@@ -717,34 +717,37 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 		// rather than a row of triangles: individual trees are never resolved,
 		// only the ragged edge of the mass, which is what a treeline actually
 		// looks like from a distance.
+		//
+		// Each rank is filled as ONE polygon. Drawing it as a chain of adjacent
+		// alpha-blended triangles double-blends every shared edge, which shows
+		// up as a vertical seam every few pixels.
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			17, 20, 32, (Uint8)(34 * fade));
+		enum { CANOPY_STEPS = 160 };
+		static Sint16 canopy_x[CANOPY_STEPS + 3];
+		static Sint16 canopy_y[CANOPY_STEPS + 3];
 		for(int rank = 0; rank < 4; rank++) {
 			int base_y = surface->h * (70 + rank * 5) / 100;
 			Uint8 shade = (Uint8)(40 + rank * 18);
 			Uint8 alpha = (Uint8)((185 - rank * 28) * fade);
-			int previous_x = 0;
-			int previous_y = base_y;
-			// Fine steps so the canopy edge is smooth, not faceted.
-			for(int segment = 1; segment <= 160; segment++) {
-				double t = (double)segment / 160;
-				int px = (int)(t * surface->w);
+			for(int segment = 0; segment <= CANOPY_STEPS; segment++) {
+				double t = (double)segment / CANOPY_STEPS;
 				// Three octaves: broad clumps, individual crowns, fine twigs.
 				double canopy =
 					smooth_noise(t * 9.0 + rank * 4.7, rank * 2.3, 2111) * 0.55
 					+ smooth_noise(t * 34.0 + rank * 1.9, rank * 3.1, 2237) * 0.30
 					+ smooth_noise(t * 90.0, rank * 1.3, 2371) * 0.15;
-				int py = base_y - (int)((canopy - 0.30) * scale * 0.13
-					* (1.0 - rank * 0.10));
-				filledTrigonRGBA(surface, previous_x, previous_y, px, py,
-					px, surface->h, shade, (Uint8)(shade + 7),
-					(Uint8)(shade + 16), alpha);
-				filledTrigonRGBA(surface, previous_x, previous_y,
-					px, surface->h, previous_x, surface->h,
-					shade, (Uint8)(shade + 7), (Uint8)(shade + 16), alpha);
-				previous_x = px;
-				previous_y = py;
+				canopy_x[segment] = (Sint16)(t * surface->w);
+				canopy_y[segment] = (Sint16)(base_y
+					- (canopy - 0.30) * scale * 0.13 * (1.0 - rank * 0.10));
 			}
+			// Close the polygon down to the bottom of the frame.
+			canopy_x[CANOPY_STEPS + 1] = (Sint16)(surface->w - 1);
+			canopy_y[CANOPY_STEPS + 1] = (Sint16)(surface->h - 1);
+			canopy_x[CANOPY_STEPS + 2] = 0;
+			canopy_y[CANOPY_STEPS + 2] = (Sint16)(surface->h - 1);
+			filledPolygonRGBA(surface, canopy_x, canopy_y, CANOPY_STEPS + 3,
+				shade, (Uint8)(shade + 7), (Uint8)(shade + 16), alpha);
 			// Haze pooling along the base of each rank, so the layers separate
 			// by depth rather than by outline.
 			soft_band(surface, base_y - scale / 26, base_y + scale / 10,
@@ -1320,28 +1323,43 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			soft_band(surface, sea_y + scale / 20 + drift,
 				surface->h * 92 / 100 + drift, 190, 198, 214, 44);
 		} else if(kind == 50) {
-			// A wall of snow advancing, erasing the ridge behind it. Drawn one
-			// column at a time with an analytic alpha, so there are no seams
-			// from overlapping blocks.
+			// A snow squall crossing the valley. Built from soft glows along a
+			// feathered leading edge plus a broad veil. Stepping the alpha one
+			// column at a time produced visible vertical striping, and hard
+			// top/bottom edges made it read as a grey rectangle.
 			double reach = sin(progress * 3.14159265359);
 			int edge_x = direction > 0
-				? (int)(reach * surface->w * 1.05) - surface->w / 8
-				: surface->w + surface->w / 8
-					- (int)(reach * surface->w * 1.05);
-			int fade_span = surface->w / 3;
-			if(fade_span < 1) fade_span = 1;
-			for(int px = 0; px < surface->w; px += 2) {
-				int dist = direction > 0 ? edge_x - px : px - edge_x;
-				if(dist < 0) continue;
-				double envelope = 1.0;
-				if(dist < fade_span) {
-					double u = (double)dist / fade_span;
-					envelope = u * u;
-				}
-				int a = (int)(alpha * 0.13 * envelope);
-				if(a < 1) continue;
-				boxRGBA(surface, px, surface->h * 6 / 100,
-					px + 1, surface->h * 86 / 100, 206, 212, 224, (Uint8)a);
+				? (int)(reach * surface->w * 1.15) - surface->w / 6
+				: surface->w + surface->w / 6
+					- (int)(reach * surface->w * 1.15);
+			int top_y = surface->h * 8 / 100;
+			int bottom_y = surface->h * 88 / 100;
+			int span_y = bottom_y - top_y;
+			if(span_y < 1) span_y = 1;
+			// The body of the squall, trailing behind the leading edge.
+			int body_x = edge_x - direction * surface->w / 4;
+			soft_column(surface, body_x, bottom_y, span_y,
+				surface->w / 5, 206, 212, 224, (int)(alpha * 0.10));
+			// The leading edge: overlapping glows, so the boundary dissolves
+			// into the air instead of ending in a wall.
+			for(int puff = 0; puff < 14; puff++) {
+				double t = (double)puff / 13;
+				int py = top_y + (int)(t * span_y);
+				int jitter = (int)(sin(t * 7.0 + ticks / 2600.0)
+					* scale * 0.02);
+				soft_glow(surface, edge_x + jitter, py,
+					(int)(scale * (0.10 + 0.05 * sin(t * 5.0))),
+					210, 216, 228, (int)(alpha * 0.16));
+			}
+			// Flakes inside the squall, falling and drifting.
+			for(int flake = 0; flake < 90; flake++) {
+				unsigned int s = (unsigned int)flake * 1664525u + seed;
+				int fx = edge_x - direction
+					* (int)((s % 1000) / 1000.0 * surface->w / 3);
+				int fy = top_y + (int)((s >> 10) % (Uint32)span_y);
+				fy = top_y + ((fy - top_y + (int)(ticks / 14.0)) % span_y);
+				pixelRGBA(surface, fx, fy, 226, 232, 242,
+					(Uint8)(alpha * 0.30));
 			}
 		} else if(kind == 51) {
 			// Heat lightning: the horizon pulses, nothing else moves. A dim
