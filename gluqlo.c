@@ -289,13 +289,13 @@ static const EffectSpec EFFECT_FLEET_BATTLE = {
 	60000, 0, 0, false, 1400, 2200, 0, GROUP_SKY, 0, NULL };
 static const EffectSpec EFFECT_BACKGROUND_BATTLE = {
 	"background_battle", 90000, 1, 4, false, 0,
-	26000, 0, 0, false, 900, 1700, 0, GROUP_SKY, 1, NULL };
+	32000, 0, 0, false, 900, 1700, 0, GROUP_SKY, 1, NULL };
 static const EffectSpec EFFECT_RARE_SKY = {
 	"rare_sky", 48000, 0, 3, true, 2246822519u,
 	4200, 3200, 8, true, 350, 400, RARE_SKY_KINDS, GROUP_SKY, 2, rare_sky_accept };
 static const EffectSpec EFFECT_BATTLE_FLYBY = {
 	"battle_flyby", 60000, 1, 0, false, 0,
-	14000, 0, 0, false, 900, 1100, 0, GROUP_SKY, 3, NULL };
+	18000, 0, 0, false, 900, 1100, 0, GROUP_SKY, 3, NULL };
 static const EffectSpec EFFECT_FOREGROUND = {
 	"foreground", 180000, 1, 2, false, 2246822519u,
 	6500, 0, 0, false, 650, 900, 4, GROUP_NONE, 0, NULL };
@@ -788,266 +788,400 @@ static void draw_bird(SDL_Surface *surface, int x, int y, int size, int wing_lif
 /*
  * Ship drawing
  *
- * Ships are seen from the side. Each part is a polygon described in tenths of
- * the ship's unit size, with +x pointing forward and +y down, so one table
- * serves both directions. The parts are drawn back to front: far wing, hull,
- * shading, then lights, so translucent parts do not stack on each other.
+ * Ships are seen from the side, nose towards +x, +y down. A design is the upper
+ * half of a hull outline in tenths of a unit, mirrored to make the whole hull.
+ * The hull is painted in four bands of light from above with a dark outline and
+ * glowing engines. Each ship is drawn fully opaque and then blended onto the
+ * scene at the requested opacity, so its overlapping parts do not stack up.
+ *
+ * Ships come in three roles. Small ones are the fighters used everywhere,
+ * mid-size and big ones only appear in the fleet battle.
  */
 typedef signed char ShipPoint[2];
 
-static int ship_coord(int origin, int unit, int sign, int tenths) {
-	return origin + sign * (int)floor(tenths * unit / 10.0 + 0.5);
+typedef struct {
+	const ShipPoint *points;
+	int count;
+} ShipOutline;
+
+#define SHIP_OUTLINE(points) { points, (int)(sizeof(points) / sizeof(points[0])) }
+#define SHIP_NO_OUTLINE { NULL, 0 }
+#define SHIP_ENGINE_SIZE 2     // engine glow radius, tenths of a unit
+#define SHIP_OPACITY 235       // opacity of a fully faded in ship
+
+typedef struct {
+	ShipOutline hull;          // upper half, nose first, tail last (both at y = 0)
+	ShipOutline plates[2];     // lighter plates drawn over the hull, if any
+	const ShipPoint *spikes;   // (x, height) of each spike on the back, if any
+	int spike_count;
+	ShipPoint engines[3];
+	int engine_count;
+	ShipPoint accent[2];       // glowing slit between these two points
+	bool accent_on;
+	bool eye;                  // a glowing eye in the middle instead of a slit
+	int nose, tail;            // extent of the hull along x
+} ShipDesign;
+
+typedef struct {
+	Uint8 tone[4][3];          // shadow, mid, light, highlight
+	Uint8 glow[3];             // engine glow and bounced light
+	Uint8 accent[3];           // glowing slits and eyes
+} ShipTeam;
+
+static const ShipTeam ship_teams[2] = {
+	{ { {8, 12, 19}, {16, 25, 38}, {29, 43, 60}, {55, 74, 95} },
+		{90, 190, 255}, {150, 235, 255} },
+	{ { {19, 11, 8}, {36, 21, 15}, {55, 34, 24}, {88, 64, 48} },
+		{255, 150, 70}, {255, 208, 120} }
+};
+
+static const ShipPoint hull_dagger[] = {{45,0},{30,-3},{12,-5},{-4,-14},{-20,-22},{-14,-8},{-26,-5},{-28,0}};
+static const ShipPoint spine_dagger[] = {{40,0},{18,-2},{-20,-2},{-28,0}};
+static const ShipPoint hull_manta[] = {{32,0},{20,-6},{4,-16},{-12,-30},{-20,-27},{-14,-15},{-26,-8},{-32,-4},{-32,0}};
+static const ShipPoint spine_manta[] = {{34,0},{10,-4},{-30,-3},{-32,0}};
+static const ShipPoint hull_hammerhead[] = {{38,0},{37,-18},{29,-19},{26,-6},{-8,-7},{-22,-12},{-30,-9},{-30,0}};
+static const ShipPoint spine_hammerhead[] = {{26,0},{24,-3},{-8,-4},{-30,-3},{-30,0}};
+static const ShipPoint hull_mandible[] = {{8,0},{22,-4},{38,-12},{22,-18},{2,-15},{-14,-12},{-26,-8},{-32,-3},{-32,0}};
+static const ShipPoint spine_mandible[] = {{2,0},{0,-5},{-30,-4},{-32,0}};
+static const ShipPoint hull_trident[] = {{46,0},{24,-3},{16,-5},{30,-16},{12,-12},{-4,-9},{-24,-12},{-30,-6},{-30,0}};
+static const ShipPoint spine_trident[] = {{44,0},{10,-2},{-28,-2},{-30,0}};
+static const ShipPoint hull_scythe[] = {{30,0},{22,-6},{8,-16},{-8,-26},{-28,-36},{-20,-20},{-14,-10},{-28,-6},{-30,0}};
+static const ShipPoint spine_scythe[] = {{32,0},{6,-4},{-28,-3},{-30,0}};
+static const ShipPoint hull_bat[] = {{26,0},{14,-8},{-4,-20},{-10,-31},{-16,-22},{-18,-31},{-24,-19},{-28,-25},{-30,-8},{-32,0}};
+static const ShipPoint spine_bat[] = {{28,0},{8,-4},{-30,-3},{-32,0}};
+static const ShipPoint hull_leviathan[] = {{52,0},{38,-4},{12,-7},{-30,-8},{-46,-5},{-50,0}};
+static const ShipPoint spine_leviathan[] = {{48,0},{12,-3},{-46,-2},{-50,0}};
+static const ShipPoint spikes_leviathan[] = {{20,14},{4,18},{-12,18},{-28,14}};
+static const ShipPoint hull_wedge[] = {{42,0},{-4,-16},{-30,-22},{-36,-14},{-36,0}};
+static const ShipPoint plate_wedge[] = {{30,0},{-6,-10},{-30,-14},{-34,-8},{-34,0}};
+static const ShipPoint top_wedge[] = {{16,0},{-8,-5},{-30,-7},{-34,-4},{-34,0}};
+static const ShipPoint hull_swept[] = {{36,0},{12,-4},{28,-22},{6,-20},{-6,-8},{-20,-10},{-26,-4},{-26,0}};
+static const ShipPoint spine_swept[] = {{34,0},{10,-2},{-24,-2},{-26,0}};
+
+// Indexes into ship_designs[], grouped by role.
+enum { SHIP_SMALL, SHIP_MID, SHIP_BIG };
+static const int ship_small_designs[] = { 0, 1, 5, 6, 9 };   // dagger, manta, scythe, bat, swept
+static const int ship_mid_designs[] = { 2, 3, 4 };           // hammerhead, mandible, trident
+static const int ship_big_designs[] = { 7, 8 };              // leviathan, wedge
+
+static const ShipDesign ship_designs[] = {
+	// 0 dagger
+	{ SHIP_OUTLINE(hull_dagger), { SHIP_OUTLINE(spine_dagger), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-28,-3}, {-28,3}, {0,0} }, 2, { {34,0}, {22,0} }, true, false, 45, -28 },
+	// 1 manta
+	{ SHIP_OUTLINE(hull_manta), { SHIP_OUTLINE(spine_manta), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {26,0}, {12,0} }, true, false, 32, -32 },
+	// 2 hammerhead
+	{ SHIP_OUTLINE(hull_hammerhead), { SHIP_OUTLINE(spine_hammerhead), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-30,-4}, {-30,4}, {0,0} }, 2, { {36,-15}, {36,15} }, true, false, 38, -30 },
+	// 3 mandible
+	{ SHIP_OUTLINE(hull_mandible), { SHIP_OUTLINE(spine_mandible), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {0,0}, {0,0} }, false, true, 38, -32 },
+	// 4 trident
+	{ SHIP_OUTLINE(hull_trident), { SHIP_OUTLINE(spine_trident), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {38,0}, {26,0} }, true, false, 46, -30 },
+	// 5 scythe
+	{ SHIP_OUTLINE(hull_scythe), { SHIP_OUTLINE(spine_scythe), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {24,0}, {10,0} }, true, false, 30, -30 },
+	// 6 bat
+	{ SHIP_OUTLINE(hull_bat), { SHIP_OUTLINE(spine_bat), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {20,0}, {8,0} }, true, false, 26, -32 },
+	// 7 leviathan
+	{ SHIP_OUTLINE(hull_leviathan), { SHIP_OUTLINE(spine_leviathan), SHIP_NO_OUTLINE },
+		spikes_leviathan, 4,
+		{ {-50,-2}, {-50,2}, {0,0} }, 2, { {44,0}, {30,0} }, true, false, 52, -50 },
+	// 8 wedge
+	{ SHIP_OUTLINE(hull_wedge), { SHIP_OUTLINE(plate_wedge), SHIP_OUTLINE(top_wedge) }, NULL, 0,
+		{ {-36,-10}, {-36,0}, {-36,10} }, 3, { {26,0}, {8,0} }, true, false, 42, -36 },
+	// 9 forward-swept
+	{ SHIP_OUTLINE(hull_swept), { SHIP_OUTLINE(spine_swept), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-26,-3}, {-26,3}, {0,0} }, 2, { {28,0}, {16,0} }, true, false, 36, -26 }
+};
+
+// Maps design coordinates (tenths of a unit, origin at the design's own
+// origin) to screen pixels. The ship is centred on x along its length.
+typedef struct {
+	int x, y, direction;
+	double scale;              // pixels per tenth
+	double middle;             // design x that lands on `x`
+	double cos_pitch, sin_pitch; // tilt of the nose above the horizontal
+} ShipTransform;
+
+static void ship_to_pixels(const ShipTransform *xf, int tx, int ty, int *px, int *py) {
+	double along = (tx - xf->middle) * xf->scale;
+	double down = ty * xf->scale;
+	*px = xf->x + (int)floor(xf->direction * (along * xf->cos_pitch + down * xf->sin_pitch) + 0.5);
+	*py = xf->y + (int)floor(-along * xf->sin_pitch + down * xf->cos_pitch + 0.5);
 }
 
-static Uint8 ship_shade(int value, int percent) {
-	int shaded = value * percent / 100;
-	return (Uint8)(shaded > 255 ? 255 : shaded);
+// Fills px/py with the mirrored outline of a half outline; returns the point count.
+static int ship_build_polygon(const ShipTransform *xf, const ShipOutline *outline,
+	int *px, int *py) {
+	int count = 0;
+	for(int i = 0; i < outline->count; i++) {
+		ship_to_pixels(xf, outline->points[i][0], outline->points[i][1], &px[count], &py[count]);
+		count++;
+	}
+	for(int i = outline->count - 2; i >= 1; i--) {
+		ship_to_pixels(xf, outline->points[i][0], -outline->points[i][1], &px[count], &py[count]);
+		count++;
+	}
+	return count;
 }
 
-// Highlights only lift a hull part part-way to a dull steel grey, never to white.
-static Uint8 ship_light(int value, int percent) {
-	return (Uint8)(value + (182 - value) * percent / 100);
+static Uint8 ship_mix(int from, int to, double amount) {
+	return (Uint8)(from + (to - from) * amount + 0.5);
 }
 
-// Engine glow colour of the ship being drawn, set by ship_set_palette().
-static Uint8 ship_glow[3];
-
-// Called first by each ship: the team colour becomes the engine glow, and the
-// hull itself is darkened so the ship reads as a dark silhouette.
-static void ship_set_palette(Uint8 *red, Uint8 *green, Uint8 *blue) {
-	ship_glow[0] = (Uint8)(*red * 3 / 2 > 255 ? 255 : *red * 3 / 2);
-	ship_glow[1] = (Uint8)(*green * 3 / 2 > 255 ? 255 : *green * 3 / 2);
-	ship_glow[2] = (Uint8)(*blue * 3 / 2 > 255 ? 255 : *blue * 3 / 2);
-	*red = ship_shade(*red, 26);
-	*green = ship_shade(*green, 26);
-	*blue = ship_shade(*blue, 26);
+// Colour of a lighting band (3 highlight .. 0 shadow), pushed lighter (bias > 0)
+// or darker (bias < 0).
+static void ship_tone(const ShipTeam *team, int band, double bias, Uint8 *rgb) {
+	const Uint8 *target = team->tone[bias >= 0 ? 3 : 0];
+	double amount = bias >= 0 ? bias : -bias;
+	for(int i = 0; i < 3; i++) rgb[i] = ship_mix(team->tone[band][i], target[i], amount);
 }
 
-static void ship_shape(SDL_Surface *surface, int x, int y, int unit, int direction,
-	const ShipPoint *points, int count, Uint8 red, Uint8 green, Uint8 blue,
-	Uint8 alpha, Uint8 edge_alpha) {
-	Sint16 vx[24], vy[24];
-	if(count > 24) count = 24;
+// The vertical stretches of a polygon on pixel column `col`, top to bottom.
+static int ship_column_spans(const int *px, const int *py, int count, int col, int spans[][2]) {
+	double x = col + 0.5;
+	double crossings[24];
+	int found = 0;
+	for(int i = 0; i < count && found < 24; i++) {
+		int j = (i + 1) % count;
+		if((px[i] <= x && x < px[j]) || (px[j] <= x && x < px[i])) {
+			crossings[found++] = py[i] + (x - px[i]) * (double)(py[j] - py[i]) / (px[j] - px[i]);
+		}
+	}
+	for(int i = 1; i < found; i++) {
+		double value = crossings[i];
+		int j = i - 1;
+		while(j >= 0 && crossings[j] > value) {
+			crossings[j + 1] = crossings[j];
+			j--;
+		}
+		crossings[j + 1] = value;
+	}
+	int span_count = 0;
+	for(int i = 0; i + 1 < found; i += 2) {
+		int top = (int)ceil(crossings[i]);
+		int bottom = (int)floor(crossings[i + 1]);
+		if(bottom >= top && span_count < 12) {
+			spans[span_count][0] = top;
+			spans[span_count][1] = bottom;
+			span_count++;
+		}
+	}
+	return span_count;
+}
+
+// Paints one polygon in four bands of light with a dark outline.
+static void ship_paint(SDL_Surface *surface, const ShipTeam *team, const int *px,
+	const int *py, int count, double bias, int outline_width) {
+	int min_x = px[0], max_x = px[0];
+	for(int i = 1; i < count; i++) {
+		if(px[i] < min_x) min_x = px[i];
+		if(px[i] > max_x) max_x = px[i];
+	}
+	static const int bands[3] = { 3, 2, 1 };
+	for(int col = min_x; col <= max_x; col++) {
+		int spans[12][2];
+		int span_count = ship_column_spans(px, py, count, col, spans);
+		for(int span = 0; span < span_count; span++) {
+			int top = spans[span][0], bottom = spans[span][1];
+			int height = bottom - top + 1;
+			int band_height[3];
+			band_height[0] = (int)(height * 0.14 + 0.5);
+			if(band_height[0] < 1) band_height[0] = 1;
+			band_height[1] = (int)(height * 0.28 + 0.5);
+			band_height[2] = (int)(height * 0.30 + 0.5);
+			int y = top;
+			Uint8 rgb[3];
+			for(int band = 0; band < 3 && y <= bottom; band++) {
+				if(band_height[band] <= 0) continue;
+				int band_bottom = y + band_height[band] - 1;
+				if(band_bottom > bottom) band_bottom = bottom;
+				ship_tone(team, bands[band], bias, rgb);
+				vlineRGBA(surface, col, y, band_bottom, rgb[0], rgb[1], rgb[2], 255);
+				y = band_bottom + 1;
+			}
+			if(y <= bottom) {
+				ship_tone(team, 0, bias, rgb);
+				bool bounce = height >= 7;
+				vlineRGBA(surface, col, y, bounce ? bottom - 1 : bottom, rgb[0], rgb[1], rgb[2], 255);
+				if(bounce) {
+					// A little bounced light along the lower edge.
+					vlineRGBA(surface, col, bottom, bottom,
+						ship_mix(rgb[0], team->glow[0], 0.35),
+						ship_mix(rgb[1], team->glow[1], 0.35),
+						ship_mix(rgb[2], team->glow[2], 0.35), 255);
+				}
+			}
+		}
+	}
 	for(int i = 0; i < count; i++) {
-		vx[i] = (Sint16)ship_coord(x, unit, direction, points[i][0]);
-		vy[i] = (Sint16)ship_coord(y, unit, 1, points[i][1]);
-	}
-	filledPolygonRGBA(surface, vx, vy, count, red, green, blue, alpha);
-	if(edge_alpha > 0) {
-		// A thin rim in the team colour, so the dark hull still has an outline.
-		aapolygonRGBA(surface, vx, vy, count, (Uint8)(ship_glow[0] * 7 / 10),
-			(Uint8)(ship_glow[1] * 7 / 10), (Uint8)(ship_glow[2] * 7 / 10),
-			(Uint8)(edge_alpha * 3 / 2 > 255 ? 255 : edge_alpha * 3 / 2));
+		int j = (i + 1) % count;
+		thickLineRGBA(surface, px[i], py[i], px[j], py[j], outline_width, 8, 10, 18, 255);
 	}
 }
 
-static void ship_line(SDL_Surface *surface, int x, int y, int unit, int direction,
-	int x1, int y1, int x2, int y2, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	aalineRGBA(surface, ship_coord(x, unit, direction, x1), ship_coord(y, unit, 1, y1),
-		ship_coord(x, unit, direction, x2), ship_coord(y, unit, 1, y2),
-		red, green, blue, alpha);
-}
+// Scratch copy of the screen area under the ship being drawn.
+static SDL_Surface *ship_backup;
 
-// A soft engine glow: a faint exhaust cone, a halo and a pale core.
-static void ship_engine(SDL_Surface *surface, int x, int y, int unit, int direction,
-	int ex, int ey, int radius_tenths, Uint8 alpha) {
-	int cx = ship_coord(x, unit, direction, ex);
-	int cy = ship_coord(y, unit, 1, ey);
-	int radius = radius_tenths * unit / 10;
-	if(radius < 1) radius = 1;
-	filledTrigonRGBA(surface, cx, cy - radius, cx, cy + radius,
-		cx - direction * radius * 3, cy, ship_glow[0], ship_glow[1], ship_glow[2],
-		(Uint8)(alpha * 0.22));
-	filledCircleRGBA(surface, cx, cy, radius + 1 + radius / 2,
-		ship_glow[0], ship_glow[1], ship_glow[2], (Uint8)(alpha * 0.14));
-	filledCircleRGBA(surface, cx, cy, radius, (Uint8)((ship_glow[0] + 255) / 2),
-		(Uint8)((ship_glow[1] + 255) / 2), (Uint8)((ship_glow[2] + 255) / 2),
-		(Uint8)(alpha * 0.8));
-}
+// Draws one ship centred on (x, y), `length` pixels long, nose towards `direction`
+// (1: right, -1: left) and tilted up by `pitch` radians, blended onto the
+// surface at `opacity` (0..255).
+static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_index,
+	int length, int direction, int team_index, Uint8 opacity, double pitch = 0.0) {
+	if(opacity == 0) return;
+	const ShipDesign *design = &ship_designs[design_index];
+	const ShipTeam *team = &ship_teams[team_index];
+	ShipTransform xf;
+	xf.x = x;
+	xf.y = y;
+	xf.direction = direction;
+	xf.scale = length / (double)(design->nose - design->tail);
+	xf.middle = (design->nose + design->tail) / 2.0;
+	xf.cos_pitch = cos(pitch);
+	xf.sin_pitch = sin(pitch);
 
-static void ship_window(SDL_Surface *surface, int x, int y, int unit, int direction,
-	int wx, int wy, Uint8 alpha) {
-	int px = ship_coord(x, unit, direction, wx);
-	int py = ship_coord(y, unit, 1, wy);
-	pixelRGBA(surface, px, py, 214, 78, 52, (Uint8)(alpha * 0.9));
-	if(unit >= 14) pixelRGBA(surface, px + direction, py, 214, 78, 52, (Uint8)(alpha * 0.6));
-}
+	// Everything the ship draws stays inside this area, which is saved first.
+	// (A tilted ship still fits: nothing is further than 0.8 lengths from its centre.)
+	int reach = length + length / 4 + 12;
+	int left = x - reach < 0 ? 0 : x - reach;
+	int top = y - reach < 0 ? 0 : y - reach;
+	int right = x + reach + 1 > surface->w ? surface->w : x + reach + 1;
+	int bottom = y + reach + 1 > surface->h ? surface->h : y + reach + 1;
+	if(right <= left || bottom <= top) return;
+	SDL_Rect area;
+	area.x = (Sint16)left;
+	area.y = (Sint16)top;
+	area.w = (Uint16)(right - left);
+	area.h = (Uint16)(bottom - top);
+	if(opacity < 255) {
+		if(!ship_backup || ship_backup->w < area.w || ship_backup->h < area.h) {
+			int backup_w = ship_backup && ship_backup->w > area.w ? ship_backup->w : area.w;
+			int backup_h = ship_backup && ship_backup->h > area.h ? ship_backup->h : area.h;
+			if(ship_backup) SDL_FreeSurface(ship_backup);
+			ship_backup = SDL_CreateRGBSurface(SDL_SWSURFACE, backup_w, backup_h, 32,
+				surface->format->Rmask, surface->format->Gmask, surface->format->Bmask, 0);
+			if(!ship_backup) return;
+		}
+		SDL_Rect source = area;
+		SDL_Rect target;
+		target.x = 0;
+		target.y = 0;
+		target.w = 0;
+		target.h = 0;
+		SDL_BlitSurface(surface, &source, ship_backup, &target);
+	}
+	SDL_Rect previous_clip;
+	SDL_GetClipRect(surface, &previous_clip);
+	SDL_SetClipRect(surface, &area);
 
-static void ship_box(SDL_Surface *surface, int x, int y, int unit, int direction,
-	int x1, int y1, int x2, int y2, Uint8 red, Uint8 green, Uint8 blue,
-	Uint8 alpha, Uint8 edge_alpha) {
-	ShipPoint box[4] = {
-		{ (signed char)x2, (signed char)y1 }, { (signed char)x2, (signed char)y2 },
-		{ (signed char)x1, (signed char)y2 }, { (signed char)x1, (signed char)y1 } };
-	ship_shape(surface, x, y, unit, direction, box, 4, red, green, blue, alpha, edge_alpha);
-}
+	int outline_width = xf.scale * 10.0 >= 16.0 ? 2 : 1;
+	int engine_radius = (int)(SHIP_ENGINE_SIZE * xf.scale + 0.5);
+	if(engine_radius < 1) engine_radius = 1;
 
-// Fighter: a twin-pod gunship seen from above. A slim fuselage with a canopy
-// is joined by swept struts to two engine pods, so it reads as a craft with
-// a wide stance instead of a single arrow.
-static void draw_battle_ship(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	ship_set_palette(&red, &green, &blue);
-	static const ShipPoint far_pod[] = {
-		{14, -12}, {11, -13}, {-12, -13}, {-14, -11}, {-14, -8}, {11, -8}, {14, -10} };
-	static const ShipPoint near_pod[] = {
-		{14, 12}, {11, 13}, {-12, 13}, {-14, 11}, {-14, 8}, {11, 8}, {14, 10} };
-	static const ShipPoint far_strut[] = { {5, -8}, {-8, -8}, {-4, -3}, {2, -3} };
-	static const ShipPoint near_strut[] = { {5, 8}, {-8, 8}, {-4, 3}, {2, 3} };
-	static const ShipPoint fuselage[] = {
-		{23, 0}, {18, -2}, {8, -3}, {-10, -3}, {-12, -2}, {-12, 2}, {-10, 3},
-		{8, 3}, {18, 2} };
+	// Engine plumes go behind the hull.
+	int nozzle_x[3], nozzle_y[3];
+	for(int engine = 0; engine < design->engine_count; engine++) {
+		ship_to_pixels(&xf, design->engines[engine][0], design->engines[engine][1],
+			&nozzle_x[engine], &nozzle_y[engine]);
+		for(int layer = 0; layer < 4; layer++) {
+			int plume = (int)(engine_radius * (8.0 - layer * 1.8));
+			int plume_width = (int)(engine_radius * (1.3 - layer * 0.25));
+			if(plume_width < 1) plume_width = 1;
+			// The plume points straight back from the nose; its width is across the ship.
+			double tail_x = -direction * xf.cos_pitch, tail_y = xf.sin_pitch;
+			double side_x = direction * xf.sin_pitch, side_y = xf.cos_pitch;
+			filledTrigonRGBA(surface,
+				nozzle_x[engine] + (int)(side_x * plume_width), nozzle_y[engine] + (int)(side_y * plume_width),
+				nozzle_x[engine] - (int)(side_x * plume_width), nozzle_y[engine] - (int)(side_y * plume_width),
+				nozzle_x[engine] + (int)(tail_x * plume), nozzle_y[engine] + (int)(tail_y * plume),
+				team->glow[0], team->glow[1], team->glow[2], 36 + layer * 30);
+		}
+		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine], engine_radius * 2,
+			team->glow[0], team->glow[1], team->glow[2], 46);
+	}
 
-	ship_shape(surface, x, y, size, direction, far_pod, 7,
-		ship_shade(red, 70), ship_shade(green, 70), ship_shade(blue, 70), alpha, alpha / 2);
-	ship_shape(surface, x, y, size, direction, far_strut, 4,
-		ship_shade(red, 82), ship_shade(green, 82), ship_shade(blue, 82), alpha, alpha / 3);
-	ship_shape(surface, x, y, size, direction, near_strut, 4,
-		ship_shade(red, 82), ship_shade(green, 82), ship_shade(blue, 82), alpha, alpha / 3);
-	ship_shape(surface, x, y, size, direction, near_pod, 7,
-		ship_light(red, 10), ship_light(green, 10), ship_light(blue, 10), alpha, alpha / 2);
-	ship_shape(surface, x, y, size, direction, fuselage, 9,
-		ship_light(red, 4), ship_light(green, 4), ship_light(blue, 4), alpha, alpha / 2);
-	// Bright team-coloured stripe along each pod.
-	ship_line(surface, x, y, size, direction, 10, -10, -10, -10,
-		ship_light(red, 75), ship_light(green, 75), ship_light(blue, 75),
-		(Uint8)(alpha * 0.7));
-	ship_line(surface, x, y, size, direction, 10, 10, -10, 10,
-		ship_light(red, 75), ship_light(green, 75), ship_light(blue, 75),
-		(Uint8)(alpha * 0.7));
-	filledEllipseRGBA(surface, ship_coord(x, size, direction, 10), y,
-		4 * size / 10 + 2, 2 * size / 10 + 1, 196, 56, 42, (Uint8)(alpha * 0.95));
-	ship_engine(surface, x, y, size, direction, -14, -10, 3, alpha);
-	ship_engine(surface, x, y, size, direction, -14, 10, 3, alpha);
-	ship_engine(surface, x, y, size, direction, -12, 0, 2, alpha);
-}
-
-// Frigate: a twin-hull warship seen from above. Two long armoured hulls are
-// tied together by cross decks and a central command block with a dome, so
-// it reads as a ladder-like frame rather than a single hull.
-static void draw_frigate(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	ship_set_palette(&red, &green, &blue);
-	static const ShipPoint far_hull[] = {
-		{16, -13}, {13, -14}, {-28, -14}, {-30, -12}, {-30, -7}, {-28, -5},
-		{8, -5}, {12, -8} };
-	static const ShipPoint near_hull[] = {
-		{16, 13}, {13, 14}, {-28, 14}, {-30, 12}, {-30, 7}, {-28, 5},
-		{8, 5}, {12, 8} };
-	static const ShipPoint core[] = {
-		{35, 0}, {29, -3}, {22, -4}, {10, -5}, {-10, -5}, {-10, 5}, {10, 5},
-		{22, 4}, {29, 3} };
-	static const ShipPoint prow_plate[] = {
-		{35, 0}, {29, -3}, {22, -4}, {22, 4}, {29, 3} };
-	Uint8 lr = ship_light(red, 75), lg = ship_light(green, 75), lb = ship_light(blue, 75);
-
-	ship_shape(surface, x, y, size, direction, far_hull, 8,
-		ship_shade(red, 75), ship_shade(green, 75), ship_shade(blue, 75), alpha, alpha / 2);
-	ship_shape(surface, x, y, size, direction, near_hull, 8,
-		ship_light(red, 8), ship_light(green, 8), ship_light(blue, 8), alpha, alpha / 2);
-	// Cross decks between the hulls.
-	ship_box(surface, x, y, size, direction, -25, -5, -20, 5,
-		ship_shade(red, 85), ship_shade(green, 85), ship_shade(blue, 85), alpha, alpha / 3);
-	ship_shape(surface, x, y, size, direction, core, 9,
-		red, green, blue, alpha, alpha / 2);
-	ship_shape(surface, x, y, size, direction, prow_plate, 5,
-		ship_light(red, 16), ship_light(green, 16), ship_light(blue, 16), alpha, alpha / 2);
-	ship_line(surface, x, y, size, direction, 12, -10, -25, -10, lr, lg, lb,
-		(Uint8)(alpha * 0.65));
-	ship_line(surface, x, y, size, direction, 12, 10, -25, 10, lr, lg, lb,
-		(Uint8)(alpha * 0.65));
-	ship_line(surface, x, y, size, direction, 34, 0, 24, 0,
-		196, 56, 42, (Uint8)(alpha * 0.9));
-	filledEllipseRGBA(surface, ship_coord(x, size, direction, 3), y,
-		6 * size / 10 + 1, 3 * size / 10 + 1, 170, 46, 36, (Uint8)(alpha * 0.9));
-
-	// Gun turrets on the hulls, and lit portholes along the core.
-	int turret_x[] = { 6, -16 };
-	for(int i = 0; i < 2; i++) {
+	int px[24], py[24];
+	for(int spike = 0; spike < design->spike_count; spike++) {
 		for(int side = -1; side <= 1; side += 2) {
-			int cx = ship_coord(x, size, direction, turret_x[i]);
-			int cy = ship_coord(y, size, 1, side * 9);
-			filledEllipseRGBA(surface, cx, cy, size / 5 + 2, size / 10 + 1,
-				ship_light(red, 18), ship_light(green, 18), ship_light(blue, 18), alpha);
-			ship_line(surface, x, y, size, direction, turret_x[i] + 1, side * 9,
-				turret_x[i] + 7, side * 9, lr, lg, lb, alpha);
+			int spike_x = design->spikes[spike][0];
+			int spike_height = design->spikes[spike][1];
+			ship_to_pixels(&xf, spike_x, side * 7, &px[0], &py[0]);
+			ship_to_pixels(&xf, spike_x - 5, side * spike_height, &px[1], &py[1]);
+			ship_to_pixels(&xf, spike_x - 10, side * 7, &px[2], &py[2]);
+			ship_paint(surface, team, px, py, 3, -0.30, outline_width);
 		}
 	}
-	for(int window = 0; window < 4; window++) {
-		ship_window(surface, x, y, size, direction, -8 + window * 4, -4, alpha);
-		ship_window(surface, x, y, size, direction, -8 + window * 4, 4, alpha);
+	int count = ship_build_polygon(&xf, &design->hull, px, py);
+	ship_paint(surface, team, px, py, count, 0.0, outline_width);
+	for(int plate = 0; plate < 2; plate++) {
+		if(design->plates[plate].count == 0) continue;
+		count = ship_build_polygon(&xf, &design->plates[plate], px, py);
+		ship_paint(surface, team, px, py, count, 0.16 * (plate + 1), 1);
 	}
-	ship_engine(surface, x, y, size, direction, -30, -10, 2, alpha);
-	ship_engine(surface, x, y, size, direction, -30, 10, 2, alpha);
-	ship_engine(surface, x, y, size, direction, -10, 0, 2, alpha);
+
+	if(design->accent_on) {
+		int x1, y1, x2, y2;
+		ship_to_pixels(&xf, design->accent[0][0], design->accent[0][1], &x1, &y1);
+		ship_to_pixels(&xf, design->accent[1][0], design->accent[1][1], &x2, &y2);
+		thickLineRGBA(surface, x1, y1, x2, y2, 3,
+			team->accent[0], team->accent[1], team->accent[2], 70);
+		thickLineRGBA(surface, x1, y1, x2, y2, 1,
+			team->accent[0], team->accent[1], team->accent[2], 255);
+	}
+	if(design->eye) {
+		int eye_x, eye_y;
+		ship_to_pixels(&xf, 0, 0, &eye_x, &eye_y);
+		int eye_unit = (int)(xf.scale * 10.0 + 0.5);
+		filledCircleRGBA(surface, eye_x, eye_y, eye_unit * 6 / 10 + 2,
+			team->accent[0], team->accent[1], team->accent[2], 60);
+		filledEllipseRGBA(surface, eye_x, eye_y, 3 * eye_unit / 10 + 2, eye_unit / 10 + 1,
+			team->accent[0], team->accent[1], team->accent[2], 255);
+		filledCircleRGBA(surface, eye_x, eye_y, eye_unit / 10 < 1 ? 1 : eye_unit / 10,
+			255, 255, 255, 255);
+	}
+	// Hot engine cores sit on top of the hull.
+	for(int engine = 0; engine < design->engine_count; engine++) {
+		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine], engine_radius + 1,
+			ship_mix(team->glow[0], 255, 0.5), ship_mix(team->glow[1], 255, 0.5),
+			ship_mix(team->glow[2], 255, 0.5), 255);
+		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine],
+			engine_radius / 2 < 1 ? 1 : engine_radius / 2, 255, 255, 255, 255);
+	}
+
+	if(opacity < 255) {
+		// Blend the saved background back over the ship: ship * opacity + scene * (1 - opacity).
+		SDL_SetAlpha(ship_backup, SDL_SRCALPHA, (Uint8)(255 - opacity));
+		SDL_Rect source;
+		source.x = 0;
+		source.y = 0;
+		source.w = area.w;
+		source.h = area.h;
+		SDL_Rect target = area;
+		SDL_BlitSurface(ship_backup, &source, surface, &target);
+		SDL_SetAlpha(ship_backup, 0, 255);
+	}
+	SDL_SetClipRect(surface, &previous_clip);
 }
 
-// Cruiser: a modular spine ship. A thin keel carries, front to back, a sensor
-// nose, an armoured gun deck, a tall crew drum, a fuel tank and a flared drive.
-// The varied blocks give it a broken, built-up silhouette.
-static void draw_cruiser(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	ship_set_palette(&red, &green, &blue);
-	static const ShipPoint nose[] = {
-		{23, 1}, {20, -3}, {15, -3}, {15, 3}, {21, 3} };
-	static const ShipPoint deck[] = {
-		{15, -1}, {13, -4}, {3, -4}, {3, 3}, {15, 3} };
-	static const ShipPoint drum[] = {
-		{1, -6}, {-1, -9}, {-6, -9}, {-8, -6}, {-8, 6}, {-6, 9}, {-1, 9}, {1, 6} };
-	static const ShipPoint drive[] = {
-		{-15, -3}, {-15, 3}, {-22, 8}, {-22, -8} };
-	Uint8 dr = ship_shade(red, 60), dg = ship_shade(green, 60), db = ship_shade(blue, 60);
-	Uint8 lr = ship_light(red, 70), lg = ship_light(green, 70), lb = ship_light(blue, 70);
-
-	// Keel: only the stretches between blocks show, so the alpha does not stack.
-	ship_box(surface, x, y, size, direction, -9, -1, -8, 1,
-		dr, dg, db, alpha, 0);
-	ship_box(surface, x, y, size, direction, 1, -1, 3, 1,
-		dr, dg, db, alpha, 0);
-	ship_shape(surface, x, y, size, direction, drive, 4,
-		ship_shade(red, 70), ship_shade(green, 70), ship_shade(blue, 70), alpha, alpha / 2);
-	ship_box(surface, x, y, size, direction, -15, -5, -9, 5,
-		ship_light(red, 4), ship_light(green, 4), ship_light(blue, 4), alpha, alpha / 2);
-	ship_line(surface, x, y, size, direction, -13, -5, -13, 5, dr, dg, db,
-		(Uint8)(alpha * 0.8));
-	ship_line(surface, x, y, size, direction, -11, -5, -11, 5, dr, dg, db,
-		(Uint8)(alpha * 0.8));
-	ship_shape(surface, x, y, size, direction, drum, 8,
-		ship_light(red, 10), ship_light(green, 10), ship_light(blue, 10), alpha, alpha / 2);
-	ship_line(surface, x, y, size, direction, 1, 0, -8, 0, dr, dg, db,
-		(Uint8)(alpha * 0.8));
-	ship_shape(surface, x, y, size, direction, deck, 5,
-		red, green, blue, alpha, alpha / 2);
-	ship_shape(surface, x, y, size, direction, nose, 5,
-		ship_light(red, 14), ship_light(green, 14), ship_light(blue, 14), alpha, alpha / 2);
-	ship_line(surface, x, y, size, direction, 20, -1, 16, -1,
-		196, 56, 42, (Uint8)(alpha * 0.95));
-	ship_line(surface, x, y, size, direction, 13, -4, 3, -4, lr, lg, lb,
-		(Uint8)(alpha * 0.6));
-	ship_line(surface, x, y, size, direction, -1, -9, -6, -9, lr, lg, lb,
-		(Uint8)(alpha * 0.6));
-
-	// A raised bridge at the back of the deck and a gun turret forward of it.
-	static const ShipPoint bridge[] = { {9, -4}, {8, -8}, {4, -8}, {4, -4} };
-	ship_shape(surface, x, y, size, direction, bridge, 4,
-		ship_light(red, 16), ship_light(green, 16), ship_light(blue, 16), alpha, alpha / 2);
-	ship_line(surface, x, y, size, direction, 8, -6, 5, -6,
-		196, 56, 42, (Uint8)(alpha * 0.95));
-	filledEllipseRGBA(surface, ship_coord(x, size, direction, 12), ship_coord(y, size, 1, -4),
-		size / 5 + 2, size / 10 + 1,
-		ship_light(red, 18), ship_light(green, 18), ship_light(blue, 18), alpha);
-	ship_line(surface, x, y, size, direction, 13, -5, 19, -5, lr, lg, lb, alpha);
-	// Lit portholes on the crew drum and a hangar slit on the deck.
-	for(int row = 0; row < 4; row++) {
-		for(int column = 0; column < 3; column++) {
-			ship_window(surface, x, y, size, direction, -1 - column * 2, -6 + row * 4, alpha);
-		}
+// Draws a ship of the given role. `variety` picks one of the designs of that role.
+static void draw_ship_role(SDL_Surface *surface, int x, int y, int role,
+	unsigned int variety, int length, int direction, int team_index, Uint8 opacity,
+	double pitch = 0.0) {
+	const int *designs = ship_small_designs;
+	int count = (int)(sizeof(ship_small_designs) / sizeof(ship_small_designs[0]));
+	if(role == SHIP_MID) {
+		designs = ship_mid_designs;
+		count = (int)(sizeof(ship_mid_designs) / sizeof(ship_mid_designs[0]));
+	} else if(role == SHIP_BIG) {
+		designs = ship_big_designs;
+		count = (int)(sizeof(ship_big_designs) / sizeof(ship_big_designs[0]));
 	}
-	ship_line(surface, x, y, size, direction, 13, 1, 5, 1,
-		170, 52, 38, (Uint8)(alpha * 0.8));
-	ship_engine(surface, x, y, size, direction, -22, -5, 1, alpha);
-	ship_engine(surface, x, y, size, direction, -22, 0, 1, alpha);
-	ship_engine(surface, x, y, size, direction, -22, 5, 1, alpha);
+	draw_ship_design(surface, x, y, designs[variety % (unsigned int)count], length,
+		direction, team_index, opacity, pitch);
 }
 
 static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale,
@@ -1109,134 +1243,268 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 	}
 }
 
-static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
-	EffectWindow window;
-	if(!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
-	Uint32 phase = window.phase;
+/*
+ * Dogfights
+ *
+ * Like every effect a dogfight is stateless: where each ship is, which way it
+ * points and which shots are in the air are all worked out from the time since
+ * the effect began. A dogfight is made of pairs of ships, one of each team.
+ * Each pair flies several passes across the sky. In a pass the leader flies a
+ * route of wide loops, and the chaser follows the same route a little behind,
+ * closing and dropping back, and fires at it. Most shots miss; one hits. The
+ * leader that was hit trails smoke for the rest of the pass, and on the last
+ * pass it is destroyed. The next pass goes the other way with the roles swapped.
+ */
+#define DOG_BURSTS 5            // volleys the chaser fires in a pass
+#define DOG_BOLTS 3             // shots in a volley
+#define DOG_HIT_BURST 3         // the volley that hits (its second shot)
+#define DOG_BOLT_GAP 80.0       // ms between the shots of a volley
+#define DOG_BOLT_FLIGHT 240.0   // ms a shot takes to reach its target
 
-	int size = scale / 170;
-	if(size < 4) size = 4;
-	double fade = window.fade;
-	double progress = window.progress;
-	int left_x = (int)(-size + progress * (surface->w + 2.0 * size));
-	int right_x = surface->w - left_x;
-	int center_y = surface->h * 17 / 100;
-	int arc = (int)(sin(progress * 6.28318530718) * scale * 0.018);
-	int maneuver = (int)(sin(progress * 12.56637061436) * scale * 0.014);
-	int left_y = center_y + arc + maneuver;
-	int right_y = center_y - arc - maneuver;
-	Uint8 alpha = (Uint8)(150 * fade);
+typedef struct {
+	SDL_Surface *surface;
+	int scale;
+	Uint32 seed;
+	int pair_count;
+	int pass_count;
+	double pass_ms;             // length of one pass
+	double stagger_ms;          // delay between the start of one pair and the next
+	int length;                 // ship length in pixels
+} Dogfight;
 
-	draw_battle_ship(surface, left_x, left_y, size, 1, 105, 163, 183, alpha);
-	draw_battle_ship(surface, right_x, right_y, size, -1, 177, 130, 102, alpha);
+typedef struct {
+	bool visible;
+	double x, y;
+	int direction;              // 1: nose points right, -1: left
+	double pitch;               // nose above the horizontal, radians
+	double u;                   // 0: entering the screen, 1: leaving it
+	int pass;
+	int team;
+} DogPose;
 
-	Uint32 volley_phase = phase % 2600;
-	if(volley_phase < 300 && progress > 0.08 && progress < 0.94) {
-		int bolt_length = scale / 18;
-		if(bolt_length < 12) bolt_length = 12;
-		Uint8 bolt_alpha = (Uint8)(alpha * 0.8);
-		thickLineRGBA(surface, left_x + size, left_y,
-			left_x + size + bolt_length, left_y - size / 3,
-			1, 143, 204, 224, bolt_alpha);
-		thickLineRGBA(surface, right_x - size, right_y,
-			right_x - size - bolt_length, right_y + size / 3,
-			1, 220, 164, 126, bolt_alpha);
+static unsigned int dog_hash(unsigned int a, unsigned int b) {
+	unsigned int value = a * 2654435761u + b * 2246822519u + 0x9e3779b9u;
+	value ^= value >> 15;
+	value *= 2246822519u;
+	value ^= value >> 13;
+	return value;
+}
+
+// A point of the looping route of pair `pair` on pass `pass`; u runs 0..1 across the screen.
+static void dog_route_point(const Dogfight *fight, int pair, int pass, double u,
+	double *x, double *y) {
+	int width = fight->surface->w;
+	int loops = (int)(width / (fight->scale * 0.4) + 0.5);
+	if(loops < 2) loops = 2;
+	if(loops > 6) loops = 6;
+	double margin = fight->scale / 10.0;
+	double travel = width + 2.0 * margin;
+	double drift = travel / (6.28318530718 * loops);
+	double reach = drift * 1.45;          // wider than the drift, so the route loops
+	double height = fight->scale * 0.032;
+	double start = (dog_hash(fight->seed, pair * 8 + pass) % 6283) / 1000.0;
+	double angle = 6.28318530718 * loops * u + start;
+	double along = -margin + travel * u - reach * (sin(angle) - sin(start));
+	*x = (pass % 2) ? width - along : along;
+	*y = fight->surface->h * 0.078 - height * cos(angle);
+}
+
+// Where a ship of `pair` is at time t (ms since the effect began). Role 0 leads, role 1 chases.
+static void dog_pose(const Dogfight *fight, int pair, int role, double t, DogPose *pose) {
+	pose->visible = false;
+	double local = t - pair * fight->stagger_ms;
+	if(local < 0.0 || local >= fight->pass_count * fight->pass_ms) return;
+	int pass = (int)(local / fight->pass_ms);
+	double u = (local - pass * fight->pass_ms) / fight->pass_ms * 1.2;
+	if(role == 1) u -= 0.1 * (1.0 + 0.4 * sin(u * 9.0 + pair + pass));
+	double before_x, before_y, after_x, after_y;
+	dog_route_point(fight, pair, pass, u - 0.003, &before_x, &before_y);
+	dog_route_point(fight, pair, pass, u + 0.003, &after_x, &after_y);
+	dog_route_point(fight, pair, pass, u, &pose->x, &pose->y);
+	double heading = atan2(-(after_y - before_y), after_x - before_x);
+	if(after_x >= before_x) {
+		pose->direction = 1;
+		pose->pitch = heading;
+	} else {
+		pose->direction = -1;
+		pose->pitch = atan2(sin(3.14159265359 - heading), cos(3.14159265359 - heading));
 	}
-	if(volley_phase > 1850 && volley_phase < 2250) {
-		double hit_progress = (double)(volley_phase - 1850) / 400.0;
-		int impact_x = surface->w / 2
-			+ (int)(sin(phase / 1700.0) * scale * 0.045);
-		int impact_y = center_y + (int)(sin(phase / 950.0) * scale * 0.025);
-		Uint8 impact_alpha = (Uint8)(alpha * (1.0 - hit_progress));
-		int radius = size / 2 + (int)(size * hit_progress);
-		filledCircleRGBA(surface, impact_x, impact_y, radius,
-			219, 158, 111, (Uint8)(impact_alpha * 0.65));
-		filledCircleRGBA(surface, impact_x, impact_y, size / 4,
-			238, 216, 177, impact_alpha);
+	pose->u = u;
+	pose->pass = pass;
+	pose->team = (role + pass) % 2;
+	pose->visible = pose->x > -fight->length && pose->x < fight->surface->w + fight->length;
+}
+
+static double dog_shot_time(const Dogfight *fight, int burst, int bolt) {
+	return (0.20 + 0.14 * burst) * fight->pass_ms + bolt * DOG_BOLT_GAP;
+}
+
+// When, within a pass, the leader is hit.
+static double dog_hit_time(const Dogfight *fight) {
+	return dog_shot_time(fight, DOG_HIT_BURST, 1) + DOG_BOLT_FLIGHT;
+}
+
+static void dog_draw_blast(SDL_Surface *surface, double x, double y, double age,
+	double radius, bool destroyed, double fade) {
+	double life = destroyed ? 1100.0 : 450.0;
+	if(age < 0.0 || age >= life) return;
+	double progress = age / life;
+	Uint8 alpha = (Uint8)(230 * fade * (1.0 - progress));
+	// A bright flash that shrinks away quickly, inside a ring that grows and fades.
+	double flash = 1.0 - smooth_step(0.0, 0.4, progress);
+	double ring = radius * (0.3 + 1.5 * progress);
+	filledCircleRGBA(surface, (int)x, (int)y, (int)(radius * (0.2 + 0.5 * flash)),
+		255, 238, 200, (Uint8)(alpha * (0.4 + 0.6 * flash)));
+	filledCircleRGBA(surface, (int)x, (int)y, (int)(radius * (0.4 + 0.3 * progress)),
+		240, 120, 60, (Uint8)(alpha * 0.22));
+	circleRGBA(surface, (int)x, (int)y, (int)ring, 255, 175, 95, alpha);
+	circleRGBA(surface, (int)x, (int)y, (int)ring + 1, 255, 140, 70, (Uint8)(alpha * 0.6));
+	if(destroyed) {
+		for(int spark = 0; spark < 9; spark++) {
+			double angle = spark * 0.69813170079 + 0.4;
+			double near_edge = radius * (0.5 + 1.8 * progress);
+			double far_edge = near_edge + radius * 0.5;
+			thickLineRGBA(surface, (int)(x + cos(angle) * near_edge),
+				(int)(y + sin(angle) * near_edge), (int)(x + cos(angle) * far_edge),
+				(int)(y + sin(angle) * far_edge), 1, 255, 190, 120, alpha);
+		}
 	}
 }
 
-static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
-	EffectWindow window;
-	if(!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
-	Uint32 phase = window.phase;
+static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, int scale,
+	int pair_count, int pass_count, double stagger) {
+	Dogfight fight;
+	fight.surface = surface;
+	fight.scale = scale;
+	fight.seed = window->seed;
+	fight.pair_count = pair_count;
+	fight.pass_count = pass_count;
+	fight.pass_ms = (window->duration - 800.0) / (pass_count + (pair_count - 1) * stagger);
+	fight.stagger_ms = fight.pass_ms * stagger;
+	fight.length = scale / 28;
+	if(fight.length < 16) fight.length = 16;
+	double t = window->phase;
+	double fade = window->fade;
+	Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+	static const Uint8 bolt_colors[2][3] = { { 143, 204, 224 }, { 245, 164, 112 } };
 
-	int size = scale / 170;
-	if(size < 4) size = 4;
-	Uint32 seed = window.seed;
-	int winner = seed & 1;
-	double fade = window.fade;
-	double progress = window.progress;
-	double approach = smooth_step(0.04, 0.34, progress);
-	double withdrawal = smooth_step(0.80, 0.98, progress);
-	int center_y = surface->h * 18 / 100;
-	int left_x = (int)(-size * 4 + approach * (surface->w * 0.38 + size * 4)
-		- (winner ? withdrawal * surface->w * 0.60 : 0));
-	int right_x = (int)(surface->w + size * 4
-		- approach * (surface->w * 0.38 + size * 4)
-		+ (winner == 0 ? withdrawal * surface->w * 0.60 : 0));
-	int left_count = 2 + (seed >> 5) % 3;
-	int right_count = 2 + (seed >> 9) % 3;
-	int arc = (int)(sin(ticks / 1750.0) * scale * 0.010);
-	Uint8 alpha = (Uint8)(150 * fade);
+	for(int pair = 0; pair < pair_count; pair++) {
+		double local = t - pair * fight.stagger_ms;
+		if(local < 0.0 || local >= pass_count * fight.pass_ms) continue;
+		int pass = (int)(local / fight.pass_ms);
+		double pass_age = local - pass * fight.pass_ms;
+		bool last_pass = pass == pass_count - 1;
+		double pass_start = pair * fight.stagger_ms + pass * fight.pass_ms;
+		bool leader_hit = pass_age >= dog_hit_time(&fight);
+		bool leader_destroyed = leader_hit && last_pass;
 
-	for(int side = 0; side < 2; side++) {
-		int direction = side == 0 ? 1 : -1;
-		int count = side == 0 ? left_count : right_count;
-		int anchor_x = side == 0 ? left_x : right_x;
-		int side_y = center_y + (side == 0 ? arc : -arc);
-		Uint8 red = side == 0 ? 105 : 177;
-		Uint8 green = side == 0 ? 163 : 130;
-		Uint8 blue = side == 0 ? 183 : 102;
-		for(int ship = 0; ship < count; ship++) {
-			int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
-			int ship_x = anchor_x + direction * ship * size * 2
-				+ (int)(sin(ticks / (620.0 + ship * 150) + side * 2.0) * size * 0.7);
-			int ship_y = side_y + lane * scale / 34
-				+ (int)(sin(ticks / (410.0 + ship * 93) + ship) * size * 0.7);
-			unsigned int type = seed >> (ship + side * 5);
-			if(ship == 0 && (type & 1)) {
-				draw_cruiser(surface, ship_x, ship_y, size * 2, direction,
-					red, green, blue, alpha);
-			} else if(type % 3 == 0) {
-				draw_frigate(surface, ship_x, ship_y, size, direction,
-					red, green, blue, alpha);
-			} else {
-				draw_battle_ship(surface, ship_x, ship_y,
-					size + (ship % 2), direction, red, green, blue, alpha);
+		// Engine trails, and smoke behind the leader once it has been hit.
+		for(int role = 0; role < 2; role++) {
+			DogPose pose;
+			dog_pose(&fight, pair, role, t, &pose);
+			if(!pose.visible || (role == 0 && leader_destroyed)) continue;
+			double last_x = pose.x, last_y = pose.y;
+			for(int step = 1; step <= 10; step++) {
+				DogPose earlier;
+				dog_pose(&fight, pair, role, t - step * 50.0, &earlier);
+				if(!earlier.visible || earlier.pass != pose.pass) break;
+				thickLineRGBA(surface, (int)last_x, (int)last_y, (int)earlier.x, (int)earlier.y,
+					1, ship_teams[pose.team].glow[0], ship_teams[pose.team].glow[1],
+					ship_teams[pose.team].glow[2], (Uint8)(95 * fade * (1.0 - step / 11.0)));
+				last_x = earlier.x;
+				last_y = earlier.y;
+			}
+			if(role == 0 && leader_hit) {
+				for(int puff = 1; puff <= 9; puff++) {
+					double puff_time = t - puff * 110.0;
+					if(puff_time - pass_start < dog_hit_time(&fight)) break;
+					DogPose smoke;
+					dog_pose(&fight, pair, 0, puff_time, &smoke);
+					if(!smoke.visible || smoke.pass != pose.pass) break;
+					filledCircleRGBA(surface, (int)smoke.x, (int)smoke.y, 1 + puff / 2,
+						150, 150, 160, (Uint8)(70 * fade * (1.0 - puff / 10.0)));
+				}
+			}
+		}
+
+		// The ships.
+		for(int role = 0; role < 2; role++) {
+			DogPose pose;
+			dog_pose(&fight, pair, role, t, &pose);
+			if(!pose.visible || (role == 0 && leader_destroyed)) continue;
+			unsigned int variety = dog_hash(fight.seed, pair * 2 + pose.team) >> 4;
+			draw_ship_role(surface, (int)floor(pose.x + 0.5), (int)floor(pose.y + 0.5),
+				SHIP_SMALL, variety, fight.length, pose.direction, pose.team, opacity,
+				pose.pitch);
+			if(role == 0 && leader_hit && !leader_destroyed) {
+				// A burning patch where it was hit.
+				filledCircleRGBA(surface, (int)pose.x, (int)pose.y, fight.length / 5 + 1,
+					255, 140, 60, (Uint8)(110 * fade * (0.5 + 0.5 * sin(t / 70.0))));
+			}
+		}
+
+		// Shots from the chaser at the leader.
+		for(int burst = 0; burst < DOG_BURSTS; burst++) {
+			if(last_pass && burst > DOG_HIT_BURST) break;
+			for(int bolt = 0; bolt < DOG_BOLTS; bolt++) {
+				double fired = pass_start + dog_shot_time(&fight, burst, bolt);
+				double age = t - fired;
+				bool hit = burst == DOG_HIT_BURST && bolt == 1;
+				if(age < 0.0 || age >= DOG_BOLT_FLIGHT + (hit ? 1200.0 : 0.0)) continue;
+				DogPose shooter, target;
+				dog_pose(&fight, pair, 1, fired, &shooter);
+				dog_pose(&fight, pair, 0, fired + DOG_BOLT_FLIGHT, &target);
+				if(!shooter.visible || !target.visible) continue;
+				double aim_x = shooter.direction * cos(shooter.pitch);
+				double aim_y = -sin(shooter.pitch);
+				double from_x = shooter.x + aim_x * fight.length * 0.5;
+				double from_y = shooter.y + aim_y * fight.length * 0.5;
+				double to_x = target.x, to_y = target.y;
+				if(!hit) {
+					// Misses pass to one side or the other of the target.
+					double side = ((burst * 3 + bolt) % 2 ? 1.0 : -1.0)
+						* fight.length * (0.7 + 0.2 * ((burst + bolt) % 3));
+					double dx = to_x - from_x, dy = to_y - from_y;
+					double span = sqrt(dx * dx + dy * dy) + 1.0;
+					to_x += -dy / span * side;
+					to_y += dx / span * side;
+				}
+				if(age < DOG_BOLT_FLIGHT) {
+					double flight = age / DOG_BOLT_FLIGHT;
+					double bolt_x = from_x + (to_x - from_x) * flight;
+					double bolt_y = from_y + (to_y - from_y) * flight;
+					double dx = to_x - from_x, dy = to_y - from_y;
+					double span = sqrt(dx * dx + dy * dy) + 1.0;
+					double tail = fight.length * 0.45;
+					const Uint8 *color = bolt_colors[shooter.team];
+					Uint8 bolt_alpha = (Uint8)(235 * fade);
+					thickLineRGBA(surface, (int)(bolt_x - dx / span * tail),
+						(int)(bolt_y - dy / span * tail), (int)bolt_x, (int)bolt_y, 2,
+						color[0], color[1], color[2], (Uint8)(bolt_alpha * 0.55));
+					thickLineRGBA(surface, (int)(bolt_x - dx / span * tail * 0.6),
+						(int)(bolt_y - dy / span * tail * 0.6), (int)bolt_x, (int)bolt_y, 1,
+						255, 255, 255, bolt_alpha);
+				} else if(hit) {
+					dog_draw_blast(surface, to_x, to_y, age - DOG_BOLT_FLIGHT,
+						fight.length * (last_pass ? 0.95 : 0.4), last_pass, fade);
+				}
 			}
 		}
 	}
+}
 
-	Uint32 volley_phase = (phase + (seed >> 16)) % 2100;
-	if(volley_phase < 240 && progress > 0.15 && progress < 0.86) {
-		double shot_progress = (double)volley_phase / 240.0;
-		for(int bolt = 0; bolt < 3; bolt++) {
-			int lane_y = center_y + (bolt - 1) * scale / 36;
-			int shot_x = left_x + size * 3
-				+ (int)((right_x - left_x - size * 6) * shot_progress);
-			int shot_y = lane_y + (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 42);
-			thickLineRGBA(surface, shot_x - size, shot_y, shot_x, shot_y,
-				2, 139, 208, 235, (Uint8)(alpha * 0.95));
-			shot_x = right_x - size * 3
-				- (int)((right_x - left_x - size * 6) * shot_progress);
-			shot_y = lane_y - (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 42);
-			thickLineRGBA(surface, shot_x + size, shot_y, shot_x, shot_y,
-				2, 245, 164, 112, (Uint8)(alpha * 0.95));
-		}
-	}
-	if(progress > 0.24 && progress < 0.84 && (phase % 2500) < 240) {
-		double blast = 1.0 - (phase % 2500) / 240.0;
-		int impact_x = (winner == 0 ? right_x : left_x)
-				+ (int)(sin(ticks / 510.0) * scale * 0.015);
-			int impact_y = center_y + (int)(cos(ticks / 390.0) * scale * 0.012);
-		int radius = size / 2 + (int)(size * (1.0 - blast));
-		Uint8 impact_alpha = (Uint8)(125 * fade * blast);
-		filledCircleRGBA(surface, impact_x, impact_y, radius,
-			230, 128, 79, impact_alpha);
-		circleRGBA(surface, impact_x, impact_y, radius + size / 2,
-			255, 202, 139, (Uint8)(impact_alpha * 0.8));
-	}
+// One pair of small ships chasing each other in loops, then trading places.
+static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
+	render_dogfight(surface, &window, scale, 1, 2, 0.0);
+}
+
+// A furball: two or three pairs fighting at once.
+static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
+	render_dogfight(surface, &window, scale, 2 + (window.seed >> 5) % 2, 3, 0.35);
 }
 
 static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
@@ -1261,22 +1529,19 @@ static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 	int right_x = (int)(surface->w + size * 6
 		- approach * (surface->w - right_hold + size * 6)
 		+ (winner == 1 ? 0 : retreat * surface->w * 0.62));
-	int center_y = surface->h * 19 / 100;
+	int center_y = surface->h * 12 / 100;
 	int arc = (int)(sin(ticks / 1900.0 + progress * 8.0) * scale * 0.010);
 	int left_count = 3 + (seed >> 4) % 4;
 	int right_count = 3 + (seed >> 12) % 4;
-	Uint8 left_alpha = (Uint8)(150 * fade * (winner == 0 ? 1.0 : 1.0 - defeat * 0.75));
-	Uint8 right_alpha = (Uint8)(150 * fade * (winner == 1 ? 1.0 : 1.0 - defeat * 0.75));
+	Uint8 left_opacity = (Uint8)(SHIP_OPACITY * fade * (winner == 0 ? 1.0 : 1.0 - defeat * 0.75));
+	Uint8 right_opacity = (Uint8)(SHIP_OPACITY * fade * (winner == 1 ? 1.0 : 1.0 - defeat * 0.75));
 
 	for(int side = 0; side < 2; side++) {
 		int direction = side == 0 ? 1 : -1;
 		int count = side == 0 ? left_count : right_count;
 		int anchor_x = side == 0 ? left_x : right_x;
 		int side_arc = side == 0 ? arc : -arc;
-		int red = side == 0 ? 100 : 170;
-		int green = side == 0 ? 147 : 126;
-		int blue = side == 0 ? 167 : 101;
-		Uint8 side_alpha = side == 0 ? left_alpha : right_alpha;
+		Uint8 side_opacity = side == 0 ? left_opacity : right_opacity;
 
 		for(int ship = 0; ship < count; ship++) {
 			int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
@@ -1284,19 +1549,20 @@ static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 			int weave = (int)(sin(ticks / (510.0 + ship * 127)
 				+ ship * 1.8 + side * 2.4) * scale * 0.009);
 			int ship_x = anchor_x + offset + weave;
-			int ship_y = center_y + side_arc + lane * scale / 30
+			int ship_y = center_y + side_arc + lane * scale / 36
 				+ (int)(sin(ticks / (370.0 + ship * 83) + ship * 1.3) * size * 0.75);
 			unsigned int type = seed >> ((ship * 3 + side * 7) % 24);
+			unsigned int variety = (seed >> 9) + ship * 5 + side * 3;
 			if(ship == 0 && ((seed >> (side + 2)) & 1)) {
-				draw_cruiser(surface, ship_x, ship_y, size * 2, direction,
-					red, green, blue, side_alpha);
+				draw_ship_role(surface, ship_x, ship_y, SHIP_BIG, variety,
+					size * 10, direction, side, side_opacity);
 			} else if(type % 3 == 0) {
-				draw_frigate(surface, ship_x, ship_y, size, direction,
-					red, green, blue, side_alpha);
+				draw_ship_role(surface, ship_x, ship_y, SHIP_MID, variety,
+					size * 7, direction, side, side_opacity);
 			} else {
-				draw_battle_ship(surface, ship_x, ship_y,
-					fighter_size + (ship % 3 == 0 ? 2 : 0), direction,
-					red, green, blue, side_alpha);
+				draw_ship_role(surface, ship_x, ship_y, SHIP_SMALL, variety,
+					(fighter_size + (ship % 3 == 0 ? 2 : 0)) * 5, direction, side,
+					side_opacity);
 			}
 		}
 	}
@@ -1308,16 +1574,14 @@ static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 		for(int side = 0; side < 2; side++) {
 			int direction = side == 0 ? 1 : -1;
 			int anchor_x = side == 0 ? left_x : right_x;
-			int red = side == 0 ? 100 : 170;
-			int green = side == 0 ? 147 : 126;
-			int blue = side == 0 ? 167 : 101;
 			for(int ship = 0; ship < reserves; ship++) {
 				int x = anchor_x - direction * (int)(surface->w * 0.16 * (1.0 - reinforcement))
 					- direction * ship * fighter_size * 3;
 				int y = center_y + (side == 0 ? arc : -arc)
 					+ (ship - reserves / 2) * scale / 25;
-				draw_battle_ship(surface, x, y, fighter_size, direction,
-					red, green, blue, (Uint8)(130 * fade * reinforcement));
+				draw_ship_role(surface, x, y, SHIP_SMALL, (seed >> 13) + ship * 5 + side * 3,
+					fighter_size * 5, direction, side,
+					(Uint8)(SHIP_OPACITY * 0.85 * fade * reinforcement));
 			}
 		}
 	}
@@ -3072,6 +3336,7 @@ int main(int argc, char** argv ) {
 	SDL_FreeSurface(bg);
 	if(backdrop_base) SDL_FreeSurface(backdrop_base);
 	if(flip_backdrop) SDL_FreeSurface(flip_backdrop);
+	if(ship_backup) SDL_FreeSurface(ship_backup);
 	if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
 
 	TTF_CloseFont(font_time);
