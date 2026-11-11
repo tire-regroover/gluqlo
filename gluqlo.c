@@ -726,25 +726,20 @@ static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) 
 		int start_x = particle_seed % surface->w;
 		int start_y = (particle_seed >> 9) % surface->h;
 		int speed = 3 + (particle_seed >> 20) % 7;
-		int travel = (int)(ticks / (35 + speed * 7));
-		int x, y, end_x, end_y;
-		if(kind == 0) {
-			x = (start_x + travel * speed) % surface->w;
-			y = (start_y + travel / 2) % surface->h;
-			end_x = x - scale / 90;
-			end_y = y + scale / 50;
-		} else if(kind == 1) {
-			x = (start_x - travel * speed + surface->w * 2) % surface->w;
-			y = (start_y - travel) % surface->h;
-			if(y < 0) y += surface->h;
-			end_x = x + scale / 100;
-			end_y = y + scale / 70;
-		} else {
-			x = (start_x + travel * speed / 2) % surface->w;
-			y = (start_y + travel) % surface->h;
-			end_x = x - scale / 130;
-			end_y = y + scale / 60;
-		}
+		// Each particle moves along its own streak: kind 0 falls slanting to the
+		// right, kind 1 rises to the left, the others fall almost straight down.
+		double direction_x = kind == 0 ? 0.55 : (kind == 1 ? -0.7 : 0.4);
+		double direction_y = kind == 1 ? -1.0 : 1.0;
+		double streak = scale * (kind == 0 ? 0.023 : 0.017);
+		double travel = ticks * 2.0 / (35 + speed * 7);
+		double path = sqrt(direction_x * direction_x + direction_y * direction_y);
+		double wrapped_x = fmod(start_x + travel * direction_x, (double)surface->w);
+		double wrapped_y = fmod(start_y + travel * direction_y, (double)surface->h);
+		if(wrapped_x < 0.0) wrapped_x += surface->w;
+		if(wrapped_y < 0.0) wrapped_y += surface->h;
+		int x = (int)wrapped_x, y = (int)wrapped_y;
+		int end_x = x - (int)(direction_x / path * streak);
+		int end_y = y - (int)(direction_y / path * streak);
 		Uint8 alpha = (Uint8)((18 + (particle_seed >> 24) % 30) * fade);
 		thickLineRGBA(surface, x, y, end_x, end_y, 1, red, green, blue, alpha);
 		if(particle % 9 == 0) filledCircleRGBA(surface, x, y, 1,
@@ -3798,7 +3793,8 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		double travel = ticks * speed / 150.0;
 		int y = (start_y + (int)travel) % (surface->h + length);
 		int x = (start_x + (int)(travel * (0.16 + weather.wind * 0.22))) % surface->w;
-		int x_end = x - length / 3;
+		// The streak leans the same way the drop travels.
+		int x_end = x - (int)(length * (0.16 + weather.wind * 0.22) + 0.5);
 		int y_start = y - length;
 		Uint8 alpha = (Uint8)(38 + (rain_seed >> 16) % 48 + weather.rain * 35);
 		thickLineRGBA(surface, x, y, x_end, y_start, 1,
