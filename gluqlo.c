@@ -481,18 +481,19 @@ static void draw_ship(SDL_Surface *surface, int x, int y, int length,
 		// --- The Blade: needle prow, swept fins, red lamps ---------------
 		int half = length / 7;
 		if(half < 3) half = 3;
-		// Fins first, so the hull sits on top of them. A fin needs a base
-		// roughly as long as it is deep, otherwise the triangle collapses
-		// into a scratch: a 65%-of-length base with a 5px apex reads as a
-		// hairline, not a fin.
+		// Fins first, so the hull sits on top of them. Deliberately unequal:
+		// two matching fins plus a pointed prow is an arrow, and an arrow is
+		// a mouse cursor. One fin is long and raked, the other is a stub.
 		for(int side = -1; side <= 1; side += 2) {
+			int reach = side < 0 ? 240 : 130;
+			int root = side < 0 ? -30 : -58;
 			Sint16 fx[3], fy[3];
-			fx[0] = (Sint16)(x + dir * (-34) * length / 100);
+			fx[0] = (Sint16)(x + dir * root * length / 100);
 			fy[0] = (Sint16)(y + side * half * 80 / 100);
-			fx[1] = (Sint16)(x + dir * (-74) * length / 100);
+			fx[1] = (Sint16)(x + dir * (-78) * length / 100);
 			fy[1] = (Sint16)(y + side * half * 80 / 100);
 			fx[2] = (Sint16)(x + dir * (-100) * length / 100);
-			fy[2] = (Sint16)(y + side * half * 240 / 100);
+			fy[2] = (Sint16)(y + side * half * reach / 100);
 			filledPolygonRGBA(surface, fx, fy, 3, hr, hg, hb, alpha);
 			aalineRGBA(surface, fx[0], fy[0], fx[2], fy[2], rr, rg, rb, alpha);
 		}
@@ -591,27 +592,29 @@ static void draw_ship(SDL_Surface *surface, int x, int y, int length,
 		}
 	} else {
 		// --- The Anvil: blunt industrial wedge, cold blue lamps ----------
-		// Cut square at the stern. Two parallel hull bars run its length, so
-		// it reads as built rather than grown.
+		// Asymmetric on purpose. A pointed nose widening to a flat rectangle
+		// is an arrow, and an arrow is a mouse cursor. Here the prow sits off
+		// the centreline, the stern is cut at an angle, and the belly bulges
+		// further than the back, so the outline never mirrors itself.
 		int half = length / 6;
 		if(half < 3) half = 3;
-		static const int px[7] = { 100, 72, 34, -100, -100, 34, 72 };
-		static const int py[7] = { 0, -55, -100, -100, 100, 100, 55 };
-		Sint16 hx[7], hy[7];
-		for(int i = 0; i < 7; i++) {
+		static const int px[9] = { 100, 78, 40, -30, -100, -100, -20, 46, 86 };
+		static const int py[9] = { -10, -62, -100, -100, -78, 62, 100, 88, 30 };
+		Sint16 hx[9], hy[9];
+		for(int i = 0; i < 9; i++) {
 			hx[i] = (Sint16)(x + dir * px[i] * length / 100);
 			hy[i] = (Sint16)(y + py[i] * half / 100 + tilt * px[i] / 100);
 		}
-		filledPolygonRGBA(surface, hx, hy, 7, hr, hg, hb, alpha);
-		// Shadow along the lower half.
-		static const int sx[6] = { 72, 34, -100, -100, 34, 72 };
-		static const int sy[6] = { 55, 100, 100, 25, 25, 25 };
-		Sint16 shx[6], shy[6];
-		for(int i = 0; i < 6; i++) {
+		filledPolygonRGBA(surface, hx, hy, 9, hr, hg, hb, alpha);
+		// Shadow along the belly only, following the same asymmetric edge.
+		static const int sx[5] = { 46, -20, -100, -100, 86 };
+		static const int sy[5] = { 88, 100, 62, 20, 30 };
+		Sint16 shx[5], shy[5];
+		for(int i = 0; i < 5; i++) {
 			shx[i] = (Sint16)(x + dir * sx[i] * length / 100);
 			shy[i] = (Sint16)(y + sy[i] * half / 100 + tilt * sx[i] / 100);
 		}
-		filledPolygonRGBA(surface, shx, shy, 6, sr, sg, sb, alpha);
+		filledPolygonRGBA(surface, shx, shy, 5, sr, sg, sb, alpha);
 		// Twin hull bars: two dark channels running the length of the wedge.
 		for(int side = -1; side <= 1; side += 2) {
 			int by = y + side * half * 34 / 100;
@@ -1021,9 +1024,11 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 				int y = line_y + lane;
 				// Big enough to read as a hull. Anything under ~30px at this
 				// distance is a speck, which is what made the old ones
-				// invisible.
+				// invisible. The upper bound keeps a 4K screen from drawing
+				// 360px hulls, which would read as models rather than ships.
 				int len = scale / (6 + (s >> 20) % 4);
 				if(len < 34) len = 34;
+				if(len > 190) len = 190;
 				// Each side is a different race, so the two lines read as two
 				// fleets rather than one fleet mirrored.
 				draw_ship(surface, x, y, len, dir, 0,
@@ -2353,9 +2358,14 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		filledCircleRGBA(surface, x, y, i % 9 == 0 ? 2 : 1,
 			202, 216, 231, (Uint8)(85 + weather.snow * 80));
 	}
+	// Only blend the warm wash when there is actually warmth to add. In most
+	// weather presets warm_blend is zero, and a full-screen alpha blend of
+	// 2M pixels is not free on a Pi 4.
 	Uint8 warm_alpha = (Uint8)(warm_blend * (75 + weather.sunshine * 15));
-	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		warm_red, warm_green, warm_blue, warm_alpha);
+	if(warm_alpha > 0) {
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			warm_red, warm_green, warm_blue, warm_alpha);
+	}
 }
 
 
