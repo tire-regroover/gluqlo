@@ -572,35 +572,36 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 	int kind = seed % 7;
 
 	if(kind == 0) {
-		for(int tree = 0; tree < 7; tree++) {
-			int tree_x = surface->w * (8 + tree * 13) / 100;
-			double nx = (double)tree_x / surface->w;
-			double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-			int base_y = (int)(surface->h * ridge);
-			double growth = smooth_step(0.03 + tree * 0.025, 0.72 + tree * 0.025, progress);
-			int tree_height = (int)(scale * (0.035 + (tree % 3) * 0.012) * growth);
-			if(tree_height < 2) continue;
-			Uint8 alpha = (Uint8)(175 * fade);
-			thickLineRGBA(surface, tree_x, base_y, tree_x, base_y - tree_height,
-				2 + tree % 2, 61, 72, 61, alpha);
-			for(int branch = 1; branch <= 3; branch++) {
-				int branch_y = base_y - tree_height * branch / 4;
-				int branch_length = tree_height * (4 - branch) / 5;
-				thickLineRGBA(surface, tree_x, branch_y,
-					tree_x - branch_length, branch_y - branch_length / 2,
-					2, 67, 82, 66, alpha);
-				thickLineRGBA(surface, tree_x, branch_y,
-					tree_x + branch_length, branch_y - branch_length / 2,
-					2, 67, 82, 66, alpha);
-				if(growth > 0.72) {
-					filledCircleRGBA(surface, tree_x - branch_length,
-						branch_y - branch_length / 2, branch_length / 3 + 1,
-						74, 112, 78, alpha);
-					filledCircleRGBA(surface, tree_x + branch_length,
-						branch_y - branch_length / 2, branch_length / 3 + 1,
-						86, 124, 83, alpha);
-				}
+		// Ridges emerging from haze as the light comes up. Each rank is drawn
+		// as a filled silhouette with a soft top edge, so the hills dissolve
+		// into the air instead of ending in a hard line.
+		for(int rank = 0; rank < 4; rank++) {
+			int base_y = surface->h * (66 + rank * 7) / 100;
+			Uint8 shade = (Uint8)(30 + rank * 14);
+			Uint8 alpha = (Uint8)((150 - rank * 22) * fade);
+			int previous_x = 0;
+			int previous_y = base_y;
+			for(int segment = 1; segment <= 40; segment++) {
+				double t = (double)segment / 40;
+				int px = (int)(t * surface->w);
+				double nx = t;
+				// Two octaves of noise give a ridge that reads as terrain
+				// rather than a sine wave.
+				double ridge = smooth_noise(nx * 5.0 + rank * 3.1, rank * 1.7, 1123)
+					* 0.65 + smooth_noise(nx * 13.0, rank * 2.3, 1451) * 0.35;
+				int py = base_y - (int)((ridge - 0.35) * scale * 0.16);
+				filledTrigonRGBA(surface, previous_x, previous_y, px, py,
+					px, surface->h, shade, (Uint8)(shade + 7),
+					(Uint8)(shade + 15), alpha);
+				filledTrigonRGBA(surface, previous_x, previous_y,
+					px, surface->h, previous_x, surface->h,
+					shade, (Uint8)(shade + 7), (Uint8)(shade + 15), alpha);
+				previous_x = px;
+				previous_y = py;
 			}
+			// Haze pooling at the foot of each rank.
+			soft_band(surface, base_y - scale / 30, base_y + scale / 12,
+				150, 164, 186, (int)((9 + rank * 3) * fade));
 		}
 	} else if(kind == 1) {
 		int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
