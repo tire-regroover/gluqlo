@@ -234,7 +234,6 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	const Uint32 season_transition = 20000;
 	const Uint32 weather_duration = 65000;
 	const Uint32 weather_transition = 12000;
-	const int weather_count = sizeof(weather_levels) / sizeof(weather_levels[0]);
 	SceneWeather scene = { { 0.0, 0.0, 0.0, 0.0 },
 		0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, { 0.0, 0.0, 0.0 } };
 
@@ -246,13 +245,29 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	scene.season[season] = 1.0 - season_blend;
 	scene.season[(season + 1) % 4] = season_blend;
 
+	// Each season draws from its own pool of presets so that rain, snow and
+	// clear skies stay tied to the season instead of appearing at random.
+	static const int season_weather_pool[4][4] = {
+		{ 0, 2, 3, 9 },  // spring: clear, cloudy, light rain, fog
+		{ 0, 1, 4, 5 },  // summer: clear, sunset, heavy rain, thunderstorm
+		{ 2, 3, 4, 9 },  // autumn: cloudy, drizzle, rain, fog
+		{ 6, 7, 2, 8 }   // winter: light snow, blizzard, overcast, aurora
+	};
+	const int pool_size = 4;
+	int dominant = 0;
+	for(int i = 1; i < 4; i++) {
+		if(scene.season[i] > scene.season[dominant]) dominant = i;
+	}
+	const int *pool = season_weather_pool[dominant];
+
 	Uint32 weather_slot = ticks / weather_duration;
 	Uint32 current_seed = weather_slot * 2654435761u + 0x9e3779b9u;
 	Uint32 previous_seed = (weather_slot - 1) * 2246822519u + 3266489917u;
-	int current = current_seed % weather_count;
-	int previous = previous_seed % weather_count;
+	int current = pool[current_seed % pool_size];
+	int previous = pool[previous_seed % pool_size];
 	if(previous == current) {
-		previous = (previous + 1 + (current_seed >> 8) % (weather_count - 1)) % weather_count;
+		previous = pool[(previous_seed % pool_size + 1
+			+ (current_seed >> 8) % (pool_size - 1)) % pool_size];
 	}
 	Uint32 weather_phase = ticks % weather_duration;
 	double weather_blend = smooth_step(0.0, weather_transition, weather_phase);
@@ -466,11 +481,11 @@ static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) 
 	Uint32 slot = ticks / cycle;
 	Uint32 phase = ticks % cycle;
 	Uint32 seed = slot * 2246822519u + 3266489917u;
-	if(seed % 4 != 0) return;
+	if(seed % 6 != 0) return;
 	seed ^= seed >> 15;
 	seed *= 2246822519u;
 	seed ^= seed >> 13;
-	Uint32 duration = 52000 + (seed >> 8) % 18000;
+	Uint32 duration = 44000 + (seed >> 8) % 15000;
 	if(phase >= duration) return;
 	double fade = smooth_step(0.0, 5000.0, phase)
 		* (1.0 - smooth_step(duration - 7000.0, duration, phase));
@@ -483,7 +498,7 @@ static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) 
 	Uint8 green = sky_colors[kind][1];
 	Uint8 blue = sky_colors[kind][2];
 	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		red, green, blue, (Uint8)(18 * fade));
+		red, green, blue, (Uint8)(12 * fade));
 
 	if(kind == 2) {
 		int planet_x = surface->w * (25 + (seed >> 12) % 50) / 100;
@@ -2150,21 +2165,34 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 			(Uint8)(35 + 30 * (0.5 + 0.5 * sin(ticks / (230.0 + i * 31) + i))));
 	}
 
-	int autumn = weather.season[2] * 16;
+	// Autumn leaves: a distinct seasonal feature, denser and with a small
+	// leaf silhouette so autumn reads clearly on its own.
+	double autumn_strength = weather.season[2];
+	int autumn = (int)(autumn_strength * 46);
 	for(int i = 0; i < autumn; i++) {
 		unsigned int seed = (unsigned int)i * 2246822519u + 3266489917u;
-		int x = (seed + ticks / (32 + i % 5 * 9)) % surface->w;
-		int y = (seed / 11 + ticks * (2 + i % 3) / 55) % surface->h;
-		int sway = (int)(sin(ticks / 370.0 + i * 1.7) * scale * 0.012);
-		Uint8 alpha = (Uint8)(55 + 90 * weather.season[2]);
-		thickLineRGBA(surface, x, y, x + sway + 2, y + 3,
-			2, (Uint8)(154 + i % 3 * 20), (Uint8)(76 + i % 4 * 13), 43, alpha);
+		int drift = (int)(ticks / (26 + i % 5 * 7));
+		int fall = (int)(ticks * (3 + i % 4) / 46);
+		int x = (seed + drift) % surface->w;
+		int y = (seed / 11 + fall) % surface->h;
+		int sway = (int)(sin(ticks / (300.0 + i % 7 * 40) + i * 1.7) * scale * 0.016);
+		Uint8 alpha = (Uint8)(70 + 110 * autumn_strength);
+		int leaf = 2 + i % 3;
+		int tilt = (i & 1) ? sway / 2 : -sway / 2;
+		Uint8 lr = (Uint8)(150 + (i * 37) % 80);
+		Uint8 lg = (Uint8)(58 + (i * 23) % 55);
+		Uint8 lb = (Uint8)(28 + (i * 17) % 35);
+		thickLineRGBA(surface, x + sway, y, x + sway + tilt, y + leaf,
+			2, lr, lg, lb, alpha);
+		filledCircleRGBA(surface, x + sway, y, leaf, lr, lg, lb,
+			(Uint8)(alpha * 0.85));
 	}
 
 	unsigned int rain_seed = 0x7f4a7c15u;
 	double storm_strength = smooth_step(0.25, 0.75, weather.lightning);
+	double rain_share = 1.0 - weather.snow * 0.45;
 	int rain_count = (int)(surface->w * surface->h / 1650.0 * weather.rain
-		* (1.0 + storm_strength * 2.0));
+		* (1.0 + storm_strength * 2.0) * rain_share);
 	if(rain_count > MAX_RAIN_DROPS) rain_count = MAX_RAIN_DROPS;
 	for(int i = 0; i < rain_count; i++) {
 		rain_seed = rain_seed * 1664525u + 1013904223u;
@@ -2183,7 +2211,8 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 			154, 174, 207, alpha);
 	}
 
-	int snow_count = (int)(surface->w * surface->h / 3400.0 * weather.snow);
+	double snow_share = 1.0 - weather.rain * 0.45;
+	int snow_count = (int)(surface->w * surface->h / 3400.0 * weather.snow * snow_share);
 	for(int i = 0; i < snow_count; i++) {
 		unsigned int seed = (unsigned int)i * 1664525u + 1013904223u;
 		int x = (seed + ticks / (12 + i % 7 * 4)) % surface->w;
