@@ -398,161 +398,6 @@ static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
 	}
 }
 
-static void render_world_jump(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 360000;
-	const Uint32 duration = 7800;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	if(seed % 5 != 0 || phase >= duration) return;
-	seed ^= seed >> 15;
-	seed *= 2654435761u;
-	seed ^= seed >> 13;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 350.0, phase)
-		* (1.0 - smooth_step(duration - 450.0, duration, phase));
-	int center_x = surface->w / 2 + (int)(sin(ticks / 115.0) * scale * 0.012);
-	int center_y = surface->h * 43 / 100;
-	double tunnel_open = sin(progress * 3.14159265359);
-	int portal_x_radius = scale * (0.045 + tunnel_open * 0.22);
-	int portal_y_radius = scale * (0.035 + tunnel_open * 0.15);
-	Uint8 tunnel_alpha = (Uint8)(118 * fade * (0.35 + tunnel_open * 0.65));
-
-	for(int ring = 0; ring < 9; ring++) {
-		double ring_scale = 0.34 + ring * 0.105;
-		int radius_x = (int)(portal_x_radius * ring_scale);
-		int radius_y = (int)(portal_y_radius * ring_scale);
-		Uint8 ring_alpha = (Uint8)(tunnel_alpha * (1.0 - ring * 0.065));
-		ellipseRGBA(surface, center_x, center_y, radius_x, radius_y,
-			(Uint8)(100 + ring * 14), (Uint8)(151 + ring * 9),
-			(Uint8)(218 + ring * 4), ring_alpha);
-	}
-	for(int streak = 0; streak < 48; streak++) {
-		unsigned int streak_seed = seed + streak * 2246822519u;
-		double angle = (streak_seed % 6283) / 1000.0 + ticks / 700.0;
-		double travel = fmod((streak_seed >> 8) / 4294967295.0 + progress * 1.8, 1.0);
-		double distance = portal_x_radius + travel * scale * 0.38;
-		int star_x = center_x + (int)(cos(angle) * distance);
-		int star_y = center_y + (int)(sin(angle) * distance * 0.68);
-		int tail_x = center_x + (int)(cos(angle) * (distance - scale * 0.035));
-		int tail_y = center_y + (int)(sin(angle) * (distance - scale * 0.035) * 0.68);
-		thickLineRGBA(surface, tail_x, tail_y, star_x, star_y, 1,
-			(Uint8)(155 + streak % 5 * 18), (Uint8)(182 + streak % 4 * 16),
-			235, (Uint8)(tunnel_alpha * 0.62));
-	}
-
-	double destination_mix = smooth_step(3900.0, 5150.0, phase)
-		* (1.0 - smooth_step(5850.0, 7200.0, phase));
-	static const Uint8 destination_palette[4][3] = {
-		{ 36, 90, 112 }, { 128, 66, 75 }, { 74, 103, 68 }, { 98, 79, 132 }
-	};
-	int destination = seed % 4;
-	Uint8 sky_alpha = (Uint8)(84 * destination_mix * fade);
-	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		destination_palette[destination][0], destination_palette[destination][1],
-		destination_palette[destination][2], sky_alpha);
-	for(int layer = 0; layer < 3; layer++) {
-		int base_y = surface->h * (66 + layer * 9) / 100;
-		Uint8 terrain_alpha = (Uint8)(148 * destination_mix * fade * (0.85 - layer * 0.16));
-		Uint8 terrain_red = (Uint8)(14 + destination * 13 + layer * 5);
-		Uint8 terrain_green = (Uint8)(31 + destination * 9 + layer * 4);
-		Uint8 terrain_blue = (Uint8)(43 + destination * 14 + layer * 3);
-		for(int segment = 0; segment < 18; segment++) {
-			int x1 = surface->w * segment / 18;
-			int x2 = surface->w * (segment + 1) / 18;
-			int y1 = base_y + (int)(sin(segment * 1.4 + destination) * scale * 0.035);
-			int y2 = base_y + (int)(sin((segment + 1) * 1.4 + destination) * scale * 0.035);
-			filledTrigonRGBA(surface, x1, y1, x2, y2, x2, surface->h,
-				terrain_red, terrain_green, terrain_blue, terrain_alpha);
-			filledTrigonRGBA(surface, x1, y1, x2, surface->h, x1, surface->h,
-				terrain_red, terrain_green, terrain_blue, terrain_alpha);
-		}
-	}
-	Uint32 return_phase = phase > 5900 ? phase - 5900 : 0;
-	if(return_phase < 900) {
-		double return_flash = (1.0 - return_phase / 900.0) * fade;
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			225, 233, 241, (Uint8)(150 * return_flash));
-	}
-}
-
-static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 300000;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	if(seed % 6 != 0) return;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	Uint32 duration = 44000 + (seed >> 8) % 15000;
-	if(phase >= duration) return;
-	double fade = smooth_step(0.0, 5000.0, phase)
-		* (1.0 - smooth_step(duration - 7000.0, duration, phase));
-	int kind = seed % 5;
-	static const Uint8 sky_colors[5][3] = {
-		{ 66, 142, 106 }, { 99, 81, 157 }, { 62, 113, 156 },
-		{ 158, 83, 91 }, { 157, 125, 62 }
-	};
-	Uint8 red = sky_colors[kind][0];
-	Uint8 green = sky_colors[kind][1];
-	Uint8 blue = sky_colors[kind][2];
-	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		red, green, blue, (Uint8)(12 * fade));
-
-	if(kind == 2) {
-		int planet_x = surface->w * (25 + (seed >> 12) % 50) / 100;
-		int planet_y = surface->h * 28 / 100;
-		int radius = scale / 11;
-		filledCircleRGBA(surface, planet_x, planet_y, radius,
-			32, 38, 51, (Uint8)(150 * fade));
-		circleRGBA(surface, planet_x, planet_y, radius + scale / 30,
-			134, 194, 210, (Uint8)(100 * fade));
-	}
-
-	int count = surface->w * surface->h / 12000;
-	if(count < 24) count = 24;
-	if(count > 180) count = 180;
-	for(int particle = 0; particle < count; particle++) {
-		Uint32 particle_seed = (Uint32)particle * 1664525u + seed;
-		int start_x = particle_seed % surface->w;
-		int start_y = (particle_seed >> 9) % surface->h;
-		int speed = 3 + (particle_seed >> 20) % 7;
-		int travel = (int)(ticks / (35 + speed * 7));
-		int x, y, end_x, end_y;
-		if(kind == 0) {
-			x = (start_x + travel * speed) % surface->w;
-			y = (start_y + travel / 2) % surface->h;
-			end_x = x - scale / 90;
-			end_y = y + scale / 50;
-		} else if(kind == 1) {
-			x = (start_x - travel * speed + surface->w * 2) % surface->w;
-			y = (start_y - travel) % surface->h;
-			if(y < 0) y += surface->h;
-			end_x = x + scale / 100;
-			end_y = y + scale / 70;
-		} else {
-			x = (start_x + travel * speed / 2) % surface->w;
-			y = (start_y + travel) % surface->h;
-			end_x = x - scale / 130;
-			end_y = y + scale / 60;
-		}
-		Uint8 alpha = (Uint8)((18 + (particle_seed >> 24) % 30) * fade);
-		thickLineRGBA(surface, x, y, end_x, end_y, 1, red, green, blue, alpha);
-		if(particle % 9 == 0) filledCircleRGBA(surface, x, y, 1,
-			(Uint8)(red + 25), (Uint8)(green + 25), (Uint8)(blue + 25), alpha);
-	}
-
-	if(kind == 3) {
-		Uint32 flash_phase = phase % 8400;
-		if(flash_phase < 140) {
-			Uint8 flash = (Uint8)(45 * fade * (1.0 - flash_phase / 140.0));
-			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-				211, 183, 226, flash);
-		}
-	}
-}
-
 // A distant bird, drawn as a shallow gull silhouette: two thin wing strokes
 // meeting at the body, with the tips settling slightly below the mid-wing
 // joint. At this scale any extra detail (head, beak, tail) collapses into a
@@ -572,126 +417,6 @@ static void draw_bird(SDL_Surface *surface, int x, int y, int size, int wing_lif
 	aalineRGBA(surface, x - joint_x, joint_y, x - span, tip_y, shade, shade_g, shade_b, 145);
 	aalineRGBA(surface, x, y, x + joint_x, joint_y, shade, shade_g, shade_b, 165);
 	aalineRGBA(surface, x + joint_x, joint_y, x + span, tip_y, shade, shade_g, shade_b, 145);
-}
-
-static void draw_battle_ship(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 2;
-	int back_x = x - direction * size;
-	int wing_x = x - direction * size / 3;
-	int wing_top = y - size;
-	int wing_bottom = y + size;
-
-	filledTrigonRGBA(surface, nose_x, y, wing_x, wing_top, back_x, y,
-		red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, back_x, y, wing_x, wing_bottom,
-		red, green, blue, alpha);
-	thickLineRGBA(surface, nose_x, y, back_x, y, 1, 191, 212, 231, alpha);
-	thickLineRGBA(surface, nose_x, y, wing_x, wing_top, 2, 186, 206, 220, alpha);
-	thickLineRGBA(surface, nose_x, y, wing_x, wing_bottom, 2, 186, 206, 220, alpha);
-	thickLineRGBA(surface, wing_x, wing_top, x, y, 1, red, green, blue, alpha);
-	thickLineRGBA(surface, x, y, wing_x, wing_bottom, 1, red, green, blue, alpha);
-	int cockpit_radius = size / 8;
-	if(cockpit_radius < 1) cockpit_radius = 1;
-	filledCircleRGBA(surface, x + direction * size / 2, y, cockpit_radius,
-		171, 224, 245, (Uint8)(alpha * 0.85));
-	thickLineRGBA(surface, back_x - direction * size / 2, y,
-		back_x, y, 2, 116, 196, 232, (Uint8)(alpha * 0.35));
-	filledCircleRGBA(surface, back_x, y, size / 7, 111, 201, 232,
-		(Uint8)(alpha * 3 / 4));
-}
-
-static void draw_frigate(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 3;
-	int tail_x = x - direction * size * 3;
-	int shoulder_x = x - direction * size;
-	int top_y = y - size / 2;
-	int bottom_y = y + size / 2;
-	int half_x[] = { nose_x, shoulder_x, tail_x, x, nose_x };
-	int upper_y[] = { y, top_y, y - size / 3, y, y };
-	int lower_y[] = { y, y, y + size / 3, bottom_y, y };
-
-	filledTrigonRGBA(surface, half_x[0], upper_y[0], half_x[1], upper_y[1],
-		half_x[2], upper_y[2], red, green, blue, alpha);
-	filledTrigonRGBA(surface, half_x[0], lower_y[0], half_x[2], lower_y[2],
-		half_x[3], lower_y[3], red, green, blue, alpha);
-	thickLineRGBA(surface, nose_x, y, tail_x, y, 2, 191, 212, 231, alpha);
-
-	for(int turret = -1; turret <= 1; turret += 2) {
-		int turret_x = x + turret * size / 2;
-		int turret_y = y + turret * size / 5;
-		filledCircleRGBA(surface, turret_x, turret_y, size / 7,
-			(Uint8)(red + 18), (Uint8)(green + 18), (Uint8)(blue + 18), alpha);
-		thickLineRGBA(surface, turret_x, turret_y,
-			turret_x + direction * size / 2, turret_y - turret * size / 5,
-			1, red, green, blue, alpha);
-	}
-	filledCircleRGBA(surface, tail_x, y, size / 6, 111, 201, 232,
-		(Uint8)(alpha * 3 / 4));
-}
-
-static void draw_cruiser(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 2;
-	int tail_x = x - direction * size * 2;
-	int upper_y = y - size / 2;
-	int lower_y = y + size / 2;
-
-	filledTrigonRGBA(surface, nose_x, y, x + direction * size, upper_y,
-		tail_x, upper_y, red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, upper_y, tail_x, lower_y,
-		red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, lower_y,
-		x + direction * size, lower_y, red, green, blue, alpha);
-	boxRGBA(surface, x - size, y - size / 5, x + size, y + size / 5,
-		(Uint8)(red * 0.72), (Uint8)(green * 0.72), (Uint8)(blue * 0.72), alpha);
-	thickLineRGBA(surface, nose_x, y, tail_x, y, 2, 205, 218, 227, alpha);
-
-	for(int turret = -1; turret <= 1; turret++) {
-		int turret_x = x + turret * size / 2;
-		int turret_y = y + turret * size / 4;
-		filledCircleRGBA(surface, turret_x, turret_y, size / 7,
-			(Uint8)(red + 15), (Uint8)(green + 15), (Uint8)(blue + 15), alpha);
-		thickLineRGBA(surface, turret_x, turret_y,
-			turret_x + direction * size / 2, turret_y - turret * size / 4,
-			2, 216, 198, 164, alpha);
-	}
-	for(int engine = -1; engine <= 1; engine++) {
-		filledCircleRGBA(surface, tail_x, y + engine * size / 5, size / 8,
-			95, 190, 225, (Uint8)(alpha * 0.8));
-	}
-}
-
-static void draw_carrier(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 3;
-	int tail_x = x - direction * size * 3;
-	int upper_y = y - size / 2;
-	int lower_y = y + size / 2;
-
-	filledTrigonRGBA(surface, nose_x, y, x + direction * size, upper_y,
-		tail_x, upper_y, red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, upper_y, tail_x, lower_y,
-		red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, lower_y,
-		x + direction * size, lower_y, red, green, blue, alpha);
-	boxRGBA(surface, x - size, y - size / 5, x + size, y + size / 5,
-		(Uint8)(red * 0.72), (Uint8)(green * 0.72), (Uint8)(blue * 0.72), alpha);
-	thickLineRGBA(surface, nose_x, y, tail_x, y, 2, 205, 218, 227, alpha);
-
-	// Flight deck stripe
-	boxRGBA(surface, x - size * 2, y - size / 6, x + size * 2, y + size / 6,
-		(Uint8)(red * 0.55), (Uint8)(green * 0.55), (Uint8)(blue * 0.55), alpha);
-	// Bridge tower
-	boxRGBA(surface, x + direction * size, y - size * 3 / 4,
-		x + direction * size * 2, y - size / 4,
-		(Uint8)(red * 0.85), (Uint8)(green * 0.85), (Uint8)(blue * 0.85), alpha);
-	// Engine glow
-	for(int engine = -1; engine <= 1; engine++) {
-		filledCircleRGBA(surface, tail_x, y + engine * size / 5, size / 8,
-			95, 190, 225, (Uint8)(alpha * 0.8));
-	}
 }
 
 static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale) {
@@ -815,299 +540,6 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 				255, 255, 250, (Uint8)(meteor_alpha * 1.2));
 		}
 	}
-}
-
-static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 60000;
-	const Uint32 duration = 14000;
-	Uint32 phase = ticks % cycle;
-	if(phase >= duration) return;
-
-	int size = scale / 170;
-	if(size < 4) size = 4;
-	double fade = smooth_step(0.0, 900.0, phase)
-		* (1.0 - smooth_step(duration - 1100.0, duration, phase));
-	double progress = (double)phase / duration;
-	int left_x = (int)(-size + progress * (surface->w + 2.0 * size));
-	int right_x = surface->w - left_x;
-	int center_y = surface->h * 17 / 100;
-	int arc = (int)(sin(progress * 6.28318530718) * scale * 0.018);
-	int maneuver = (int)(sin(progress * 12.56637061436) * scale * 0.014);
-	int left_y = center_y + arc + maneuver;
-	int right_y = center_y - arc - maneuver;
-	Uint8 alpha = (Uint8)(100 * fade);
-
-	draw_battle_ship(surface, left_x, left_y, size, 1, 105, 163, 183, alpha);
-	draw_battle_ship(surface, right_x, right_y, size, -1, 177, 130, 102, alpha);
-
-	Uint32 volley_phase = phase % 2600;
-	if(volley_phase < 300 && progress > 0.08 && progress < 0.94) {
-		int bolt_length = scale / 18;
-		if(bolt_length < 12) bolt_length = 12;
-		Uint8 bolt_alpha = (Uint8)(alpha * 0.8);
-		thickLineRGBA(surface, left_x + size, left_y,
-			left_x + size + bolt_length, left_y - size / 3,
-			1, 143, 204, 224, bolt_alpha);
-		thickLineRGBA(surface, right_x - size, right_y,
-			right_x - size - bolt_length, right_y + size / 3,
-			1, 220, 164, 126, bolt_alpha);
-	}
-	if(volley_phase > 1850 && volley_phase < 2250) {
-		double hit_progress = (double)(volley_phase - 1850) / 400.0;
-		int impact_x = surface->w / 2
-			+ (int)(sin(phase / 1700.0) * scale * 0.045);
-		int impact_y = center_y + (int)(sin(phase / 950.0) * scale * 0.025);
-		Uint8 impact_alpha = (Uint8)(alpha * (1.0 - hit_progress));
-		int radius = size / 2 + (int)(size * hit_progress);
-		filledCircleRGBA(surface, impact_x, impact_y, radius,
-			219, 158, 111, (Uint8)(impact_alpha * 0.65));
-		filledCircleRGBA(surface, impact_x, impact_y, size / 4,
-			238, 216, 177, impact_alpha);
-	}
-}
-
-static bool render_background_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 90000;
-	const Uint32 duration = 26000;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	if(phase >= duration) return false;
-
-	int size = scale / 170;
-	if(size < 4) size = 4;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	if(seed % 4 != 0) return false;
-	int winner = seed & 1;
-	double fade = smooth_step(0.0, 900.0, phase)
-		* (1.0 - smooth_step(duration - 1700.0, duration, phase));
-	double progress = (double)phase / duration;
-	double approach = smooth_step(0.04, 0.34, progress);
-	double withdrawal = smooth_step(0.80, 0.98, progress);
-	int center_y = surface->h * 18 / 100;
-	int left_x = (int)(-size * 4 + approach * (surface->w * 0.38 + size * 4)
-		- (winner ? withdrawal * surface->w * 0.60 : 0));
-	int right_x = (int)(surface->w + size * 4
-		- approach * (surface->w * 0.38 + size * 4)
-		+ (winner == 0 ? withdrawal * surface->w * 0.60 : 0));
-	int left_count = 2 + (seed >> 5) % 3;
-	int right_count = 2 + (seed >> 9) % 3;
-	int arc = (int)(sin(ticks / 1750.0) * scale * 0.010);
-	Uint8 alpha = (Uint8)(100 * fade);
-
-	for(int side = 0; side < 2; side++) {
-		int direction = side == 0 ? 1 : -1;
-		int count = side == 0 ? left_count : right_count;
-		int anchor_x = side == 0 ? left_x : right_x;
-		int side_y = center_y + (side == 0 ? arc : -arc);
-		Uint8 red = side == 0 ? 105 : 177;
-		Uint8 green = side == 0 ? 163 : 130;
-		Uint8 blue = side == 0 ? 183 : 102;
-		for(int ship = 0; ship < count; ship++) {
-			int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
-			int ship_x = anchor_x + direction * ship * size * 2
-				+ (int)(sin(ticks / (620.0 + ship * 150) + side * 2.0) * size * 0.7);
-			int ship_y = side_y + lane * scale / 34
-				+ (int)(sin(ticks / (410.0 + ship * 93) + ship) * size * 0.7);
-			unsigned int type = seed >> (ship + side * 5);
-			if(ship == 0 && (type & 1)) {
-				draw_cruiser(surface, ship_x, ship_y, size * 2, direction,
-					red, green, blue, alpha);
-			} else if(type % 3 == 0) {
-				draw_frigate(surface, ship_x, ship_y, size, direction,
-					red, green, blue, alpha);
-			} else {
-				draw_battle_ship(surface, ship_x, ship_y,
-					size + (ship % 2), direction, red, green, blue, alpha);
-			}
-		}
-	}
-
-	Uint32 volley_phase = (phase + (seed >> 16)) % 2100;
-	if(volley_phase < 240 && progress > 0.15 && progress < 0.86) {
-		double shot_progress = (double)volley_phase / 240.0;
-		for(int bolt = 0; bolt < 3; bolt++) {
-			int lane_y = center_y + (bolt - 1) * scale / 36;
-			int shot_x = left_x + size * 3
-				+ (int)((right_x - left_x - size * 6) * shot_progress);
-			int shot_y = lane_y + (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 42);
-			thickLineRGBA(surface, shot_x - size, shot_y, shot_x, shot_y,
-				2, 139, 208, 235, (Uint8)(alpha * 0.95));
-			shot_x = right_x - size * 3
-				- (int)((right_x - left_x - size * 6) * shot_progress);
-			shot_y = lane_y - (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 42);
-			thickLineRGBA(surface, shot_x + size, shot_y, shot_x, shot_y,
-				2, 245, 164, 112, (Uint8)(alpha * 0.95));
-		}
-	}
-	if(progress > 0.24 && progress < 0.84 && (phase % 2500) < 240) {
-		double blast = 1.0 - (phase % 2500) / 240.0;
-		int impact_x = (winner == 0 ? right_x : left_x)
-				+ (int)(sin(ticks / 510.0) * scale * 0.015);
-		int impact_y = center_y + (int)(cos(ticks / 390.0) * scale * 0.012);
-		int radius = size / 2 + (int)(size * (1.0 - blast));
-		Uint8 impact_alpha = (Uint8)(125 * fade * blast);
-		filledCircleRGBA(surface, impact_x, impact_y, radius,
-			230, 128, 79, impact_alpha);
-		circleRGBA(surface, impact_x, impact_y, radius + size / 2,
-			255, 202, 139, (Uint8)(impact_alpha * 0.8));
-	}
-	return true;
-}
-
-static bool render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 240000;
-	const Uint32 duration = 60000;
-	static Uint32 session_seed;
-	static bool seed_initialized = false;
-	Uint32 phase = ticks % cycle;
-	if(phase >= duration) return false;
-
-	if(!seed_initialized) {
-		session_seed = (Uint32)time(NULL);
-		seed_initialized = true;
-	}
-	Uint32 encounter = ticks / cycle;
-	Uint32 seed = encounter * 2654435761u + session_seed + 0x9e3779b9u;
-	if(seed % 3 != 0) return false;
-	int winner = (seed ^ (seed >> 13) ^ (seed >> 23)) & 1;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 1400.0, phase)
-		* (1.0 - smooth_step(duration - 2200.0, duration, phase));
-	double approach = smooth_step(0.04, 0.31, progress);
-	double retreat = smooth_step(0.78, 0.97, progress);
-	double defeat = smooth_step(0.48, 0.84, progress);
-	int size = scale / 72;
-	if(size < 10) size = 10;
-	int fighter_size = size / 3;
-	if(fighter_size < 5) fighter_size = 5;
-	double left_hold = surface->w * (0.37 + 0.008 * sin(ticks / 3600.0));
-	double right_hold = surface->w * (0.63 + 0.008 * sin(ticks / 3900.0 + 1.7));
-	int left_x = (int)(-size * 6 + approach * (left_hold + size * 6)
-		- (winner == 0 ? 0 : retreat * surface->w * 0.62));
-	int right_x = (int)(surface->w + size * 6
-		- approach * (surface->w - right_hold + size * 6)
-		+ (winner == 1 ? 0 : retreat * surface->w * 0.62));
-	int center_y = surface->h * 19 / 100;
-	int arc = (int)(sin(ticks / 1900.0 + progress * 8.0) * scale * 0.010);
-	int left_count = 3 + (seed >> 4) % 4;
-	int right_count = 3 + (seed >> 12) % 4;
-	Uint8 left_alpha = (Uint8)(96 * fade * (winner == 0 ? 1.0 : 1.0 - defeat * 0.75));
-	Uint8 right_alpha = (Uint8)(96 * fade * (winner == 1 ? 1.0 : 1.0 - defeat * 0.75));
-
-	for(int side = 0; side < 2; side++) {
-		int direction = side == 0 ? 1 : -1;
-		int count = side == 0 ? left_count : right_count;
-		int anchor_x = side == 0 ? left_x : right_x;
-		int side_arc = side == 0 ? arc : -arc;
-		int red = side == 0 ? 100 : 170;
-		int green = side == 0 ? 147 : 126;
-		int blue = side == 0 ? 167 : 101;
-		Uint8 side_alpha = side == 0 ? left_alpha : right_alpha;
-
-		for(int ship = 0; ship < count; ship++) {
-			int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
-			int offset = direction * ((ship + 1) / 2) * size * 3;
-			int weave = (int)(sin(ticks / (510.0 + ship * 127)
-				+ ship * 1.8 + side * 2.4) * scale * 0.009);
-			int ship_x = anchor_x + offset + weave;
-			int ship_y = center_y + side_arc + lane * scale / 30
-				+ (int)(sin(ticks / (370.0 + ship * 83) + ship * 1.3) * size * 0.75);
-			unsigned int type = seed >> ((ship * 3 + side * 7) % 24);
-			if(ship == 0 && ((seed >> (side + 2)) & 1)) {
-				draw_cruiser(surface, ship_x, ship_y, size * 2, direction,
-					red, green, blue, side_alpha);
-			} else if(ship == 0 && ((seed >> (side + 4)) & 1)) {
-				draw_carrier(surface, ship_x, ship_y, size * 2, direction,
-					red, green, blue, side_alpha);
-			} else if(type % 3 == 0) {
-				draw_frigate(surface, ship_x, ship_y, size, direction,
-					red, green, blue, side_alpha);
-			} else {
-				draw_battle_ship(surface, ship_x, ship_y,
-					fighter_size + (ship % 3 == 0 ? 2 : 0), direction,
-					red, green, blue, side_alpha);
-			}
-		}
-	}
-
-	double reinforcement = smooth_step(0.36, 0.45, progress)
-		* (1.0 - smooth_step(0.70, 0.79, progress));
-	if(reinforcement > 0.0) {
-		int reserves = 1 + (seed >> 20) % 3;
-		for(int side = 0; side < 2; side++) {
-			int direction = side == 0 ? 1 : -1;
-			int anchor_x = side == 0 ? left_x : right_x;
-			int red = side == 0 ? 100 : 170;
-			int green = side == 0 ? 147 : 126;
-			int blue = side == 0 ? 167 : 101;
-			for(int ship = 0; ship < reserves; ship++) {
-				int x = anchor_x - direction * (int)(surface->w * 0.16 * (1.0 - reinforcement))
-					- direction * ship * fighter_size * 3;
-				int y = center_y + (side == 0 ? arc : -arc)
-					+ (ship - reserves / 2) * scale / 25;
-				draw_battle_ship(surface, x, y, fighter_size, direction,
-					red, green, blue, (Uint8)(85 * fade * reinforcement));
-			}
-		}
-	}
-
-	// Fighter launch: small craft stream out from the carriers mid-battle.
-	double launch = smooth_step(0.20, 0.30, progress)
-		* (1.0 - smooth_step(0.62, 0.74, progress));
-	if(launch > 0.0) {
-		for(int side = 0; side < 2; side++) {
-			int direction = side == 0 ? 1 : -1;
-			int anchor_x = side == 0 ? left_x : right_x;
-			int red = side == 0 ? 100 : 170;
-			int green = side == 0 ? 147 : 126;
-			int blue = side == 0 ? 167 : 101;
-			for(int fighter = 0; fighter < 4; fighter++) {
-				double fighter_progress = fmod(launch * 1.6 + fighter * 0.25, 1.0);
-				int x = anchor_x + direction * (int)(fighter_progress * surface->w * 0.30);
-				int y = center_y + (side == 0 ? arc : -arc)
-					+ (fighter - 2) * scale / 22
-					+ (int)(sin(ticks / 300.0 + fighter * 1.7) * size * 0.5);
-				Uint8 fighter_alpha = (Uint8)(90 * fade * launch
-					* (1.0 - fighter_progress * 0.6));
-				draw_battle_ship(surface, x, y, fighter_size / 2, direction,
-					red, green, blue, fighter_alpha);
-			}
-		}
-	}
-
-	Uint32 volley_phase = (phase + (seed >> 9)) % 1800;
-	if(volley_phase < 280 && progress > 0.14 && progress < 0.88) {
-		double shot_progress = (double)volley_phase / 280.0;
-		for(int bolt = 0; bolt < 4; bolt++) {
-			int lane_y = center_y + (bolt - 1) * scale / 34;
-			int shot_x = left_x + size * 3
-				+ (int)((right_x - left_x - size * 6) * shot_progress);
-			int shot_y = lane_y + (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 38);
-			thickLineRGBA(surface, shot_x - size * 2, shot_y, shot_x, shot_y,
-				2, 135, 200, 230, (Uint8)(92 * fade));
-			shot_x = right_x - size * 3
-				- (int)((right_x - left_x - size * 6) * shot_progress);
-			shot_y = lane_y - (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 38);
-			thickLineRGBA(surface, shot_x + size * 2, shot_y, shot_x, shot_y,
-				2, 239, 154, 108, (Uint8)(92 * fade));
-		}
-	}
-
-	Uint32 impact_phase = (phase + (seed >> 16)) % 2300;
-	if(progress > 0.22 && progress < 0.86 && impact_phase < 300) {
-		unsigned int blast_seed = seed ^ 0xa511e9b3u ^ (phase / 450 * 0x9e3779b9u);
-		int loser_x = winner == 0 ? right_x : left_x;
-		int blast_x = loser_x + (int)(blast_seed % (unsigned int)(size * 10 + 1)) - size * 5;
-		int blast_y = center_y + (int)((blast_seed >> 8) % (unsigned int)(scale / 10 + 1))
-			- scale / 20;
-		int blast_radius = size / 3 + (int)(size * impact_phase / 900.0);
-		Uint8 blast_alpha = (Uint8)(130 * fade * (1.0 - impact_phase / 300.0));
-		filledCircleRGBA(surface, blast_x, blast_y, blast_radius,
-			225, 119, 72, blast_alpha);
-		circleRGBA(surface, blast_x, blast_y, blast_radius + size / 2,
-			255, 201, 137, (Uint8)(blast_alpha * 0.8));
-	}
-	return true;
 }
 
 // Defined further down; declared here so the long scenes can use the
@@ -2115,50 +1547,68 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 		return;
 	}
 
+	// The common events are the ones seen most often, so they carry the tone:
+	// a point of light, a few birds, a meteor, a wisp of high cloud. Nothing
+	// here has a hull, a cockpit or a face.
 	switch(kind % 4) {
 		case 0: {
-			int pulse_radius = size + (int)(progress * size * 2);
-			filledCircleRGBA(surface, x, y, size / 2 + 1,
-				245, 233, 207, alpha);
-			circleRGBA(surface, x, y, pulse_radius,
-				162, 193, 213, (Uint8)(alpha * 0.72));
-			for(int ray = 0; ray < 8; ray++) {
-				double angle = ray * 0.78539816339 + progress;
-				int ray_x = x + (int)(cos(angle) * pulse_radius * 1.7);
-				int ray_y = y + (int)(sin(angle) * pulse_radius * 1.7);
-				thickLineRGBA(surface, x, y, ray_x, ray_y, 1,
-					180, 203, 220, (Uint8)(alpha * 0.35));
+			// A single point of light crossing the sky, with a soft halo and a
+			// short fading wake. No shape is ever resolved.
+			soft_glow(surface, x, y, size * 3, 214, 226, 246,
+				(int)(alpha * 0.30));
+			soft_glow(surface, x, y, size, 236, 242, 252,
+				(int)(alpha * 0.55));
+			for(int step = 1; step <= 8; step++) {
+				int wx = x - direction * step * size;
+				thickLineRGBA(surface, wx, y, wx - direction, y, 1,
+					206, 218, 240,
+					(Uint8)(alpha * 0.30 * (1.0 - step / 9.0)));
+			}
+			filledCircleRGBA(surface, x, y, 1, 250, 252, 255, alpha);
+			break;
+		}
+		case 1: {
+			// Three gulls crossing in loose formation, each beating at its own
+			// rate so the group ripples rather than pulsing together.
+			for(int bird = 0; bird < 3; bird++) {
+				int bird_x = x - direction * bird * size * 3;
+				int bird_y = y + (bird - 1) * size * 2
+					+ (int)(sin(ticks / (900.0 + bird * 170) + bird * 2.1)
+						* size * 0.8);
+				double beat = sin(ticks / (150.0 + bird * 13) + bird * 2.3);
+				int flap = (int)((0.5 + 0.5 * beat) * (size + 1));
+				draw_bird(surface, bird_x, bird_y, size, flap);
 			}
 			break;
 		}
-		case 1:
-			draw_battle_ship(surface, x, y, size, direction,
-				181, 190, 198, alpha);
-			thickLineRGBA(surface, x - direction * size, y,
-				x - direction * size * 3, y + size / 3,
-				1, 161, 190, 218, (Uint8)(alpha * 0.55));
-			break;
 		case 2: {
-			int tail_x = x - direction * size * 4;
-			int tail_y = y - size;
-			thickLineRGBA(surface, x, y, tail_x, tail_y,
-				2, 194, 205, 218, alpha);
-			filledCircleRGBA(surface, x, y, size / 2,
-				227, 224, 211, alpha);
+			// A meteor: one continuous tapered streak that burns out, rather
+			// than a stack of segments that would read as dashes.
+			int length = size * 6;
+			double burn = sin(progress * 3.14159265359);
+			int head_x = x + direction * (int)(progress * length);
+			int head_y = y + (int)(progress * length * 9 / 16);
+			thickLineRGBA(surface, head_x - direction * length,
+				head_y - length * 9 / 16, head_x, head_y, 3,
+				198, 212, 238, (Uint8)(alpha * 0.16 * burn));
+			thickLineRGBA(surface, head_x - direction * length / 2,
+				head_y - length * 9 / 32, head_x, head_y, 2,
+				216, 228, 248, (Uint8)(alpha * 0.34 * burn));
+			thickLineRGBA(surface, head_x - direction * length / 4,
+				head_y - length * 9 / 64, head_x, head_y, 1,
+				238, 244, 255, (Uint8)(alpha * 0.60 * burn));
+			soft_glow(surface, head_x, head_y, size * 2, 228, 236, 252,
+				(int)(alpha * 0.40 * burn));
 			break;
 		}
 		default: {
-			int trail_x = x - direction * size * 4;
-			int trail_y = y + size;
-			thickLineRGBA(surface, trail_x, trail_y, x, y,
-				2, 202, 177, 130, alpha);
-			filledCircleRGBA(surface, x, y, size / 2,
-				235, 221, 185, alpha);
-			for(int fragment = 1; fragment <= 2; fragment++) {
-				int fragment_x = x - direction * size * (fragment + 1);
-				int fragment_y = y + size * fragment;
-				pixelRGBA(surface, fragment_x, fragment_y,
-					214, 193, 159, (Uint8)(alpha * 0.75));
+			// A wisp of high cloud drifting across, lit from one side. Soft
+			// edges only, so it never reads as a shape.
+			for(int puff = 0; puff < 4; puff++) {
+				int px = x - direction * puff * size * 4;
+				int py = y + (int)(sin(puff * 1.7 + ticks / 5200.0) * size);
+				soft_glow(surface, px, py, size * (3 + puff % 2),
+					176, 186, 206, (int)(alpha * 0.10));
 			}
 			break;
 		}
@@ -2380,8 +1830,6 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		(Uint8)tint_red, (Uint8)tint_green, (Uint8)tint_blue, tint_alpha);
 	render_fullscreen_event(surface, ticks, scale);
 	render_weather_effects(surface, ticks, &weather, scale);
-	render_alien_weather(surface, ticks, scale);
-	render_world_jump(surface, ticks, scale);
 	if(weather.sunshine > 0.01) {
 		int sun_x = surface->w * 3 / 4;
 		int sun_y = surface->h * 27 / 100;
@@ -2439,10 +1887,6 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 			}
 		}
 
-	if(!render_fleet_battle(surface, ticks, scale)
-		&& !render_background_battle(surface, ticks, scale)) {
-		render_battle_flyby(surface, ticks, scale);
-	}
 	render_rare_sky_event(surface, ticks, scale);
 	render_long_scene(surface, ticks, scale);
 
