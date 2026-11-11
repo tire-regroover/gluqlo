@@ -1783,10 +1783,28 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 					}
 				}
 
-				double far_edge = 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
-				double middle_edge = 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
-				double near_edge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-				double ground_noise = smooth_noise(nx * 28.0, ny * 32.0, 1237);
+				// Ridge lines need enough horizontal frequency to undulate. At
+				// 3-4 cells across the frame they collapse into a straight
+				// horizontal seam, which is what made the horizon read as a
+				// banded slab.
+				double far_edge = 0.68
+					+ (smooth_noise(nx * 11.0, 1.0, 907) - 0.5) * 0.16
+					+ (smooth_noise(nx * 29.0, 4.0, 941) - 0.5) * 0.05;
+				double middle_edge = 0.79
+					+ (smooth_noise(nx * 14.0 + 8.0, 2.0, 1013) - 0.5) * 0.13
+					+ (smooth_noise(nx * 37.0, 5.0, 1051) - 0.5) * 0.04;
+				double near_edge = 0.88
+					+ (smooth_noise(nx * 18.0 - 3.0, 3.0, 1123) - 0.5) * 0.11
+					+ (smooth_noise(nx * 47.0, 6.0, 1153) - 0.5) * 0.035;
+				// Two octaves of ground texture. A single low-frequency field
+				// stretched over the lower third reads as a flat slab, so the
+				// fine octave carries the visible grain.
+				double ground_coarse = smooth_noise(nx * 22.0, ny * 26.0, 1237);
+				double ground_fine = smooth_noise(nx * 90.0, ny * 110.0, 1291);
+				double ground_noise = ground_coarse * 0.55 + ground_fine * 0.45;
+				// Depth: the ground darkens toward the bottom of the frame, so
+				// the foreground recedes instead of ending in a flat wall.
+				double depth = smooth_step(0.62, 1.0, ny);
 				double far_cover = smooth_step(far_edge - 0.014, far_edge + 0.014, ny);
 				red = blend_channel(red, (Uint8)(35 + 17 * ground_noise), far_cover);
 				green = blend_channel(green, (Uint8)(44 + 21 * ground_noise), far_cover);
@@ -1799,6 +1817,12 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 				red = blend_channel(red, (Uint8)(9 + 8 * ground_noise), near_cover);
 				green = blend_channel(green, (Uint8)(17 + 10 * ground_noise), near_cover);
 				blue = blend_channel(blue, (Uint8)(25 + 12 * ground_noise), near_cover);
+				// Apply the depth falloff only where ground is present, so the
+				// sky is untouched.
+				double ground_present = far_cover;
+				red = blend_channel(red, (Uint8)(red * 0.45), depth * ground_present);
+				green = blend_channel(green, (Uint8)(green * 0.45), depth * ground_present);
+				blue = blend_channel(blue, (Uint8)(blue * 0.50), depth * ground_present);
 
 				Uint32 pixel = SDL_MapRGB(surface->format, red, green, blue);
 				int block_width = surface->w - x < 4 ? surface->w - x : 4;
@@ -1924,10 +1948,11 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 			(Uint8)(35 + 30 * (0.5 + 0.5 * sin(ticks / (230.0 + i * 31) + i))));
 	}
 
-	// Autumn leaves: a distinct seasonal feature, denser and with a small
-	// leaf silhouette so autumn reads clearly on its own.
+	// Autumn: leaf litter drifting on the wind. Drawn as small soft motes with
+	// a faint warm tint rather than bright dots, so they read as debris in the
+	// air instead of embers.
 	double autumn_strength = weather.season[2];
-	int autumn = (int)(autumn_strength * 46);
+	int autumn = (int)(autumn_strength * 34);
 	for(int i = 0; i < autumn; i++) {
 		unsigned int seed = (unsigned int)i * 2246822519u + 3266489917u;
 		int drift = (int)(ticks / (26 + i % 5 * 7));
@@ -1935,16 +1960,18 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		int x = (seed + drift) % surface->w;
 		int y = (seed / 11 + fall) % surface->h;
 		int sway = (int)(sin(ticks / (300.0 + i % 7 * 40) + i * 1.7) * scale * 0.016);
-		Uint8 alpha = (Uint8)(70 + 110 * autumn_strength);
-		int leaf = 2 + i % 3;
-		int tilt = (i & 1) ? sway / 2 : -sway / 2;
-		Uint8 lr = (Uint8)(150 + (i * 37) % 80);
-		Uint8 lg = (Uint8)(58 + (i * 23) % 55);
-		Uint8 lb = (Uint8)(28 + (i * 17) % 35);
-		thickLineRGBA(surface, x + sway, y, x + sway + tilt, y + leaf,
-			2, lr, lg, lb, alpha);
-		filledCircleRGBA(surface, x + sway, y, leaf, lr, lg, lb,
-			(Uint8)(alpha * 0.85));
+		// Faint, and dimmer the further it is from the viewer.
+		Uint8 alpha = (Uint8)(26 + 44 * autumn_strength);
+		Uint8 lr = (Uint8)(132 + (i * 37) % 46);
+		Uint8 lg = (Uint8)(74 + (i * 23) % 34);
+		Uint8 lb = (Uint8)(44 + (i * 17) % 24);
+		int radius = 1 + i % 2;
+		// A soft mote: a dim core with a single faint halo pixel, no hard edge.
+		filledCircleRGBA(surface, x + sway, y, radius, lr, lg, lb, alpha);
+		pixelRGBA(surface, x + sway + radius, y, lr, lg, lb,
+			(Uint8)(alpha / 3));
+		pixelRGBA(surface, x + sway, y + radius, lr, lg, lb,
+			(Uint8)(alpha / 3));
 	}
 
 	unsigned int rain_seed = 0x7f4a7c15u;
