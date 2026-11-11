@@ -2298,32 +2298,6 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 	render_rare_sky_event(surface, ticks, scale);
 	render_long_scene(surface, ticks, scale);
 
-	// Autumn: leaf litter drifting on the wind. Drawn as small soft motes with
-	// a faint warm tint rather than bright dots, so they read as debris in the
-	// air instead of embers.
-	double autumn_strength = weather.season[2];
-	int autumn = (int)(autumn_strength * 34);
-	for(int i = 0; i < autumn; i++) {
-		unsigned int seed = (unsigned int)i * 2246822519u + 3266489917u;
-		int drift = (int)(ticks / (26 + i % 5 * 7));
-		int fall = (int)(ticks * (3 + i % 4) / 46);
-		int x = (seed + drift) % surface->w;
-		int y = (seed / 11 + fall) % surface->h;
-		int sway = (int)(sin(ticks / (300.0 + i % 7 * 40) + i * 1.7) * scale * 0.016);
-		// Faint, and dimmer the further it is from the viewer.
-		Uint8 alpha = (Uint8)(26 + 44 * autumn_strength);
-		Uint8 lr = (Uint8)(132 + (i * 37) % 46);
-		Uint8 lg = (Uint8)(74 + (i * 23) % 34);
-		Uint8 lb = (Uint8)(44 + (i * 17) % 24);
-		int radius = 1 + i % 2;
-		// A soft mote: a dim core with a single faint halo pixel, no hard edge.
-		filledCircleRGBA(surface, x + sway, y, radius, lr, lg, lb, alpha);
-		pixelRGBA(surface, x + sway + radius, y, lr, lg, lb,
-			(Uint8)(alpha / 3));
-		pixelRGBA(surface, x + sway, y + radius, lr, lg, lb,
-			(Uint8)(alpha / 3));
-	}
-
 	unsigned int rain_seed = 0x7f4a7c15u;
 	double storm_strength = smooth_step(0.25, 0.75, weather.lightning);
 	double rain_share = 1.0 - weather.snow * 0.45;
