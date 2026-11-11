@@ -622,19 +622,36 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 			}
 		}
 	} else if(kind == 2) {
+		// A wildfire burning somewhere beyond the ridge. Only the glow and the
+		// smoke are visible; no flame is ever resolved at this distance.
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			135, 57, 27, (Uint8)(17 * fade));
-		for(int fire = 0; fire < 12; fire++) {
-			int fire_x = surface->w * (8 + fire * 7) / 100;
-			double nx = (double)fire_x / surface->w;
-			double ridge = 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
-			int fire_y = (int)(surface->h * ridge);
-			int flicker = (int)(fabs(sin(ticks / (170.0 + fire * 11) + fire)) * scale * 0.025);
-			thickLineRGBA(surface, fire_x, fire_y, fire_x + 2, fire_y - flicker,
-				2, 238, 112, 55, (Uint8)(120 * fade));
-			filledCircleRGBA(surface, fire_x + 4, fire_y - flicker, 2,
-				255, 192, 106, (Uint8)(145 * fade));
+		int fire_x = surface->w * (24 + (seed >> 8) % 52) / 100;
+		double nx = (double)fire_x / surface->w;
+		double ridge = 0.79
+			+ (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
+		int fire_y = (int)(surface->h * ridge);
+		// Slow breathing rather than a flicker, so it reads as a large fire
+		// seen from far away.
+		double breathe = 0.72 + 0.28 * sin(ticks / 3400.0);
+		soft_glow(surface, fire_x, fire_y, scale / 4,
+			226, 118, 58, (int)(52 * fade * breathe));
+		soft_glow(surface, fire_x, fire_y, scale / 9,
+			246, 168, 92, (int)(44 * fade * breathe));
+		soft_glow(surface, fire_x, fire_y - scale / 40, scale / 22,
+			255, 214, 150, (int)(30 * fade * breathe));
+		// Smoke lifting off the fire and drifting with the wind.
+		for(int plume = 0; plume < 7; plume++) {
+			double t = (double)plume / 6;
+			int px = fire_x + (int)(sin(t * 2.6 + ticks / 5200.0)
+				* scale * 0.05 * t);
+			int py = fire_y - (int)(t * scale * 0.30);
+			soft_glow(surface, px, py, (int)(scale / 16 * (1.0 + t * 0.8)),
+				74, 66, 62, (int)(26 * fade * (1.0 - t * 0.5)));
 		}
+		// The lit underside of the smoke, close to the source.
+		soft_band(surface, fire_y - scale / 12, fire_y + scale / 40,
+			198, 122, 74, (int)(30 * fade * breathe));
 	} else if(kind == 3) {
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			36, 57, 78, (Uint8)(24 * fade));
