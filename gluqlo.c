@@ -18,6 +18,8 @@
 * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
+#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <X11/Xlib.h>
@@ -60,10 +62,10 @@ TTF_Font *font_time = NULL;
 TTF_Font *font_mode = NULL;
 TTF_Font *font_date = NULL;
 
-const SDL_Color FONT_COLOR = { 0xda, 0xda, 0xe2 };
-const SDL_Color DATE_COLOR = { 0xc6, 0xc2, 0xcf };
-const SDL_Color BACKGROUND_COLOR = { 0x12, 0x14, 0x1d };
-const SDL_Color CARD_BORDER_COLOR = { 0x37, 0x3d, 0x4e };
+const SDL_Color FONT_COLOR = { 0xda, 0xda, 0xe2, 0 };
+const SDL_Color DATE_COLOR = { 0xc6, 0xc2, 0xcf, 0 };
+const SDL_Color BACKGROUND_COLOR = { 0x12, 0x14, 0x1d, 0 };
+const SDL_Color CARD_BORDER_COLOR = { 0x37, 0x3d, 0x4e, 0 };
 
 SDL_Surface *screen;
 
@@ -73,8 +75,6 @@ SDL_Rect minBackground;
 SDL_Rect bgrect;
 SDL_Surface *bg;
 static SDL_Surface *backdrop_base;
-static SDL_Surface *digit_glyphs[10];
-static SDL_Surface *ampm_glyphs[2];
 
 // draw rounded box
 // see http://lists.libsdl.org/pipermail/sdl-libsdl.org/2006-December/058868.html
@@ -139,35 +139,15 @@ void fill_rounded_box_b(SDL_Surface* dst, SDL_Rect *coords, int r, SDL_Color col
 }
 
 void render_ampm(SDL_Surface *surface, SDL_Rect *rect, int pm) {
+	char mode[3];
 	SDL_Rect coords;
-	SDL_Surface *ampm = ampm_glyphs[pm ? 1 : 0];
-	if(!ampm) return;
+	snprintf(mode, 3, "%cM", pm ? 'P' : 'A');
+	SDL_Surface *ampm = TTF_RenderText_Blended(font_mode, mode, FONT_COLOR);
 	int offset = rect->h * 0.127;
 	coords.x = rect->x + rect->h * 0.07;
 	coords.y = rect->y + (pm ? rect->h - offset - ampm->h : offset);
 	SDL_BlitSurface(ampm, 0, surface, &coords);
-}
-
-// Pre-render the clock digits and AM/PM labels once, since the time glyphs
-// don't change between ambient frames. TTF_RenderGlyph_Blended is expensive
-// to call every frame.
-static void init_glyph_cache() {
-	for(int i = 0; i < 10; i++) {
-		digit_glyphs[i] = TTF_RenderGlyph_Blended(font_time, '0' + i, FONT_COLOR);
-	}
-	ampm_glyphs[0] = TTF_RenderText_Blended(font_mode, "AM", FONT_COLOR);
-	ampm_glyphs[1] = TTF_RenderText_Blended(font_mode, "PM", FONT_COLOR);
-}
-
-static void free_glyph_cache() {
-	for(int i = 0; i < 10; i++) {
-		if(digit_glyphs[i]) SDL_FreeSurface(digit_glyphs[i]);
-		digit_glyphs[i] = NULL;
-	}
-	for(int i = 0; i < 2; i++) {
-		if(ampm_glyphs[i]) SDL_FreeSurface(ampm_glyphs[i]);
-		ampm_glyphs[i] = NULL;
-	}
+	SDL_FreeSurface(ampm);
 }
 
 static double hash_noise(int x, int y, Uint32 seed) {
@@ -204,6 +184,257 @@ static double smooth_step(double edge0, double edge1, double value) {
 	return t * t * (3.0 - 2.0 * t);
 }
 
+// Height of the three ground ridges as a fraction of the screen height at
+// horizontal position nx (0..1). Effects use it to sit things on the ground.
+enum { RIDGE_FAR, RIDGE_MIDDLE, RIDGE_NEAR };
+
+static double ridge_height(int layer, double nx) {
+	switch(layer) {
+		case RIDGE_FAR:
+			return 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
+		case RIDGE_MIDDLE:
+			return 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
+		default:
+			return 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+	}
+}
+
+/*
+ * Scheduled effects
+ *
+ * Time is split into slots of `cycle` ms. Each slot gets a seed and may be
+ * gated off (it only runs when seed % gate == 0). When a slot is active the
+ * effect runs for `duration` ms (plus seeded jitter), either from the start
+ * of the slot or at a seeded offset inside it, fading in and out.
+ *
+ * Effects that share a non-zero `group` never overlap: when their runs
+ * collide, the one with the lowest `priority` number plays and the others
+ * skip that slot entirely (so nothing pops in half way through). `accept`
+ * lets an effect declare that a slot has nothing to show, which keeps empty
+ * slots from blocking other effects.
+ *
+ * Effects call effect_window() and draw only if it returns true. With
+ * `-effect NAME[:KIND]` only that effect runs, back to back, ignoring gates.
+ *
+ * To add an effect: write render_xxx() starting with effect_window(), add an
+ * EffectSpec below, add it to effect_table[], and call it from
+ * render_backdrop() (or render_clock() for overlays drawn over the cards).
+ */
+enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
+
+#define RARE_SKY_KINDS 43
+#define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
+
+typedef struct {
+	const char *name;
+	Uint32 cycle;          // slot length (ms)
+	int seed_style;        // 0: slot * 2246822519u + 3266489917u, 1: slot * 2654435761u + 0x9e3779b9u
+	Uint32 gate;           // run only in slots where seed % gate == 0 (0: every slot)
+	bool gate_after_mix;   // test the gate on the mixed seed instead of the raw one
+	Uint32 mix_mul;        // if non-zero, scramble the seed using this multiplier
+	Uint32 duration;       // base run time (ms)
+	Uint32 jitter;         // extra run time: (seed >> jitter_shift) % jitter
+	int jitter_shift;
+	bool random_start;     // start at a seeded offset in the slot instead of at its beginning
+	double fade_in;        // ms
+	double fade_out;       // ms
+	int kind_count;        // number of forceable kinds for -effect NAME:KIND (0: none)
+	int group;             // GROUP_*: effects in the same group never overlap
+	int priority;          // within a group the lowest number wins (keep unique per group)
+	bool (*accept)(Uint32 slot, Uint32 seed); // optional: false means this slot shows nothing
+} EffectSpec;
+
+typedef struct {
+	Uint32 slot;
+	Uint32 seed;
+	Uint32 phase;          // ms since the effect started
+	Uint32 duration;
+	double progress;       // phase / duration
+	double fade;           // 0..1 fade in/out factor
+} EffectWindow;
+
+typedef struct {
+	Uint32 seed;
+	Uint32 duration;
+	Uint64 start;          // absolute start time (ms)
+} EffectRun;
+
+// Rare sky kinds from RARE_SKY_CLASSIC_KINDS up are the rarer ones: only 1 slot in 7 shows them.
+static bool rare_sky_accept(Uint32 slot, Uint32 seed) {
+	int kind = (seed >> 24) % RARE_SKY_KINDS;
+	if(kind < RARE_SKY_CLASSIC_KINDS) return true;
+	return (slot * 2654435761u + 0x9e3779b9u) % 7 == 0;
+}
+
+// Fullscreen kinds 4 and 5 are deliberate quiet slots (they keep the effect rare).
+static bool fullscreen_accept(Uint32 slot, Uint32 seed) {
+	(void)slot;
+	return (seed >> 5) % 6 < 4;
+}
+
+static const EffectSpec EFFECT_ALIEN_WEATHER = {
+	"alien_weather", 300000, 0, 4, false, 2246822519u,
+	52000, 18000, 8, false, 5000, 7000, 5, GROUP_TAKEOVER, 1, NULL };
+static const EffectSpec EFFECT_WORLD_JUMP = {
+	"world_jump", 360000, 0, 5, false, 2654435761u,
+	7800, 0, 0, false, 350, 450, 4, GROUP_TAKEOVER, 0, NULL };
+static const EffectSpec EFFECT_LONG_SCENE = {
+	"long_scene", 210000, 0, 5, false, 2246822519u,
+	72000, 28000, 8, true, 6000, 7000, 5, GROUP_TAKEOVER, 2, NULL };
+static const EffectSpec EFFECT_FULLSCREEN = {
+	"fullscreen", 90000, 1, 0, false, 0,
+	6500, 4000, 9, true, 1300, 1200, 4, GROUP_TAKEOVER, 3, fullscreen_accept };
+static const EffectSpec EFFECT_FLEET_BATTLE = {
+	"fleet_battle", 240000, 1, 3, false, 0,
+	60000, 0, 0, false, 1400, 2200, 0, GROUP_SKY, 0, NULL };
+static const EffectSpec EFFECT_BACKGROUND_BATTLE = {
+	"background_battle", 90000, 1, 4, false, 0,
+	26000, 0, 0, false, 900, 1700, 0, GROUP_SKY, 1, NULL };
+static const EffectSpec EFFECT_RARE_SKY = {
+	"rare_sky", 48000, 0, 3, true, 2246822519u,
+	4200, 3200, 8, true, 350, 400, RARE_SKY_KINDS, GROUP_SKY, 2, rare_sky_accept };
+static const EffectSpec EFFECT_BATTLE_FLYBY = {
+	"battle_flyby", 60000, 1, 0, false, 0,
+	14000, 0, 0, false, 900, 1100, 0, GROUP_SKY, 3, NULL };
+static const EffectSpec EFFECT_FOREGROUND = {
+	"foreground", 180000, 1, 2, false, 2246822519u,
+	6500, 0, 0, false, 650, 900, 4, GROUP_NONE, 0, NULL };
+static const EffectSpec EFFECT_SCREEN_FADE = {
+	"screen_fade", 300000, 1, 4, false, 0,
+	12000, 0, 0, true, 1800, 1800, 0, GROUP_NONE, 0, NULL };
+
+static const EffectSpec *const effect_table[] = {
+	&EFFECT_ALIEN_WEATHER, &EFFECT_WORLD_JUMP, &EFFECT_LONG_SCENE,
+	&EFFECT_RARE_SKY, &EFFECT_FULLSCREEN, &EFFECT_FOREGROUND,
+	&EFFECT_SCREEN_FADE, &EFFECT_BATTLE_FLYBY, &EFFECT_BACKGROUND_BATTLE,
+	&EFFECT_FLEET_BATTLE
+};
+static const size_t effect_count = sizeof(effect_table) / sizeof(effect_table[0]);
+
+static const EffectSpec *forced_effect = NULL;
+static int forced_kind = -1;
+
+/*
+ * Scene time is the clock every effect, season and weather runs on. It is the
+ * SDL tick count plus a per-launch offset, so each launch starts at a
+ * different point of the season/weather/effect schedule. -seed N makes the
+ * offset reproducible; -effect NAME starts it at 0.
+ */
+static Uint32 scene_offset = 0;
+static const Uint32 SCENE_OFFSET_RANGE = 3600000;
+
+static Uint32 scene_time(void) {
+	return SDL_GetTicks() + scene_offset;
+}
+
+static Uint32 scene_offset_from_seed(Uint32 seed) {
+	seed ^= seed >> 16;
+	seed *= 2246822519u;
+	seed ^= seed >> 13;
+	return seed % SCENE_OFFSET_RANGE;
+}
+
+static Uint32 random_scene_offset(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
+	return scene_offset_from_seed((Uint32)now.tv_nsec ^ ((Uint32)now.tv_sec * 2654435761u));
+}
+
+static const EffectSpec *find_effect(const char *name) {
+	for(size_t i = 0; i < effect_count; i++) {
+		if(strcmp(effect_table[i]->name, name) == 0) return effect_table[i];
+	}
+	return NULL;
+}
+
+// Returns `kind`, or the kind requested with -effect NAME:KIND for this effect.
+static int effect_kind(const EffectSpec *spec, int kind) {
+	return (forced_effect == spec && forced_kind >= 0) ? forced_kind : kind;
+}
+
+// Slot length used by -effect NAME: back to back with a short pause.
+static Uint32 effect_cycle(const EffectSpec *spec, bool forced) {
+	return forced ? spec->duration + spec->jitter + 3000 : spec->cycle;
+}
+
+// Works out whether `slot` of `spec` runs, and when. Forced runs ignore gating.
+static bool effect_run(const EffectSpec *spec, Uint32 slot, bool forced, EffectRun *run) {
+	Uint32 cycle = effect_cycle(spec, forced);
+	Uint32 seed = spec->seed_style
+		? slot * 2654435761u + 0x9e3779b9u
+		: slot * 2246822519u + 3266489917u;
+	if(!forced && spec->gate && !spec->gate_after_mix && seed % spec->gate != 0) return false;
+	if(spec->mix_mul) {
+		seed ^= seed >> 15;
+		seed *= spec->mix_mul;
+		seed ^= seed >> 13;
+	}
+	if(!forced && spec->gate && spec->gate_after_mix && seed % spec->gate != 0) return false;
+	if(!forced && spec->accept && !spec->accept(slot, seed)) return false;
+
+	Uint32 duration = spec->duration;
+	if(spec->jitter) duration += (seed >> spec->jitter_shift) % spec->jitter;
+	Uint32 start = 0;
+	if(!forced && spec->random_start && cycle > duration) {
+		start = (seed >> 16) % (cycle - duration);
+	}
+	run->seed = seed;
+	run->duration = duration;
+	run->start = (Uint64)slot * cycle + start;
+	return true;
+}
+
+// True if a higher priority effect of the same group runs at any point during `run`.
+static bool effect_blocked(const EffectSpec *spec, const EffectRun *run) {
+	if(spec->group == GROUP_NONE) return false;
+	Uint64 end = run->start + run->duration;
+	for(size_t i = 0; i < effect_count; i++) {
+		const EffectSpec *other = effect_table[i];
+		if(other == spec || other->group != spec->group || other->priority >= spec->priority) continue;
+		// A run never leaves its own slot, so only the slots the window touches matter.
+		Uint64 first_slot = run->start / other->cycle;
+		Uint64 last_slot = (end - 1) / other->cycle;
+		for(Uint64 slot = first_slot; slot <= last_slot; slot++) {
+			EffectRun other_run;
+			if(effect_run(other, (Uint32)slot, false, &other_run)
+				&& other_run.start < end
+				&& other_run.start + other_run.duration > run->start
+				&& !effect_blocked(other, &other_run)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+static bool effect_window(const EffectSpec *spec, Uint32 ticks, EffectWindow *window) {
+	bool forced = forced_effect == spec;
+	if(forced_effect && !forced) return false;
+
+	Uint32 cycle = effect_cycle(spec, forced);
+	Uint32 slot = ticks / cycle;
+	EffectRun run;
+	if(!effect_run(spec, slot, forced, &run)) return false;
+	if(ticks < run.start || ticks >= run.start + run.duration) return false;
+	if(!forced && effect_blocked(spec, &run)) return false;
+
+	Uint32 phase = (Uint32)(ticks - run.start);
+	window->slot = slot;
+	window->seed = run.seed;
+	window->phase = phase;
+	window->duration = run.duration;
+	window->progress = (double)phase / run.duration;
+	window->fade = smooth_step(0.0, spec->fade_in, phase)
+		* (1.0 - smooth_step(run.duration - spec->fade_out, run.duration, phase));
+	return true;
+}
+
+// True while `spec` is drawing something at `ticks`.
+static bool effect_is_active(const EffectSpec *spec, Uint32 ticks) {
+	EffectWindow window;
+	return effect_window(spec, ticks, &window);
+}
+
 typedef struct {
 	double season[4];
 	double cloud;
@@ -216,6 +447,21 @@ typedef struct {
 	double aurora;
 	double palette[3];
 } SceneWeather;
+
+// Rain and snow must never fall together. When a change swaps one for the
+// other, the old one fades out over the first part of the change, the air is
+// dry for a moment, and only then does the new one fade in. Changes that keep
+// the same kind of precipitation (light rain to heavy rain) just blend.
+static double precipitation_level(const double *previous, const double *current,
+	int channel, int other_channel, double blend) {
+	double from = previous[channel];
+	double to = current[channel];
+	if(previous[other_channel] <= 0.02 && current[other_channel] <= 0.02) {
+		return from + (to - from) * blend;
+	}
+	return from * (1.0 - smooth_step(0.0, 0.42, blend))
+		+ to * smooth_step(0.58, 1.0, blend);
+}
 
 static SceneWeather get_scene_weather(Uint32 ticks) {
 	static const double weather_levels[][11] = {
@@ -234,6 +480,7 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	const Uint32 season_transition = 20000;
 	const Uint32 weather_duration = 65000;
 	const Uint32 weather_transition = 12000;
+	const int weather_count = sizeof(weather_levels) / sizeof(weather_levels[0]);
 	SceneWeather scene = { { 0.0, 0.0, 0.0, 0.0 },
 		0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, { 0.0, 0.0, 0.0 } };
 
@@ -245,38 +492,22 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	scene.season[season] = 1.0 - season_blend;
 	scene.season[(season + 1) % 4] = season_blend;
 
-	// Each season draws from its own pool of presets so that rain, snow and
-	// clear skies stay tied to the season instead of appearing at random.
-	static const int season_weather_pool[4][4] = {
-		{ 0, 2, 3, 9 },  // spring: clear, cloudy, light rain, fog
-		{ 0, 1, 4, 5 },  // summer: clear, sunset, heavy rain, thunderstorm
-		{ 2, 3, 4, 9 },  // autumn: cloudy, drizzle, rain, fog
-		{ 6, 7, 2, 8 }   // winter: light snow, blizzard, overcast, aurora
-	};
-	const int pool_size = 4;
-	int dominant = 0;
-	for(int i = 1; i < 4; i++) {
-		if(scene.season[i] > scene.season[dominant]) dominant = i;
-	}
-	const int *pool = season_weather_pool[dominant];
-
 	Uint32 weather_slot = ticks / weather_duration;
 	Uint32 current_seed = weather_slot * 2654435761u + 0x9e3779b9u;
 	Uint32 previous_seed = (weather_slot - 1) * 2246822519u + 3266489917u;
-	int current = pool[current_seed % pool_size];
-	int previous = pool[previous_seed % pool_size];
+	int current = current_seed % weather_count;
+	int previous = previous_seed % weather_count;
 	if(previous == current) {
-		previous = pool[(previous_seed % pool_size + 1
-			+ (current_seed >> 8) % (pool_size - 1)) % pool_size];
+		previous = (previous + 1 + (current_seed >> 8) % (weather_count - 1)) % weather_count;
 	}
 	Uint32 weather_phase = ticks % weather_duration;
 	double weather_blend = smooth_step(0.0, weather_transition, weather_phase);
 	scene.cloud = weather_levels[previous][0]
 		+ (weather_levels[current][0] - weather_levels[previous][0]) * weather_blend;
-	scene.rain = weather_levels[previous][1]
-		+ (weather_levels[current][1] - weather_levels[previous][1]) * weather_blend;
-	scene.snow = weather_levels[previous][2]
-		+ (weather_levels[current][2] - weather_levels[previous][2]) * weather_blend;
+	scene.rain = precipitation_level(weather_levels[previous], weather_levels[current],
+		1, 2, weather_blend);
+	scene.snow = precipitation_level(weather_levels[previous], weather_levels[current],
+		2, 1, weather_blend);
 	scene.sunshine = weather_levels[previous][3]
 		+ (weather_levels[current][3] - weather_levels[previous][3]) * weather_blend;
 	scene.fog = weather_levels[previous][4]
@@ -295,27 +526,32 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	return scene;
 }
 
-static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
-	const SceneWeather *weather, int scale) {
-	if(weather->aurora > 0.01) {
-		for(int band = 0; band < 3; band++) {
-			int previous_x = 0;
-			int previous_y = surface->h * (19 + band * 12) / 100;
-			for(int segment = 1; segment <= 24; segment++) {
-				int x = surface->w * segment / 24;
-				double nx = (double)x / surface->w;
-				int y = surface->h * (19 + band * 12) / 100
-					+ (int)(sin(nx * 6.28318530718 + ticks / (1100.0 + band * 270)
-						+ band * 1.9) * scale * (0.03 + band * 0.008));
-				Uint8 alpha = (Uint8)(weather->aurora * (28 - band * 5));
-				thickLineRGBA(surface, previous_x, previous_y, x, y, 2,
-					(Uint8)(70 + band * 24), (Uint8)(164 + band * 18),
-					(Uint8)(137 + band * 30), alpha);
-				previous_x = x;
-				previous_y = y;
-			}
+// Three drifting aurora ribbons; `strength` is 0..1. Used by the aurora weather
+// and by the fullscreen aurora event.
+static void draw_aurora(SDL_Surface *surface, Uint32 ticks, int scale, double strength) {
+	if(strength <= 0.01) return;
+	for(int band = 0; band < 3; band++) {
+		int previous_x = 0;
+		int previous_y = surface->h * (19 + band * 12) / 100;
+		for(int segment = 1; segment <= 24; segment++) {
+			int x = surface->w * segment / 24;
+			double nx = (double)x / surface->w;
+			int y = surface->h * (19 + band * 12) / 100
+				+ (int)(sin(nx * 6.28318530718 + ticks / (1100.0 + band * 270)
+					+ band * 1.9) * scale * (0.03 + band * 0.008));
+			Uint8 alpha = (Uint8)(strength * (28 - band * 5));
+			thickLineRGBA(surface, previous_x, previous_y, x, y, 2,
+				(Uint8)(70 + band * 24), (Uint8)(164 + band * 18),
+				(Uint8)(137 + band * 30), alpha);
+			previous_x = x;
+			previous_y = y;
 		}
 	}
+}
+
+static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
+	const SceneWeather *weather, int scale) {
+	draw_aurora(surface, ticks, scale, weather->aurora);
 
 	if(weather->fog > 0.01) {
 		for(int band = 0; band < 3; band++) {
@@ -357,139 +593,87 @@ static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
 			}
 		}
 	}
-
-	// Rainbow: appears when rain and sunshine overlap (sunshower).
-	if(weather->rain > 0.15 && weather->sunshine > 0.25) {
-		double rainbow_strength = weather->rain * weather->sunshine;
-		int rainbow_x = surface->w / 2;
-		int rainbow_y = surface->h * 68 / 100;
-		int base_radius = scale / 3;
-		static const Uint8 rainbow_colors[6][3] = {
-			{ 226, 66, 60 }, { 240, 150, 54 }, { 244, 218, 74 },
-			{ 96, 190, 96 }, { 74, 148, 226 }, { 150, 96, 210 }
-		};
-		for(int band = 0; band < 6; band++) {
-			int radius = base_radius + band * scale / 60;
-			Uint8 alpha = (Uint8)(rainbow_strength * (26 - band * 2));
-			arcRGBA(surface, rainbow_x, rainbow_y, radius, 180, 360,
-				rainbow_colors[band][0], rainbow_colors[band][1],
-				rainbow_colors[band][2], alpha);
-		}
-	}
-
-	// Hail: heavy rain produces fast-falling white pellets.
-	if(weather->rain > 0.55) {
-		int hail_count = (int)(surface->w * surface->h / 9000.0 * weather->rain);
-		if(hail_count > 220) hail_count = 220;
-		unsigned int hail_seed = ticks / 900 * 2654435761u + 0x9e3779b9u;
-		for(int i = 0; i < hail_count; i++) {
-			hail_seed = hail_seed * 1664525u + 1013904223u;
-			int start_x = hail_seed % surface->w;
-			hail_seed = hail_seed * 1664525u + 1013904223u;
-			int start_y = hail_seed % surface->h;
-			int speed = 14 + i % 6;
-			double travel = ticks * speed / 90.0;
-			int y = (start_y + (int)travel) % (surface->h + 8);
-			int x = (start_x + (int)(travel * 0.10)) % surface->w;
-			Uint8 alpha = (Uint8)(90 + (hail_seed >> 16) % 60);
-			filledCircleRGBA(surface, x, y, 1 + i % 2,
-				226, 232, 240, alpha);
-		}
-	}
 }
 
 static void render_world_jump(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 360000;
-	const Uint32 duration = 7800;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	if(seed % 5 != 0 || phase >= duration) return;
-	seed ^= seed >> 15;
-	seed *= 2654435761u;
-	seed ^= seed >> 13;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 350.0, phase)
-		* (1.0 - smooth_step(duration - 450.0, duration, phase));
-	int center_x = surface->w / 2 + (int)(sin(ticks / 115.0) * scale * 0.012);
-	int center_y = surface->h * 43 / 100;
-	double tunnel_open = sin(progress * 3.14159265359);
-	int portal_x_radius = scale * (0.045 + tunnel_open * 0.22);
-	int portal_y_radius = scale * (0.035 + tunnel_open * 0.15);
-	Uint8 tunnel_alpha = (Uint8)(118 * fade * (0.35 + tunnel_open * 0.65));
+		EffectWindow window;
+		if(!effect_window(&EFFECT_WORLD_JUMP, ticks, &window)) return;
+		Uint32 seed = window.seed;
+		Uint32 phase = window.phase;
+		double progress = window.progress;
+		double fade = window.fade;
+		int center_x = surface->w / 2 + (int)(sin(ticks / 115.0) * scale * 0.012);
+		int center_y = surface->h * 43 / 100;
+		double tunnel_open = sin(progress * 3.14159265359);
+		int portal_x_radius = scale * (0.045 + tunnel_open * 0.22);
+		int portal_y_radius = scale * (0.035 + tunnel_open * 0.15);
+		Uint8 tunnel_alpha = (Uint8)(118 * fade * (0.35 + tunnel_open * 0.65));
 
-	for(int ring = 0; ring < 9; ring++) {
-		double ring_scale = 0.34 + ring * 0.105;
-		int radius_x = (int)(portal_x_radius * ring_scale);
-		int radius_y = (int)(portal_y_radius * ring_scale);
-		Uint8 ring_alpha = (Uint8)(tunnel_alpha * (1.0 - ring * 0.065));
-		ellipseRGBA(surface, center_x, center_y, radius_x, radius_y,
-			(Uint8)(100 + ring * 14), (Uint8)(151 + ring * 9),
-			(Uint8)(218 + ring * 4), ring_alpha);
-	}
-	for(int streak = 0; streak < 48; streak++) {
-		unsigned int streak_seed = seed + streak * 2246822519u;
-		double angle = (streak_seed % 6283) / 1000.0 + ticks / 700.0;
-		double travel = fmod((streak_seed >> 8) / 4294967295.0 + progress * 1.8, 1.0);
-		double distance = portal_x_radius + travel * scale * 0.38;
-		int star_x = center_x + (int)(cos(angle) * distance);
-		int star_y = center_y + (int)(sin(angle) * distance * 0.68);
-		int tail_x = center_x + (int)(cos(angle) * (distance - scale * 0.035));
-		int tail_y = center_y + (int)(sin(angle) * (distance - scale * 0.035) * 0.68);
-		thickLineRGBA(surface, tail_x, tail_y, star_x, star_y, 1,
-			(Uint8)(155 + streak % 5 * 18), (Uint8)(182 + streak % 4 * 16),
-			235, (Uint8)(tunnel_alpha * 0.62));
-	}
+		for(int ring = 0; ring < 9; ring++) {
+			double ring_scale = 0.34 + ring * 0.105;
+			int radius_x = (int)(portal_x_radius * ring_scale);
+			int radius_y = (int)(portal_y_radius * ring_scale);
+			Uint8 ring_alpha = (Uint8)(tunnel_alpha * (1.0 - ring * 0.065));
+			ellipseRGBA(surface, center_x, center_y, radius_x, radius_y,
+				(Uint8)(100 + ring * 14), (Uint8)(151 + ring * 9),
+				(Uint8)(218 + ring * 4), ring_alpha);
+		}
+		for(int streak = 0; streak < 48; streak++) {
+			unsigned int streak_seed = seed + streak * 2246822519u;
+			double angle = (streak_seed % 6283) / 1000.0 + ticks / 700.0;
+			double travel = fmod((streak_seed >> 8) / 4294967295.0 + progress * 1.8, 1.0);
+			double distance = portal_x_radius + travel * scale * 0.38;
+			int star_x = center_x + (int)(cos(angle) * distance);
+			int star_y = center_y + (int)(sin(angle) * distance * 0.68);
+			int tail_x = center_x + (int)(cos(angle) * (distance - scale * 0.035));
+			int tail_y = center_y + (int)(sin(angle) * (distance - scale * 0.035) * 0.68);
+			thickLineRGBA(surface, tail_x, tail_y, star_x, star_y, 1,
+				(Uint8)(155 + streak % 5 * 18), (Uint8)(182 + streak % 4 * 16),
+				235, (Uint8)(tunnel_alpha * 0.62));
+		}
 
-	double destination_mix = smooth_step(3900.0, 5150.0, phase)
-		* (1.0 - smooth_step(5850.0, 7200.0, phase));
-	static const Uint8 destination_palette[4][3] = {
-		{ 36, 90, 112 }, { 128, 66, 75 }, { 74, 103, 68 }, { 98, 79, 132 }
-	};
-	int destination = seed % 4;
-	Uint8 sky_alpha = (Uint8)(84 * destination_mix * fade);
-	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		destination_palette[destination][0], destination_palette[destination][1],
-		destination_palette[destination][2], sky_alpha);
-	for(int layer = 0; layer < 3; layer++) {
-		int base_y = surface->h * (66 + layer * 9) / 100;
-		Uint8 terrain_alpha = (Uint8)(148 * destination_mix * fade * (0.85 - layer * 0.16));
-		Uint8 terrain_red = (Uint8)(14 + destination * 13 + layer * 5);
-		Uint8 terrain_green = (Uint8)(31 + destination * 9 + layer * 4);
-		Uint8 terrain_blue = (Uint8)(43 + destination * 14 + layer * 3);
-		for(int segment = 0; segment < 18; segment++) {
-			int x1 = surface->w * segment / 18;
-			int x2 = surface->w * (segment + 1) / 18;
-			int y1 = base_y + (int)(sin(segment * 1.4 + destination) * scale * 0.035);
-			int y2 = base_y + (int)(sin((segment + 1) * 1.4 + destination) * scale * 0.035);
-			filledTrigonRGBA(surface, x1, y1, x2, y2, x2, surface->h,
-				terrain_red, terrain_green, terrain_blue, terrain_alpha);
-			filledTrigonRGBA(surface, x1, y1, x2, surface->h, x1, surface->h,
-				terrain_red, terrain_green, terrain_blue, terrain_alpha);
+		double destination_mix = smooth_step(3900.0, 5150.0, phase)
+			* (1.0 - smooth_step(5850.0, 7200.0, phase));
+		static const Uint8 destination_palette[4][3] = {
+			{ 36, 90, 112 }, { 128, 66, 75 }, { 74, 103, 68 }, { 98, 79, 132 }
+		};
+		int destination = effect_kind(&EFFECT_WORLD_JUMP, seed % 4);
+		Uint8 sky_alpha = (Uint8)(84 * destination_mix * fade);
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			destination_palette[destination][0], destination_palette[destination][1],
+			destination_palette[destination][2], sky_alpha);
+		for(int layer = 0; layer < 3; layer++) {
+			int base_y = surface->h * (66 + layer * 9) / 100;
+			Uint8 terrain_alpha = (Uint8)(148 * destination_mix * fade * (0.85 - layer * 0.16));
+			Uint8 terrain_red = (Uint8)(14 + destination * 13 + layer * 5);
+			Uint8 terrain_green = (Uint8)(31 + destination * 9 + layer * 4);
+			Uint8 terrain_blue = (Uint8)(43 + destination * 14 + layer * 3);
+			for(int segment = 0; segment < 18; segment++) {
+				int x1 = surface->w * segment / 18;
+				int x2 = surface->w * (segment + 1) / 18;
+				int y1 = base_y + (int)(sin(segment * 1.4 + destination) * scale * 0.035);
+				int y2 = base_y + (int)(sin((segment + 1) * 1.4 + destination) * scale * 0.035);
+				filledTrigonRGBA(surface, x1, y1, x2, y2, x2, surface->h,
+					terrain_red, terrain_green, terrain_blue, terrain_alpha);
+				filledTrigonRGBA(surface, x1, y1, x2, surface->h, x1, surface->h,
+					terrain_red, terrain_green, terrain_blue, terrain_alpha);
+			}
+		}
+		Uint32 return_phase = phase > 5900 ? phase - 5900 : 0;
+		if(return_phase < 900) {
+			double return_flash = (1.0 - return_phase / 900.0) * fade;
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				225, 233, 241, (Uint8)(150 * return_flash));
 		}
 	}
-	Uint32 return_phase = phase > 5900 ? phase - 5900 : 0;
-	if(return_phase < 900) {
-		double return_flash = (1.0 - return_phase / 900.0) * fade;
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			225, 233, 241, (Uint8)(150 * return_flash));
-	}
-}
 
 static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 300000;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	if(seed % 6 != 0) return;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	Uint32 duration = 44000 + (seed >> 8) % 15000;
-	if(phase >= duration) return;
-	double fade = smooth_step(0.0, 5000.0, phase)
-		* (1.0 - smooth_step(duration - 7000.0, duration, phase));
-	int kind = seed % 5;
+	EffectWindow window;
+	if(!effect_window(&EFFECT_ALIEN_WEATHER, ticks, &window)) return;
+	Uint32 seed = window.seed;
+	Uint32 phase = window.phase;
+	double fade = window.fade;
+	int kind = effect_kind(&EFFECT_ALIEN_WEATHER, seed % 5);
 	static const Uint8 sky_colors[5][3] = {
 		{ 66, 142, 106 }, { 99, 81, 157 }, { 62, 113, 156 },
 		{ 158, 83, 91 }, { 157, 125, 62 }
@@ -498,7 +682,7 @@ static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) 
 	Uint8 green = sky_colors[kind][1];
 	Uint8 blue = sky_colors[kind][2];
 	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		red, green, blue, (Uint8)(12 * fade));
+		red, green, blue, (Uint8)(18 * fade));
 
 	if(kind == 2) {
 		int planet_x = surface->w * (25 + (seed >> 12) % 50) / 100;
@@ -584,161 +768,266 @@ static void draw_bird(SDL_Surface *surface, int x, int y, int size, int wing_lif
 		near_tip_x, near_tip_y, 2, shade, 30, 43, alpha);
 }
 
+/*
+ * Ship drawing
+ *
+ * Ships are seen from the side. Each part is a polygon described in tenths of
+ * the ship's unit size, with +x pointing forward and +y down, so one table
+ * serves both directions. The parts are drawn back to front: far wing, hull,
+ * shading, then lights, so translucent parts do not stack on each other.
+ */
+typedef signed char ShipPoint[2];
+
+static int ship_coord(int origin, int unit, int sign, int tenths) {
+	return origin + sign * (int)floor(tenths * unit / 10.0 + 0.5);
+}
+
+static Uint8 ship_shade(int value, int percent) {
+	int shaded = value * percent / 100;
+	return (Uint8)(shaded > 255 ? 255 : shaded);
+}
+
+static Uint8 ship_light(int value, int percent) {
+	return (Uint8)(value + (232 - value) * percent / 100);
+}
+
+static void ship_shape(SDL_Surface *surface, int x, int y, int unit, int direction,
+	const ShipPoint *points, int count, Uint8 red, Uint8 green, Uint8 blue,
+	Uint8 alpha, Uint8 edge_alpha) {
+	Sint16 vx[24], vy[24];
+	if(count > 24) count = 24;
+	for(int i = 0; i < count; i++) {
+		vx[i] = (Sint16)ship_coord(x, unit, direction, points[i][0]);
+		vy[i] = (Sint16)ship_coord(y, unit, 1, points[i][1]);
+	}
+	filledPolygonRGBA(surface, vx, vy, count, red, green, blue, alpha);
+	if(edge_alpha > 0) {
+		aapolygonRGBA(surface, vx, vy, count, ship_light(red, 45),
+			ship_light(green, 45), ship_light(blue, 45), edge_alpha);
+	}
+}
+
+static void ship_line(SDL_Surface *surface, int x, int y, int unit, int direction,
+	int x1, int y1, int x2, int y2, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
+	aalineRGBA(surface, ship_coord(x, unit, direction, x1), ship_coord(y, unit, 1, y1),
+		ship_coord(x, unit, direction, x2), ship_coord(y, unit, 1, y2),
+		red, green, blue, alpha);
+}
+
+// A soft engine glow: a faint exhaust cone, a halo and a pale core.
+static void ship_engine(SDL_Surface *surface, int x, int y, int unit, int direction,
+	int ex, int ey, int radius_tenths, Uint8 alpha) {
+	int cx = ship_coord(x, unit, direction, ex);
+	int cy = ship_coord(y, unit, 1, ey);
+	int radius = radius_tenths * unit / 10;
+	if(radius < 1) radius = 1;
+	filledTrigonRGBA(surface, cx, cy - radius, cx, cy + radius,
+		cx - direction * radius * 3, cy, 96, 170, 226, (Uint8)(alpha * 0.22));
+	filledCircleRGBA(surface, cx, cy, radius + 1 + radius / 2, 96, 170, 226,
+		(Uint8)(alpha * 0.14));
+	filledCircleRGBA(surface, cx, cy, radius, 205, 238, 255, (Uint8)(alpha * 0.85));
+}
+
+static void ship_window(SDL_Surface *surface, int x, int y, int unit, int direction,
+	int wx, int wy, Uint8 alpha) {
+	int px = ship_coord(x, unit, direction, wx);
+	int py = ship_coord(y, unit, 1, wy);
+	pixelRGBA(surface, px, py, 238, 214, 150, (Uint8)(alpha * 0.9));
+	if(unit >= 14) pixelRGBA(surface, px + direction, py, 238, 214, 150, (Uint8)(alpha * 0.6));
+}
+
+static void ship_box(SDL_Surface *surface, int x, int y, int unit, int direction,
+	int x1, int y1, int x2, int y2, Uint8 red, Uint8 green, Uint8 blue,
+	Uint8 alpha, Uint8 edge_alpha) {
+	ShipPoint box[4] = {
+		{ (signed char)x2, (signed char)y1 }, { (signed char)x2, (signed char)y2 },
+		{ (signed char)x1, (signed char)y2 }, { (signed char)x1, (signed char)y1 } };
+	ship_shape(surface, x, y, unit, direction, box, 4, red, green, blue, alpha, edge_alpha);
+}
+
+// Fighter: a twin-pod gunship seen from above. A slim fuselage with a canopy
+// is joined by swept struts to two engine pods, so it reads as a craft with
+// a wide stance instead of a single arrow.
 static void draw_battle_ship(SDL_Surface *surface, int x, int y, int size,
 	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 2;
-	int back_x = x - direction * size;
-	int wing_x = x - direction * size / 3;
-	int wing_top = y - size;
-	int wing_bottom = y + size;
+	static const ShipPoint far_pod[] = {
+		{14, -12}, {11, -13}, {-12, -13}, {-14, -11}, {-14, -8}, {11, -8}, {14, -10} };
+	static const ShipPoint near_pod[] = {
+		{14, 12}, {11, 13}, {-12, 13}, {-14, 11}, {-14, 8}, {11, 8}, {14, 10} };
+	static const ShipPoint far_strut[] = { {5, -8}, {-8, -8}, {-4, -3}, {2, -3} };
+	static const ShipPoint near_strut[] = { {5, 8}, {-8, 8}, {-4, 3}, {2, 3} };
+	static const ShipPoint fuselage[] = {
+		{23, 0}, {18, -2}, {8, -3}, {-10, -3}, {-12, -2}, {-12, 2}, {-10, 3},
+		{8, 3}, {18, 2} };
 
-	filledTrigonRGBA(surface, nose_x, y, wing_x, wing_top, back_x, y,
-		red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, back_x, y, wing_x, wing_bottom,
-		red, green, blue, alpha);
-	thickLineRGBA(surface, nose_x, y, back_x, y, 1, 191, 212, 231, alpha);
-	thickLineRGBA(surface, nose_x, y, wing_x, wing_top, 2, 186, 206, 220, alpha);
-	thickLineRGBA(surface, nose_x, y, wing_x, wing_bottom, 2, 186, 206, 220, alpha);
-	thickLineRGBA(surface, wing_x, wing_top, x, y, 1, red, green, blue, alpha);
-	thickLineRGBA(surface, x, y, wing_x, wing_bottom, 1, red, green, blue, alpha);
-	int cockpit_radius = size / 8;
-	if(cockpit_radius < 1) cockpit_radius = 1;
-	filledCircleRGBA(surface, x + direction * size / 2, y, cockpit_radius,
-		171, 224, 245, (Uint8)(alpha * 0.85));
-	thickLineRGBA(surface, back_x - direction * size / 2, y,
-		back_x, y, 2, 116, 196, 232, (Uint8)(alpha * 0.35));
-	filledCircleRGBA(surface, back_x, y, size / 7, 111, 201, 232,
-		(Uint8)(alpha * 3 / 4));
+	ship_shape(surface, x, y, size, direction, far_pod, 7,
+		ship_shade(red, 70), ship_shade(green, 70), ship_shade(blue, 70), alpha, alpha / 2);
+	ship_shape(surface, x, y, size, direction, far_strut, 4,
+		ship_shade(red, 82), ship_shade(green, 82), ship_shade(blue, 82), alpha, alpha / 3);
+	ship_shape(surface, x, y, size, direction, near_strut, 4,
+		ship_shade(red, 82), ship_shade(green, 82), ship_shade(blue, 82), alpha, alpha / 3);
+	ship_shape(surface, x, y, size, direction, near_pod, 7,
+		ship_light(red, 10), ship_light(green, 10), ship_light(blue, 10), alpha, alpha / 2);
+	ship_shape(surface, x, y, size, direction, fuselage, 9,
+		ship_light(red, 4), ship_light(green, 4), ship_light(blue, 4), alpha, alpha / 2);
+	// Bright team-coloured stripe along each pod.
+	ship_line(surface, x, y, size, direction, 10, -10, -10, -10,
+		ship_light(red, 75), ship_light(green, 75), ship_light(blue, 75),
+		(Uint8)(alpha * 0.7));
+	ship_line(surface, x, y, size, direction, 10, 10, -10, 10,
+		ship_light(red, 75), ship_light(green, 75), ship_light(blue, 75),
+		(Uint8)(alpha * 0.7));
+	filledEllipseRGBA(surface, ship_coord(x, size, direction, 10), y,
+		4 * size / 10 + 2, 2 * size / 10 + 1, 156, 214, 240, (Uint8)(alpha * 0.95));
+	ship_engine(surface, x, y, size, direction, -14, -10, 3, alpha);
+	ship_engine(surface, x, y, size, direction, -14, 10, 3, alpha);
+	ship_engine(surface, x, y, size, direction, -12, 0, 2, alpha);
 }
 
+// Frigate: a twin-hull warship seen from above. Two long armoured hulls are
+// tied together by cross decks and a central command block with a dome, so
+// it reads as a ladder-like frame rather than a single hull.
 static void draw_frigate(SDL_Surface *surface, int x, int y, int size,
 	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 3;
-	int tail_x = x - direction * size * 3;
-	int shoulder_x = x - direction * size;
-	int top_y = y - size / 2;
-	int bottom_y = y + size / 2;
-	int half_x[] = { nose_x, shoulder_x, tail_x, x, nose_x };
-	int upper_y[] = { y, top_y, y - size / 3, y, y };
-	int lower_y[] = { y, y, y + size / 3, bottom_y, y };
+	static const ShipPoint far_hull[] = {
+		{16, -13}, {13, -14}, {-28, -14}, {-30, -12}, {-30, -7}, {-28, -5},
+		{8, -5}, {12, -8} };
+	static const ShipPoint near_hull[] = {
+		{16, 13}, {13, 14}, {-28, 14}, {-30, 12}, {-30, 7}, {-28, 5},
+		{8, 5}, {12, 8} };
+	static const ShipPoint core[] = {
+		{35, 0}, {29, -3}, {22, -4}, {10, -5}, {-10, -5}, {-10, 5}, {10, 5},
+		{22, 4}, {29, 3} };
+	static const ShipPoint prow_plate[] = {
+		{35, 0}, {29, -3}, {22, -4}, {22, 4}, {29, 3} };
+	Uint8 lr = ship_light(red, 75), lg = ship_light(green, 75), lb = ship_light(blue, 75);
 
-	filledTrigonRGBA(surface, half_x[0], upper_y[0], half_x[1], upper_y[1],
-		half_x[2], upper_y[2], red, green, blue, alpha);
-	filledTrigonRGBA(surface, half_x[0], lower_y[0], half_x[2], lower_y[2],
-		half_x[3], lower_y[3], red, green, blue, alpha);
-	thickLineRGBA(surface, nose_x, y, tail_x, y, 2, 191, 212, 231, alpha);
+	ship_shape(surface, x, y, size, direction, far_hull, 8,
+		ship_shade(red, 75), ship_shade(green, 75), ship_shade(blue, 75), alpha, alpha / 2);
+	ship_shape(surface, x, y, size, direction, near_hull, 8,
+		ship_light(red, 8), ship_light(green, 8), ship_light(blue, 8), alpha, alpha / 2);
+	// Cross decks between the hulls.
+	ship_box(surface, x, y, size, direction, -25, -5, -20, 5,
+		ship_shade(red, 85), ship_shade(green, 85), ship_shade(blue, 85), alpha, alpha / 3);
+	ship_shape(surface, x, y, size, direction, core, 9,
+		red, green, blue, alpha, alpha / 2);
+	ship_shape(surface, x, y, size, direction, prow_plate, 5,
+		ship_light(red, 16), ship_light(green, 16), ship_light(blue, 16), alpha, alpha / 2);
+	ship_line(surface, x, y, size, direction, 12, -10, -25, -10, lr, lg, lb,
+		(Uint8)(alpha * 0.65));
+	ship_line(surface, x, y, size, direction, 12, 10, -25, 10, lr, lg, lb,
+		(Uint8)(alpha * 0.65));
+	ship_line(surface, x, y, size, direction, 34, 0, 24, 0,
+		200, 230, 245, (Uint8)(alpha * 0.9));
+	filledEllipseRGBA(surface, ship_coord(x, size, direction, 3), y,
+		6 * size / 10 + 1, 3 * size / 10 + 1, 156, 214, 240, (Uint8)(alpha * 0.9));
 
-	for(int turret = -1; turret <= 1; turret += 2) {
-		int turret_x = x + turret * size / 2;
-		int turret_y = y + turret * size / 5;
-		filledCircleRGBA(surface, turret_x, turret_y, size / 7,
-			(Uint8)(red + 18), (Uint8)(green + 18), (Uint8)(blue + 18), alpha);
-		thickLineRGBA(surface, turret_x, turret_y,
-			turret_x + direction * size / 2, turret_y - turret * size / 5,
-			1, red, green, blue, alpha);
+	// Gun turrets on the hulls, and lit portholes along the core.
+	int turret_x[] = { 6, -16 };
+	for(int i = 0; i < 2; i++) {
+		for(int side = -1; side <= 1; side += 2) {
+			int cx = ship_coord(x, size, direction, turret_x[i]);
+			int cy = ship_coord(y, size, 1, side * 9);
+			filledEllipseRGBA(surface, cx, cy, size / 5 + 2, size / 10 + 1,
+				ship_light(red, 18), ship_light(green, 18), ship_light(blue, 18), alpha);
+			ship_line(surface, x, y, size, direction, turret_x[i] + 1, side * 9,
+				turret_x[i] + 7, side * 9, lr, lg, lb, alpha);
+		}
 	}
-	filledCircleRGBA(surface, tail_x, y, size / 6, 111, 201, 232,
-		(Uint8)(alpha * 3 / 4));
+	for(int window = 0; window < 4; window++) {
+		ship_window(surface, x, y, size, direction, -8 + window * 4, -4, alpha);
+		ship_window(surface, x, y, size, direction, -8 + window * 4, 4, alpha);
+	}
+	ship_engine(surface, x, y, size, direction, -30, -10, 2, alpha);
+	ship_engine(surface, x, y, size, direction, -30, 10, 2, alpha);
+	ship_engine(surface, x, y, size, direction, -10, 0, 2, alpha);
 }
 
+// Cruiser: a modular spine ship. A thin keel carries, front to back, a sensor
+// nose, an armoured gun deck, a tall crew drum, a fuel tank and a flared drive.
+// The varied blocks give it a broken, built-up silhouette.
 static void draw_cruiser(SDL_Surface *surface, int x, int y, int size,
 	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 2;
-	int tail_x = x - direction * size * 2;
-	int upper_y = y - size / 2;
-	int lower_y = y + size / 2;
+	static const ShipPoint nose[] = {
+		{23, 1}, {20, -3}, {15, -3}, {15, 3}, {21, 3} };
+	static const ShipPoint deck[] = {
+		{15, -1}, {13, -4}, {3, -4}, {3, 3}, {15, 3} };
+	static const ShipPoint drum[] = {
+		{1, -6}, {-1, -9}, {-6, -9}, {-8, -6}, {-8, 6}, {-6, 9}, {-1, 9}, {1, 6} };
+	static const ShipPoint drive[] = {
+		{-15, -3}, {-15, 3}, {-22, 8}, {-22, -8} };
+	Uint8 dr = ship_shade(red, 60), dg = ship_shade(green, 60), db = ship_shade(blue, 60);
+	Uint8 lr = ship_light(red, 70), lg = ship_light(green, 70), lb = ship_light(blue, 70);
 
-	filledTrigonRGBA(surface, nose_x, y, x + direction * size, upper_y,
-		tail_x, upper_y, red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, upper_y, tail_x, lower_y,
-		red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, lower_y,
-		x + direction * size, lower_y, red, green, blue, alpha);
-	boxRGBA(surface, x - size, y - size / 5, x + size, y + size / 5,
-		(Uint8)(red * 0.72), (Uint8)(green * 0.72), (Uint8)(blue * 0.72), alpha);
-	thickLineRGBA(surface, nose_x, y, tail_x, y, 2, 205, 218, 227, alpha);
+	// Keel: only the stretches between blocks show, so the alpha does not stack.
+	ship_box(surface, x, y, size, direction, -9, -1, -8, 1,
+		dr, dg, db, alpha, 0);
+	ship_box(surface, x, y, size, direction, 1, -1, 3, 1,
+		dr, dg, db, alpha, 0);
+	ship_shape(surface, x, y, size, direction, drive, 4,
+		ship_shade(red, 70), ship_shade(green, 70), ship_shade(blue, 70), alpha, alpha / 2);
+	ship_box(surface, x, y, size, direction, -15, -5, -9, 5,
+		ship_light(red, 4), ship_light(green, 4), ship_light(blue, 4), alpha, alpha / 2);
+	ship_line(surface, x, y, size, direction, -13, -5, -13, 5, dr, dg, db,
+		(Uint8)(alpha * 0.8));
+	ship_line(surface, x, y, size, direction, -11, -5, -11, 5, dr, dg, db,
+		(Uint8)(alpha * 0.8));
+	ship_shape(surface, x, y, size, direction, drum, 8,
+		ship_light(red, 10), ship_light(green, 10), ship_light(blue, 10), alpha, alpha / 2);
+	ship_line(surface, x, y, size, direction, 1, 0, -8, 0, dr, dg, db,
+		(Uint8)(alpha * 0.8));
+	ship_shape(surface, x, y, size, direction, deck, 5,
+		red, green, blue, alpha, alpha / 2);
+	ship_shape(surface, x, y, size, direction, nose, 5,
+		ship_light(red, 14), ship_light(green, 14), ship_light(blue, 14), alpha, alpha / 2);
+	ship_line(surface, x, y, size, direction, 20, -1, 16, -1,
+		200, 230, 245, (Uint8)(alpha * 0.95));
+	ship_line(surface, x, y, size, direction, 13, -4, 3, -4, lr, lg, lb,
+		(Uint8)(alpha * 0.6));
+	ship_line(surface, x, y, size, direction, -1, -9, -6, -9, lr, lg, lb,
+		(Uint8)(alpha * 0.6));
 
-	for(int turret = -1; turret <= 1; turret++) {
-		int turret_x = x + turret * size / 2;
-		int turret_y = y + turret * size / 4;
-		filledCircleRGBA(surface, turret_x, turret_y, size / 7,
-			(Uint8)(red + 15), (Uint8)(green + 15), (Uint8)(blue + 15), alpha);
-		thickLineRGBA(surface, turret_x, turret_y,
-			turret_x + direction * size / 2, turret_y - turret * size / 4,
-			2, 216, 198, 164, alpha);
+	// A raised bridge at the back of the deck and a gun turret forward of it.
+	static const ShipPoint bridge[] = { {9, -4}, {8, -8}, {4, -8}, {4, -4} };
+	ship_shape(surface, x, y, size, direction, bridge, 4,
+		ship_light(red, 16), ship_light(green, 16), ship_light(blue, 16), alpha, alpha / 2);
+	ship_line(surface, x, y, size, direction, 8, -6, 5, -6,
+		200, 230, 245, (Uint8)(alpha * 0.95));
+	filledEllipseRGBA(surface, ship_coord(x, size, direction, 12), ship_coord(y, size, 1, -4),
+		size / 5 + 2, size / 10 + 1,
+		ship_light(red, 18), ship_light(green, 18), ship_light(blue, 18), alpha);
+	ship_line(surface, x, y, size, direction, 13, -5, 19, -5, lr, lg, lb, alpha);
+	// Lit portholes on the crew drum and a hangar slit on the deck.
+	for(int row = 0; row < 4; row++) {
+		for(int column = 0; column < 3; column++) {
+			ship_window(surface, x, y, size, direction, -1 - column * 2, -6 + row * 4, alpha);
+		}
 	}
-	for(int engine = -1; engine <= 1; engine++) {
-		filledCircleRGBA(surface, tail_x, y + engine * size / 5, size / 8,
-			95, 190, 225, (Uint8)(alpha * 0.8));
-	}
+	ship_line(surface, x, y, size, direction, 13, 1, 5, 1,
+		238, 214, 150, (Uint8)(alpha * 0.8));
+	ship_engine(surface, x, y, size, direction, -22, -5, 1, alpha);
+	ship_engine(surface, x, y, size, direction, -22, 0, 1, alpha);
+	ship_engine(surface, x, y, size, direction, -22, 5, 1, alpha);
 }
 
-static void draw_carrier(SDL_Surface *surface, int x, int y, int size,
-	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
-	int nose_x = x + direction * size * 3;
-	int tail_x = x - direction * size * 3;
-	int upper_y = y - size / 2;
-	int lower_y = y + size / 2;
-
-	filledTrigonRGBA(surface, nose_x, y, x + direction * size, upper_y,
-		tail_x, upper_y, red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, upper_y, tail_x, lower_y,
-		red, green, blue, alpha);
-	filledTrigonRGBA(surface, nose_x, y, tail_x, lower_y,
-		x + direction * size, lower_y, red, green, blue, alpha);
-	boxRGBA(surface, x - size, y - size / 5, x + size, y + size / 5,
-		(Uint8)(red * 0.72), (Uint8)(green * 0.72), (Uint8)(blue * 0.72), alpha);
-	thickLineRGBA(surface, nose_x, y, tail_x, y, 2, 205, 218, 227, alpha);
-
-	// Flight deck stripe
-	boxRGBA(surface, x - size * 2, y - size / 6, x + size * 2, y + size / 6,
-		(Uint8)(red * 0.55), (Uint8)(green * 0.55), (Uint8)(blue * 0.55), alpha);
-	// Bridge tower
-	boxRGBA(surface, x + direction * size, y - size * 3 / 4,
-		x + direction * size * 2, y - size / 4,
-		(Uint8)(red * 0.85), (Uint8)(green * 0.85), (Uint8)(blue * 0.85), alpha);
-	// Engine glow
-	for(int engine = -1; engine <= 1; engine++) {
-		filledCircleRGBA(surface, tail_x, y + engine * size / 5, size / 8,
-			95, 190, 225, (Uint8)(alpha * 0.8));
-	}
-}
-
-static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 90000;
-	Uint32 slot = ticks / cycle;
-	Uint32 slot_phase = ticks % cycle;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	Uint32 duration = 6500 + (seed >> 9) % 4000;
-	Uint32 start = (seed >> 16) % (cycle - duration);
+static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale,
+	const SceneWeather *weather) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_FULLSCREEN, ticks, &window)) return;
+	Uint32 seed = window.seed;
+	Uint32 phase = window.phase;
+	double fade = window.fade;
+	// Kinds 4 and 5 are quiet slots that fullscreen_accept() already filters out.
+	// When forced, fold them back so the effect always shows something.
 	int kind = (seed >> 5) % 6;
-	if(slot_phase < start || slot_phase >= start + duration || kind >= 6) return;
-	Uint32 phase = slot_phase - start;
-	double progress = (double)phase / duration;
-
-	double fade = smooth_step(0.0, 1300.0, phase)
-		* (1.0 - smooth_step(duration - 1200.0, duration, phase));
+	if(forced_effect == &EFFECT_FULLSCREEN) kind %= 4;
+	kind = effect_kind(&EFFECT_FULLSCREEN, kind);
+	if(kind >= 4) return;
 	if(kind == 0) {
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			62, 94, 132, (Uint8)(10 * fade));
-		int segments = 20;
-		for(int band = 0; band < 3; band++) {
-			int previous_x = 0;
-			int previous_y = surface->h * (18 + band * 12) / 100;
-			for(int i = 1; i <= segments; i++) {
-				int x = surface->w * i / segments;
-				double nx = (double)x / surface->w;
-				int y = surface->h * (18 + band * 12) / 100
-					+ (int)(sin(nx * 6.28318530718 + ticks / 900.0 + band * 1.7)
-						* scale * (0.025 + band * 0.006));
-				Uint8 alpha = (Uint8)((30 - band * 5) * fade);
-				thickLineRGBA(surface, previous_x, previous_y, x, y,
-					2, (Uint8)(82 + band * 28), (Uint8)(166 + band * 15),
-					(Uint8)(167 + band * 24), alpha);
-				previous_x = x;
-				previous_y = y;
-			}
-		}
+		// Top up to full strength without doubling up when the aurora weather is on.
+		draw_aurora(surface, ticks, scale, fade * (1.0 - weather->aurora));
 	} else if(kind == 1) {
 		Uint32 flash_phase = phase % 3400;
 		double flash = smooth_step(0.0, 90.0, flash_phase)
@@ -760,7 +1049,7 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 			171, 183, 190, (Uint8)(190 * fade));
 		filledCircleRGBA(surface, moon_x + radius / 3, moon_y, radius - radius / 7,
 			22, 27, 38, (Uint8)(220 * fade));
-	} else if(kind == 3) {
+	} else {
 		int flare_x = surface->w * (28 + (seed >> 12) % 44) / 100;
 		int flare_y = surface->h * (18 + (seed >> 20) % 25) / 100;
 		int radius = scale / 13;
@@ -777,67 +1066,18 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 			thickLineRGBA(surface, flare_x, flare_y, end_x, end_y, 1,
 				251, 174, 105, (Uint8)(18 * fade));
 		}
-	} else if(kind == 4) {
-		// Solar eclipse: the sky darkens and a corona appears around the moon.
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			8, 10, 18, (Uint8)(70 * fade));
-		int eclipse_x = surface->w * (30 + (seed >> 12) % 40) / 100;
-		int eclipse_y = surface->h * (20 + (seed >> 20) % 20) / 100;
-		int sun_radius = scale / 9;
-		int moon_radius = sun_radius * 9 / 10;
-		double cover = smooth_step(0.15, 0.55, progress)
-			* (1.0 - smooth_step(0.75, 0.95, progress));
-		int moon_offset = (int)((0.5 - cover) * sun_radius * 2.2);
-		filledCircleRGBA(surface, eclipse_x, eclipse_y, sun_radius + scale / 20,
-			255, 200, 90, (Uint8)(60 * fade));
-		filledCircleRGBA(surface, eclipse_x, eclipse_y, sun_radius,
-			255, 220, 130, (Uint8)(120 * fade));
-		filledCircleRGBA(surface, eclipse_x + moon_offset, eclipse_y, moon_radius,
-			10, 12, 22, (Uint8)(230 * fade));
-		for(int ray = 0; ray < 16; ray++) {
-			double angle = ray * 0.39269908169 + ticks / 4000.0;
-			int end_x = eclipse_x + (int)(cos(angle) * sun_radius * 1.6);
-			int end_y = eclipse_y + (int)(sin(angle) * sun_radius * 1.6);
-			thickLineRGBA(surface, eclipse_x, eclipse_y, end_x, end_y, 1,
-				255, 235, 180, (Uint8)(14 * fade));
-		}
-	} else {
-		// Meteor shower: streaks of light falling across the sky.
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			10, 12, 24, (Uint8)(30 * fade));
-		int meteor_count = 18 + (seed >> 8) % 10;
-		for(int meteor = 0; meteor < meteor_count; meteor++) {
-			unsigned int meteor_seed = (unsigned int)meteor * 2246822519u + seed;
-			double meteor_progress = fmod((meteor_seed >> 8) / 4294967295.0
-				+ progress * (0.7 + (meteor_seed >> 16) % 40 / 100.0), 1.0);
-			int start_x = (int)(meteor_seed % surface->w);
-			int start_y = (int)((meteor_seed >> 12) % (surface->h * 45 / 100));
-			int length = scale / (14 + (meteor_seed >> 20) % 10);
-			int dx = length / 3;
-			int dy = length;
-			int meteor_x = start_x + (int)(meteor_progress * surface->w * 0.6);
-			int meteor_y = start_y + (int)(meteor_progress * surface->h * 0.5);
-			Uint8 meteor_alpha = (Uint8)((60 + (meteor_seed >> 24) % 60) * fade
-				* (1.0 - meteor_progress));
-			thickLineRGBA(surface, meteor_x - dx, meteor_y - dy, meteor_x, meteor_y,
-				1, 220, 230, 245, meteor_alpha);
-			filledCircleRGBA(surface, meteor_x, meteor_y, 1,
-				255, 255, 250, (Uint8)(meteor_alpha * 1.2));
-		}
 	}
 }
 
 static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 60000;
-	const Uint32 duration = 14000;
-	Uint32 phase = ticks % cycle;
-	if(phase >= duration) return;
+	EffectWindow window;
+	if(!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
+	Uint32 phase = window.phase;
 
 	int size = scale / 170;
 	if(size < 4) size = 4;
-	double fade = smooth_step(0.0, 900.0, phase)
-		* (1.0 - smooth_step(duration - 1100.0, duration, phase));
-	double progress = (double)phase / duration;
+	double fade = window.fade;
+	double progress = window.progress;
 	int left_x = (int)(-size + progress * (surface->w + 2.0 * size));
 	int right_x = surface->w - left_x;
 	int center_y = surface->h * 17 / 100;
@@ -876,21 +1116,17 @@ static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
 	}
 }
 
-static bool render_background_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 90000;
-	const Uint32 duration = 26000;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	if(phase >= duration) return false;
+static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
+	Uint32 phase = window.phase;
 
 	int size = scale / 170;
 	if(size < 4) size = 4;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	if(seed % 4 != 0) return false;
+	Uint32 seed = window.seed;
 	int winner = seed & 1;
-	double fade = smooth_step(0.0, 900.0, phase)
-		* (1.0 - smooth_step(duration - 1700.0, duration, phase));
-	double progress = (double)phase / duration;
+	double fade = window.fade;
+	double progress = window.progress;
 	double approach = smooth_step(0.04, 0.34, progress);
 	double withdrawal = smooth_step(0.80, 0.98, progress);
 	int center_y = surface->h * 18 / 100;
@@ -953,7 +1189,7 @@ static bool render_background_battle(SDL_Surface *surface, Uint32 ticks, int sca
 		double blast = 1.0 - (phase % 2500) / 240.0;
 		int impact_x = (winner == 0 ? right_x : left_x)
 				+ (int)(sin(ticks / 510.0) * scale * 0.015);
-		int impact_y = center_y + (int)(cos(ticks / 390.0) * scale * 0.012);
+			int impact_y = center_y + (int)(cos(ticks / 390.0) * scale * 0.012);
 		int radius = size / 2 + (int)(size * (1.0 - blast));
 		Uint8 impact_alpha = (Uint8)(125 * fade * blast);
 		filledCircleRGBA(surface, impact_x, impact_y, radius,
@@ -961,35 +1197,23 @@ static bool render_background_battle(SDL_Surface *surface, Uint32 ticks, int sca
 		circleRGBA(surface, impact_x, impact_y, radius + size / 2,
 			255, 202, 139, (Uint8)(impact_alpha * 0.8));
 	}
-	return true;
 }
 
-static bool render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 240000;
-	const Uint32 duration = 60000;
-	static Uint32 session_seed;
-	static bool seed_initialized = false;
-	Uint32 phase = ticks % cycle;
-	if(phase >= duration) return false;
-
-	if(!seed_initialized) {
-		session_seed = (Uint32)time(NULL);
-		seed_initialized = true;
-	}
-	Uint32 encounter = ticks / cycle;
-	Uint32 seed = encounter * 2654435761u + session_seed + 0x9e3779b9u;
-	if(seed % 3 != 0) return false;
+static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_FLEET_BATTLE, ticks, &window)) return;
+	Uint32 phase = window.phase;
+	Uint32 seed = window.seed;
 	int winner = (seed ^ (seed >> 13) ^ (seed >> 23)) & 1;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 1400.0, phase)
-		* (1.0 - smooth_step(duration - 2200.0, duration, phase));
+	double progress = window.progress;
+	double fade = window.fade;
 	double approach = smooth_step(0.04, 0.31, progress);
 	double retreat = smooth_step(0.78, 0.97, progress);
 	double defeat = smooth_step(0.48, 0.84, progress);
 	int size = scale / 72;
 	if(size < 10) size = 10;
-	int fighter_size = size / 3;
-	if(fighter_size < 5) fighter_size = 5;
+	int fighter_size = size / 2;
+	if(fighter_size < 7) fighter_size = 7;
 	double left_hold = surface->w * (0.37 + 0.008 * sin(ticks / 3600.0));
 	double right_hold = surface->w * (0.63 + 0.008 * sin(ticks / 3900.0 + 1.7));
 	int left_x = (int)(-size * 6 + approach * (left_hold + size * 6)
@@ -1026,9 +1250,6 @@ static bool render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 			if(ship == 0 && ((seed >> (side + 2)) & 1)) {
 				draw_cruiser(surface, ship_x, ship_y, size * 2, direction,
 					red, green, blue, side_alpha);
-			} else if(ship == 0 && ((seed >> (side + 4)) & 1)) {
-				draw_carrier(surface, ship_x, ship_y, size * 2, direction,
-					red, green, blue, side_alpha);
 			} else if(type % 3 == 0) {
 				draw_frigate(surface, ship_x, ship_y, size, direction,
 					red, green, blue, side_alpha);
@@ -1057,30 +1278,6 @@ static bool render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 					+ (ship - reserves / 2) * scale / 25;
 				draw_battle_ship(surface, x, y, fighter_size, direction,
 					red, green, blue, (Uint8)(85 * fade * reinforcement));
-			}
-		}
-	}
-
-	// Fighter launch: small craft stream out from the carriers mid-battle.
-	double launch = smooth_step(0.20, 0.30, progress)
-		* (1.0 - smooth_step(0.62, 0.74, progress));
-	if(launch > 0.0) {
-		for(int side = 0; side < 2; side++) {
-			int direction = side == 0 ? 1 : -1;
-			int anchor_x = side == 0 ? left_x : right_x;
-			int red = side == 0 ? 100 : 170;
-			int green = side == 0 ? 147 : 126;
-			int blue = side == 0 ? 167 : 101;
-			for(int fighter = 0; fighter < 4; fighter++) {
-				double fighter_progress = fmod(launch * 1.6 + fighter * 0.25, 1.0);
-				int x = anchor_x + direction * (int)(fighter_progress * surface->w * 0.30);
-				int y = center_y + (side == 0 ? arc : -arc)
-					+ (fighter - 2) * scale / 22
-					+ (int)(sin(ticks / 300.0 + fighter * 1.7) * size * 0.5);
-				Uint8 fighter_alpha = (Uint8)(90 * fade * launch
-					* (1.0 - fighter_progress * 0.6));
-				draw_battle_ship(surface, x, y, fighter_size / 2, direction,
-					red, green, blue, fighter_alpha);
 			}
 		}
 	}
@@ -1117,215 +1314,156 @@ static bool render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 		circleRGBA(surface, blast_x, blast_y, blast_radius + size / 2,
 			255, 201, 137, (Uint8)(blast_alpha * 0.8));
 	}
-	return true;
 }
 
 static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 210000;
-	Uint32 slot = ticks / cycle;
-	Uint32 slot_phase = ticks % cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	if(seed % 5 != 0) return;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	Uint32 duration = 72000 + (seed >> 8) % 28000;
-	Uint32 start = (seed >> 16) % (cycle - duration);
-	if(slot_phase < start || slot_phase >= start + duration) return;
-	Uint32 phase = slot_phase - start;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 6000.0, phase)
-		* (1.0 - smooth_step(duration - 7000.0, duration, phase));
-	int kind = seed % 7;
+		EffectWindow window;
+		if(!effect_window(&EFFECT_LONG_SCENE, ticks, &window)) return;
+		Uint32 seed = window.seed;
+		double progress = window.progress;
+		double fade = window.fade;
+		int kind = effect_kind(&EFFECT_LONG_SCENE, seed % 5);
 
-	if(kind == 0) {
-		for(int tree = 0; tree < 7; tree++) {
-			int tree_x = surface->w * (8 + tree * 13) / 100;
-			double nx = (double)tree_x / surface->w;
-			double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-			int base_y = (int)(surface->h * ridge);
-			double growth = smooth_step(0.03 + tree * 0.025, 0.72 + tree * 0.025, progress);
-			int tree_height = (int)(scale * (0.035 + (tree % 3) * 0.012) * growth);
-			if(tree_height < 2) continue;
-			Uint8 alpha = (Uint8)(175 * fade);
-			thickLineRGBA(surface, tree_x, base_y, tree_x, base_y - tree_height,
-				2 + tree % 2, 61, 72, 61, alpha);
-			for(int branch = 1; branch <= 3; branch++) {
-				int branch_y = base_y - tree_height * branch / 4;
-				int branch_length = tree_height * (4 - branch) / 5;
-				thickLineRGBA(surface, tree_x, branch_y,
-					tree_x - branch_length, branch_y - branch_length / 2,
-					2, 67, 82, 66, alpha);
-				thickLineRGBA(surface, tree_x, branch_y,
-					tree_x + branch_length, branch_y - branch_length / 2,
-					2, 67, 82, 66, alpha);
-				if(growth > 0.72) {
-					filledCircleRGBA(surface, tree_x - branch_length,
-						branch_y - branch_length / 2, branch_length / 3 + 1,
-						74, 112, 78, alpha);
-					filledCircleRGBA(surface, tree_x + branch_length,
-						branch_y - branch_length / 2, branch_length / 3 + 1,
-						86, 124, 83, alpha);
+		if(kind == 0) {
+			for(int tree = 0; tree < 7; tree++) {
+				int tree_x = surface->w * (8 + tree * 13) / 100;
+				double nx = (double)tree_x / surface->w;
+				double ridge = ridge_height(RIDGE_NEAR, nx);
+				int base_y = (int)(surface->h * ridge);
+				double growth = smooth_step(0.03 + tree * 0.025, 0.72 + tree * 0.025, progress);
+				int tree_height = (int)(scale * (0.035 + (tree % 3) * 0.012) * growth);
+				if(tree_height < 2) continue;
+				Uint8 alpha = (Uint8)(175 * fade);
+				thickLineRGBA(surface, tree_x, base_y, tree_x, base_y - tree_height,
+					2 + tree % 2, 61, 72, 61, alpha);
+				for(int branch = 1; branch <= 3; branch++) {
+					int branch_y = base_y - tree_height * branch / 4;
+					int branch_length = tree_height * (4 - branch) / 5;
+					thickLineRGBA(surface, tree_x, branch_y,
+						tree_x - branch_length, branch_y - branch_length / 2,
+						2, 67, 82, 66, alpha);
+					thickLineRGBA(surface, tree_x, branch_y,
+						tree_x + branch_length, branch_y - branch_length / 2,
+						2, 67, 82, 66, alpha);
+					if(growth > 0.72) {
+						filledCircleRGBA(surface, tree_x - branch_length,
+							branch_y - branch_length / 2, branch_length / 3 + 1,
+							74, 112, 78, alpha);
+						filledCircleRGBA(surface, tree_x + branch_length,
+							branch_y - branch_length / 2, branch_length / 3 + 1,
+							86, 124, 83, alpha);
+					}
 				}
 			}
-		}
-	} else if(kind == 1) {
-		int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
-		boxRGBA(surface, 0, flood_y, surface->w - 1, surface->h - 1,
-			28, 79, 116, (Uint8)(58 * fade));
-		for(int band = 0; band < 5; band++) {
-			int previous_x = 0;
-			int previous_y = flood_y + band * scale / 38;
-			for(int segment = 1; segment <= 20; segment++) {
-				int next_x = surface->w * segment / 20;
-				int next_y = flood_y + band * scale / 38
-					+ (int)(sin(segment * 0.8 + ticks / (500.0 + band * 80))
-						* scale * 0.012);
-				thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
-					1 + band % 2, 115, 183, 208, (Uint8)(70 * fade));
-				previous_x = next_x;
-				previous_y = next_y;
+		} else if(kind == 1) {
+			int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
+			boxRGBA(surface, 0, flood_y, surface->w - 1, surface->h - 1,
+				28, 79, 116, (Uint8)(58 * fade));
+			for(int band = 0; band < 5; band++) {
+				int previous_x = 0;
+				int previous_y = flood_y + band * scale / 38;
+				for(int segment = 1; segment <= 20; segment++) {
+					int next_x = surface->w * segment / 20;
+					int next_y = flood_y + band * scale / 38
+						+ (int)(sin(segment * 0.8 + ticks / (500.0 + band * 80))
+							* scale * 0.012);
+					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
+						1 + band % 2, 115, 183, 208, (Uint8)(70 * fade));
+					previous_x = next_x;
+					previous_y = next_y;
+				}
 			}
-		}
-	} else if(kind == 2) {
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			135, 57, 27, (Uint8)(17 * fade));
-		for(int fire = 0; fire < 12; fire++) {
-			int fire_x = surface->w * (8 + fire * 7) / 100;
-			double nx = (double)fire_x / surface->w;
-			double ridge = 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
-			int fire_y = (int)(surface->h * ridge);
-			int flicker = (int)(fabs(sin(ticks / (170.0 + fire * 11) + fire)) * scale * 0.025);
-			thickLineRGBA(surface, fire_x, fire_y, fire_x + 2, fire_y - flicker,
-				2, 238, 112, 55, (Uint8)(120 * fade));
-			filledCircleRGBA(surface, fire_x + 4, fire_y - flicker, 2,
-				255, 192, 106, (Uint8)(145 * fade));
-		}
-	} else if(kind == 3) {
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			36, 57, 78, (Uint8)(24 * fade));
-		for(int band = 0; band < 6; band++) {
-			int previous_x = 0;
-			int previous_y = surface->h * (17 + band * 10) / 100;
-			for(int segment = 1; segment <= 18; segment++) {
-				int next_x = surface->w * segment / 18;
-				int next_y = surface->h * (17 + band * 10) / 100
-					+ (int)(sin(segment * 0.6 + ticks / 1400.0 + band) * scale * 0.05);
-				thickLineRGBA(surface, previous_x, previous_y, next_x, next_y, 2,
-					78, 162, 163, (Uint8)(28 * fade));
-				previous_x = next_x;
-				previous_y = next_y;
+		} else if(kind == 2) {
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				135, 57, 27, (Uint8)(17 * fade));
+			for(int fire = 0; fire < 12; fire++) {
+				int fire_x = surface->w * (8 + fire * 7) / 100;
+				double nx = (double)fire_x / surface->w;
+				double ridge = ridge_height(RIDGE_MIDDLE, nx);
+				int fire_y = (int)(surface->h * ridge);
+				int flicker = (int)(fabs(sin(ticks / (170.0 + fire * 11) + fire)) * scale * 0.025);
+				thickLineRGBA(surface, fire_x, fire_y, fire_x + 2, fire_y - flicker,
+					2, 238, 112, 55, (Uint8)(120 * fade));
+				filledCircleRGBA(surface, fire_x + 4, fire_y - flicker, 2,
+					255, 192, 106, (Uint8)(145 * fade));
 			}
-		}
-	} else if(kind == 4) {
-		// Field of flowers blooming and swaying in the breeze.
-		int flower_count = 14 + (seed >> 8) % 10;
-		for(int flower = 0; flower < flower_count; flower++) {
-			int flower_x = surface->w * (4 + flower * 92 / flower_count) / 100
-				+ (int)(sin(ticks / (700.0 + flower * 37) + flower) * scale * 0.006);
-			double nx = (double)flower_x / surface->w;
-			double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-			int base_y = (int)(surface->h * ridge);
-			double growth = smooth_step(0.05 + flower * 0.02, 0.6 + flower * 0.02, progress);
-			int stem_height = (int)(scale * (0.02 + (flower % 3) * 0.008) * growth);
-			if(stem_height < 2) continue;
-			int sway = (int)(sin(ticks / (500.0 + flower * 41) + flower * 1.3) * scale * 0.008);
-			int head_x = flower_x + sway;
-			int head_y = base_y - stem_height;
-			Uint8 alpha = (Uint8)(170 * fade);
-			thickLineRGBA(surface, flower_x, base_y, head_x, head_y,
-				1, 58, 92, 58, alpha);
-			Uint8 petal_red = (Uint8)(150 + (flower * 53) % 90);
-			Uint8 petal_green = (Uint8)(60 + (flower * 29) % 60);
-			Uint8 petal_blue = (Uint8)(90 + (flower * 71) % 110);
-			for(int petal = 0; petal < 5; petal++) {
-				double angle = petal * 1.25663706144 + ticks / 3000.0;
-				int petal_x = head_x + (int)(cos(angle) * stem_height / 3);
-				int petal_y = head_y + (int)(sin(angle) * stem_height / 3);
-				filledCircleRGBA(surface, petal_x, petal_y, stem_height / 6 + 1,
-					petal_red, petal_green, petal_blue, alpha);
+		} else if(kind == 3) {
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				36, 57, 78, (Uint8)(24 * fade));
+			for(int band = 0; band < 6; band++) {
+				int previous_x = 0;
+				int previous_y = surface->h * (17 + band * 10) / 100;
+				for(int segment = 1; segment <= 18; segment++) {
+					int next_x = surface->w * segment / 18;
+					int next_y = surface->h * (17 + band * 10) / 100
+						+ (int)(sin(segment * 0.6 + ticks / 1400.0 + band) * scale * 0.05);
+					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y, 2,
+						78, 162, 163, (Uint8)(28 * fade));
+					previous_x = next_x;
+					previous_y = next_y;
+				}
 			}
-			filledCircleRGBA(surface, head_x, head_y, stem_height / 5,
-				240, 210, 90, alpha);
+		} else {
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				17, 20, 32, (Uint8)(34 * fade));
+			int figure_x = surface->w * (25 + seed % 50) / 100;
+			int figure_y = surface->h * 83 / 100;
+			int figure_height = scale / 10;
+			filledTrigonRGBA(surface, figure_x, figure_y - figure_height,
+				figure_x - figure_height / 3, figure_y,
+				figure_x + figure_height / 3, figure_y, 12, 16, 25,
+				(Uint8)(150 * fade));
+			filledCircleRGBA(surface, figure_x, figure_y - figure_height,
+				figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
 		}
-	} else if(kind == 5) {
-		// Geyser erupting from the ground.
-		int geyser_x = surface->w * (30 + (seed >> 8) % 40) / 100;
-		double nx = (double)geyser_x / surface->w;
-		double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-		int base_y = (int)(surface->h * ridge);
-		double eruption = smooth_step(0.1, 0.35, progress)
-			* (1.0 - smooth_step(0.75, 0.9, progress));
-		if(eruption > 0.0) {
-			int plume_height = (int)(scale * 0.16 * eruption);
-			int plume_width = scale / 60;
-			if(plume_width < 2) plume_width = 2;
-			Uint8 alpha = (Uint8)(150 * fade * eruption);
-			thickLineRGBA(surface, geyser_x, base_y, geyser_x, base_y - plume_height,
-				plume_width, 150, 190, 205, alpha);
-			for(int droplet = 0; droplet < 12; droplet++) {
-				unsigned int drop_seed = (unsigned int)droplet * 2246822519u + seed;
-				double angle = (drop_seed % 6283) / 1000.0;
-				int distance = (int)((drop_seed >> 8) % (plume_height / 2 + 1));
-				int drop_x = geyser_x + (int)(cos(angle) * distance);
-				int drop_y = base_y - plume_height + (int)(sin(angle) * distance);
-				filledCircleRGBA(surface, drop_x, drop_y, 1 + droplet % 2,
-					170, 205, 215, (Uint8)(alpha * 0.7));
-			}
-		}
-	} else {
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			17, 20, 32, (Uint8)(34 * fade));
-		int figure_x = surface->w * (25 + seed % 50) / 100;
-		int figure_y = surface->h * 83 / 100;
-		int figure_height = scale / 10;
-		filledTrigonRGBA(surface, figure_x, figure_y - figure_height,
-			figure_x - figure_height / 3, figure_y,
-			figure_x + figure_height / 3, figure_y, 12, 16, 25,
-			(Uint8)(150 * fade));
-		filledCircleRGBA(surface, figure_x, figure_y - figure_height,
-			figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
 	}
-}
 
-static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 event_cycle = 48000;
-	Uint32 slot = ticks / event_cycle;
-	Uint32 slot_phase = ticks % event_cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	Uint32 event_duration = 4200 + (seed >> 8) % 3200;
-	Uint32 event_start = (seed >> 16) % (event_cycle - event_duration);
-	if(slot_phase < event_start || slot_phase >= event_start + event_duration
-		|| seed % 3 != 0) return;
-	Uint32 phase = slot_phase - event_start;
-	double progress = (double)phase / event_duration;
-	double fade = smooth_step(0.0, 350.0, phase)
-		* (1.0 - smooth_step(event_duration - 400.0, event_duration, phase));
-	int direction = (seed & 1) ? 1 : -1;
-	int y = surface->h * (8 + (seed >> 8) % 39) / 100;
-	int margin = scale / 12;
-	int x = direction > 0
-		? -margin + (int)(progress * (surface->w + 2.0 * margin))
-		: surface->w + margin - (int)(progress * (surface->w + 2.0 * margin));
-	int size = scale / (26 + (seed >> 16) % 24);
-	if(size < 4) size = 4;
-	Uint8 alpha = (Uint8)(150 * fade);
-	int kind = (seed >> 24) % 48;
-	if(kind >= 23) {
-		unsigned int rare_gate = slot * 2654435761u + 0x9e3779b9u;
-		if(rare_gate % 7 != 0) return;
-	}
-	if(kind >= 23) {
-		int center_x = x;
-		int center_y = y;
-		if(kind == 23) {
+/*
+ * Rare sky events
+ *
+ * Every rare sky event is a small function taking a SkyEvent: an object that
+ * crosses the sky (x, y) in `direction`, `size` pixels big, with `alpha`
+ * already faded for fade-in/out. progress/phase say how far along it is.
+ * To add one: write sky_event_NN(), append it to sky_event_kinds[] below and
+ * bump RARE_SKY_KINDS.
+ */
+typedef struct {
+	SDL_Surface *surface;
+	Uint32 ticks;
+	int scale;             // shorter screen side
+	Uint32 seed;
+	Uint32 phase;          // ms since the event started
+	double progress;       // 0..1 through the event
+	double fade;           // 0..1 fade in/out
+	int direction;         // 1: moves left to right, -1: right to left
+	int x, y;              // current position of the object
+	int size;
+	Uint8 alpha;           // 150 * fade
+} SkyEvent;
+
+#define SKY_EVENT_UNPACK(e) \
+	SDL_Surface *surface = (e)->surface; \
+	Uint32 ticks = (e)->ticks; \
+	int scale = (e)->scale; \
+	Uint32 seed = (e)->seed; \
+	Uint32 phase = (e)->phase; \
+	double progress = (e)->progress; \
+	double fade = (e)->fade; \
+	int direction = (e)->direction; \
+	int x = (e)->x, y = (e)->y; \
+	int center_x = x, center_y = y; \
+	int size = (e)->size; \
+	Uint8 alpha = (e)->alpha; \
+	(void)surface; (void)ticks; (void)scale; (void)seed; (void)phase; \
+	(void)progress; (void)fade; (void)direction; (void)x; (void)y; \
+	(void)center_x; (void)center_y; (void)size; (void)alpha
+
+static void sky_event_23(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int ground_x = center_x < 0 ? 0 : center_x;
 			if(ground_x >= surface->w) ground_x = surface->w - 1;
 			double nx = (double)ground_x / surface->w;
-			double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+			double ridge = ridge_height(RIDGE_NEAR, nx);
 			int ground_y = (int)(surface->h * ridge);
 			Uint8 pulse = (Uint8)(alpha * (0.45 + 0.55 * (0.5 + 0.5 * sin(progress * 18.0))));
 			boxRGBA(surface, center_x - size, ground_y - size / 2,
@@ -1336,7 +1474,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				size / 2, 83, 56, 55, pulse);
 			filledCircleRGBA(surface, center_x + size, ground_y - size,
 				size / 2, 54, 75, 120, pulse);
-		} else if(kind == 24) {
+}
+
+static void sky_event_24(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int fold_size = size * 3;
 			int unfold = (int)(fold_size * (0.35 + 0.65 * sin(progress * 3.14159265359)));
 			filledTrigonRGBA(surface, center_x, center_y - fold_size,
@@ -1355,7 +1496,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				thickLineRGBA(surface, center_x, center_y - fold_size + crease * fold_size / 2,
 					crease_x, center_y + fold_size / 2, 1, 235, 220, 193, alpha);
 			}
-		} else if(kind == 25) {
+}
+
+static void sky_event_25(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int wheel_radius = scale / 180;
 			if(wheel_radius < 3) wheel_radius = 3;
 			int wheelbase = scale / 18;
@@ -1368,7 +1512,7 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			if(ridge_x < 0) ridge_x = 0;
 			if(ridge_x >= surface->w) ridge_x = surface->w - 1;
 			double nx = (double)ridge_x / surface->w;
-			double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+			double ridge = ridge_height(RIDGE_NEAR, nx);
 			int wheel_y = (int)(surface->h * ridge) - wheel_radius;
 			int seat_x = rear_x + direction * wheelbase * 38 / 100;
 			int crank_x = rear_x + direction * wheelbase * 64 / 100;
@@ -1403,7 +1547,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				1, 205, 120, 74, alpha);
 			filledCircleRGBA(surface, crank_x, wheel_y - wheel_radius * 6,
 				wheel_radius / 2 + 1, 224, 194, 151, alpha);
-		} else if(kind == 26) {
+}
+
+static void sky_event_26(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			for(int creature = 0; creature < 5; creature++) {
 				int creature_x = center_x + (creature - 2) * size * 2;
 				int creature_y = center_y + (int)(sin(progress * 6.28 + creature) * size * 2);
@@ -1420,7 +1567,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			filledTrigonRGBA(surface, center_x - size, fish_y - size,
 				center_x - size * 2, fish_y, center_x - size, fish_y + size,
 				84, 157, 176, alpha);
-		} else if(kind == 27) {
+}
+
+static void sky_event_27(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			for(int cube = 0; cube < 4; cube++) {
 				int cube_x = center_x + (cube - 2) * size * 2;
 				int cube_y = center_y + (int)(sin(progress * 6.28 + cube) * size * 2);
@@ -1446,7 +1596,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					1, 224, 245, 251, alpha);
 				filledCircleRGBA(surface, top_x, top_y, 1, 255, 255, 255, alpha);
 			}
-		} else if(kind == 28) {
+}
+
+static void sky_event_28(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			for(int card = 0; card < 3; card++) {
 				int card_x = center_x + (card - 1)
 					* (int)(size * (2.0 + 0.3 * sin(progress * 6.28318530718 + card)));
@@ -1465,7 +1618,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int coin_y = center_y - size * 2 - (int)(fabs(sin(progress * 12.56)) * size * 3);
 			filledCircleRGBA(surface, coin_x, coin_y, coin_radius, 205, 161, 83, alpha);
 			circleRGBA(surface, coin_x, coin_y, coin_radius - 1, 255, 226, 159, alpha);
-		} else if(kind == 29) {
+}
+
+static void sky_event_29(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 				82, 17, 29, (Uint8)(15 * fade));
 			unsigned int bolt_seed = seed;
@@ -1480,7 +1636,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				bolt_x = next_x;
 				bolt_y = next_y;
 			}
-		} else if(kind == 30) {
+}
+
+static void sky_event_30(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			for(int cup = 0; cup < 3; cup++) {
 				int cup_x = center_x + (cup - 1) * size * 3;
 				int cup_y = center_y + abs(cup - 1) * size / 3;
@@ -1500,7 +1659,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 						(Uint8)(alpha * 0.65));
 				}
 			}
-		} else if(kind == 31) {
+}
+
+static void sky_event_31(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			for(int sprig = 0; sprig < 5; sprig++) {
 				int stem_x = center_x + (sprig - 2) * size;
 				int stem_y = center_y + size * 2;
@@ -1519,7 +1681,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 						(Uint8)(74 + sprig * 6), (Uint8)(126 + leaf * 9), 71, alpha);
 				}
 			}
-		} else if(kind == 32) {
+}
+
+static void sky_event_32(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			for(int light = 0; light < 18; light++) {
 				int light_x = (seed + light * surface->w / 18) % surface->w;
 				int light_y = surface->h * (14 + (light * 17 + seed) % 62) / 100;
@@ -1529,7 +1694,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					(Uint8)(90 + light * 7), (Uint8)(129 + light * 5),
 					(Uint8)(176 + light * 3), pulse);
 			}
-		} else if(kind == 33) {
+}
+
+static void sky_event_33(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int burner_y = surface->h * 78 / 100;
 			filledTrigonRGBA(surface, center_x, burner_y - size,
 				center_x - size, burner_y + size / 2,
@@ -1542,7 +1710,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					(Uint8)(151 + curl * 12), (Uint8)(159 + curl * 10),
 					(Uint8)(166 + curl * 8), (Uint8)(alpha * (0.45 - curl * 0.07)));
 			}
-		} else if(kind == 34) {
+}
+
+static void sky_event_34(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			for(int wisp = 0; wisp < 7; wisp++) {
 				int smoke_x = center_x + (int)(sin(progress * 5.0 + wisp) * size * (2 + wisp));
 				int smoke_y = center_y - wisp * size / 2;
@@ -1550,7 +1721,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					(Uint8)(143 + wisp * 9), (Uint8)(150 + wisp * 8),
 					(Uint8)(162 + wisp * 7), (Uint8)(alpha * 0.42));
 			}
-		} else if(kind == 35) {
+}
+
+static void sky_event_35(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int temple_y = surface->h * 71 / 100;
 			for(int step = 0; step < 5; step++) {
 				int half_width = size * (5 - step);
@@ -1566,7 +1740,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				thickLineRGBA(surface, center_x, surface->h * 32 / 100,
 					end_x, end_y, 1, 218, 183, 120, (Uint8)(alpha * 0.45));
 			}
-		} else if(kind == 36) {
+}
+
+static void sky_event_36(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 				24, 12, 39, (Uint8)(20 * fade));
 			int eye_x = center_x;
@@ -1589,7 +1766,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					previous_y = next_y;
 				}
 			}
-		} else if(kind == 37) {
+}
+
+static void sky_event_37(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int mirror_x = surface->w * (30 + (seed >> 8) % 40) / 100;
 			int mirror_y = surface->h * 43 / 100;
 			int mirror_width = size * 6;
@@ -1615,7 +1795,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				+ (int)(sin(progress * 8.0) * size / 2);
 			filledCircleRGBA(surface, mirror_x, reflected_sun_y, size / 2,
 				226, 218, 188, (Uint8)(alpha * 0.72));
-		} else if(kind == 38) {
+}
+
+static void sky_event_38(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int water_y = surface->h * 77 / 100;
 			for(int wave = 0; wave < 9; wave++) {
 				int previous_x = 0;
@@ -1637,7 +1820,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					glint_x + size / 3, glint_y, 1,
 					192, 222, 231, (Uint8)(alpha * 0.65));
 			}
-		} else if(kind == 39) {
+}
+
+static void sky_event_39(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int orbit_x = center_x;
 			int orbit_y = center_y;
 			int orbit_radius = size * 5;
@@ -1652,7 +1838,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			}
 			filledCircleRGBA(surface, orbit_x, orbit_y, size,
 				(Uint8)(180 + (int)(35 * sin(progress * 12.56))), 141, 215, alpha);
-		} else if(kind == 40) {
+}
+
+static void sky_event_40(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int plane_y = center_y + (int)(sin(progress * 6.28318530718) * size * 2);
 			int nose_x = center_x + direction * size * 3;
 			int tail_x = center_x - direction * size * 3;
@@ -1671,7 +1860,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				filledCircleRGBA(surface, center_x + size * 2, plane_y,
 					2, 255, 54, 45, alpha);
 			}
-		} else if(kind == 41) {
+}
+
+static void sky_event_41(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int planet_x = surface->w / 2;
 			int planet_y = surface->h * 66 / 100;
 			int satellite_x = planet_x + (int)(cos(progress * 6.28318530718) * scale * 0.22);
@@ -1692,7 +1884,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				filledCircleRGBA(surface, satellite_x, satellite_y,
 					2, 255, 48, 41, alpha);
 			}
-		} else if(kind == 42) {
+}
+
+static void sky_event_42(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
 			int blimp_y = center_y + (int)(sin(progress * 6.28318530718) * size);
 			int blimp_length = size * 5;
 			for(int section = -2; section <= 2; section++) {
@@ -1712,126 +1907,14 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				filledCircleRGBA(surface, center_x, blimp_y,
 					2, 255, 48, 41, alpha);
 			}
-		} else if(kind == 43) {
-			// Hot air balloon drifting across the sky.
-			int balloon_y = center_y + (int)(sin(progress * 6.28318530718 + 1.0) * size * 2);
-			int envelope_radius = size * 2;
-			int envelope_x = center_x;
-			int envelope_top = balloon_y - envelope_radius * 2;
-			filledCircleRGBA(surface, envelope_x, envelope_top + envelope_radius,
-				envelope_radius, 196, 92, 74, alpha);
-			filledCircleRGBA(surface, envelope_x - envelope_radius / 2,
-				envelope_top + envelope_radius, envelope_radius / 2,
-				226, 168, 96, alpha);
-			filledCircleRGBA(surface, envelope_x + envelope_radius / 2,
-				envelope_top + envelope_radius, envelope_radius / 2,
-				226, 168, 96, alpha);
-			filledTrigonRGBA(surface, envelope_x - envelope_radius,
-				envelope_top + envelope_radius, envelope_x + envelope_radius,
-				envelope_top + envelope_radius, envelope_x, balloon_y,
-				196, 92, 74, alpha);
-			thickLineRGBA(surface, envelope_x, balloon_y, envelope_x, balloon_y + size * 2,
-				1, 120, 96, 74, alpha);
-			boxRGBA(surface, envelope_x - size, balloon_y + size * 2,
-				envelope_x + size, balloon_y + size * 3,
-				168, 132, 96, alpha);
-			thickLineRGBA(surface, envelope_x - size, balloon_y + size * 3,
-				envelope_x - size * 2, balloon_y + size * 4, 1, 120, 96, 74, alpha);
-			thickLineRGBA(surface, envelope_x + size, balloon_y + size * 3,
-				envelope_x + size * 2, balloon_y + size * 4, 1, 120, 96, 74, alpha);
-		} else if(kind == 44) {
-			// Comet streaking across the sky with a long tail.
-			int comet_x = center_x;
-			int comet_y = center_y + (int)(sin(progress * 3.14159265359) * scale * 0.05);
-			int tail_length = size * 10;
-			int tail_x = comet_x - direction * tail_length;
-			int tail_y = comet_y + size * 2;
-			thickLineRGBA(surface, tail_x, tail_y, comet_x, comet_y,
-				3, 150, 190, 220, (Uint8)(alpha * 0.35));
-			thickLineRGBA(surface, tail_x + size * 2, tail_y - size,
-				comet_x, comet_y, 2, 190, 215, 235, (Uint8)(alpha * 0.55));
-			thickLineRGBA(surface, tail_x + size * 4, tail_y + size,
-				comet_x, comet_y, 2, 190, 215, 235, (Uint8)(alpha * 0.55));
-			filledCircleRGBA(surface, comet_x, comet_y, size / 2 + 1,
-				245, 240, 220, alpha);
-			filledCircleRGBA(surface, comet_x, comet_y, size / 4,
-				255, 255, 245, (Uint8)(alpha * 0.9));
-		} else if(kind == 45) {
-			// Rocket launching upward with a flame plume.
-			int rocket_x = center_x;
-			int rocket_y = center_y + (int)(progress * scale * 0.35);
-			int rocket_length = size * 4;
-			int nose_y = rocket_y - rocket_length;
-			filledTrigonRGBA(surface, rocket_x, nose_y,
-				rocket_x - size / 2, rocket_y - rocket_length / 2,
-				rocket_x + size / 2, rocket_y - rocket_length / 2,
-				205, 215, 225, alpha);
-			boxRGBA(surface, rocket_x - size / 2, rocket_y - rocket_length / 2,
-				rocket_x + size / 2, rocket_y, 205, 215, 225, alpha);
-			filledTrigonRGBA(surface, rocket_x - size / 2, rocket_y - rocket_length / 2,
-				rocket_x - size, rocket_y, rocket_x - size / 2, rocket_y,
-				190, 80, 60, alpha);
-			filledTrigonRGBA(surface, rocket_x + size / 2, rocket_y - rocket_length / 2,
-				rocket_x + size, rocket_y, rocket_x + size / 2, rocket_y,
-				190, 80, 60, alpha);
-			int flame_length = size * (2 + (int)(sin(progress * 30.0) * 0.5 + 0.5));
-			filledTrigonRGBA(surface, rocket_x - size / 4, rocket_y,
-				rocket_x + size / 4, rocket_y,
-				rocket_x, rocket_y + flame_length,
-				245, 160, 70, (Uint8)(alpha * 0.9));
-			filledTrigonRGBA(surface, rocket_x - size / 6, rocket_y,
-				rocket_x + size / 6, rocket_y,
-				rocket_x, rocket_y + flame_length / 2,
-				255, 220, 140, alpha);
-		} else if(kind == 46) {
-			// Kite bobbing on the wind with a trailing ribbon.
-			int kite_x = center_x;
-			int kite_y = center_y + (int)(sin(progress * 6.28318530718) * size * 2);
-			int kite_size = size * 2;
-			int sway = (int)(sin(ticks / 300.0) * size / 3);
-			filledTrigonRGBA(surface, kite_x, kite_y - kite_size,
-				kite_x - kite_size, kite_y + kite_size / 2,
-				kite_x + kite_size, kite_y + kite_size / 2,
-				196, 84, 74, alpha);
-			filledTrigonRGBA(surface, kite_x, kite_y - kite_size,
-				kite_x - kite_size, kite_y + kite_size / 2,
-				kite_x, kite_y + kite_size / 2,
-				226, 168, 96, alpha);
-			filledTrigonRGBA(surface, kite_x, kite_y - kite_size,
-				kite_x + kite_size, kite_y + kite_size / 2,
-				kite_x, kite_y + kite_size / 2,
-				226, 168, 96, alpha);
-			thickLineRGBA(surface, kite_x, kite_y + kite_size / 2,
-				kite_x, kite_y + kite_size * 2, 1, 120, 96, 74, alpha);
-			for(int ribbon = 0; ribbon < 3; ribbon++) {
-				int ribbon_x = kite_x + (int)(sin(ticks / 250.0 + ribbon) * size);
-				int ribbon_y = kite_y + kite_size * 2 + ribbon * size / 2;
-				filledCircleRGBA(surface, ribbon_x, ribbon_y, size / 4,
-					226, 168, 96, (Uint8)(alpha * 0.8));
-			}
-			thickLineRGBA(surface, kite_x, kite_y - kite_size,
-				kite_x - sway * 2, kite_y - kite_size * 3, 1, 90, 100, 110, alpha);
-		} else {
-			// Shooting star: a bright streak that fades as it falls.
-			int star_x = center_x;
-			int star_y = center_y + (int)(progress * scale * 0.12);
-			int streak_length = size * 6;
-			int streak_x = star_x - direction * streak_length;
-			int streak_y = star_y + streak_length / 3;
-			Uint8 streak_alpha = (Uint8)(alpha * (1.0 - progress));
-			thickLineRGBA(surface, streak_x, streak_y, star_x, star_y,
-				2, 245, 240, 220, streak_alpha);
-			thickLineRGBA(surface, streak_x + size * 2, streak_y - size / 2,
-				star_x, star_y, 1, 255, 250, 235, (Uint8)(streak_alpha * 0.7));
-			filledCircleRGBA(surface, star_x, star_y, size / 2 + 1,
-				255, 252, 240, (Uint8)(alpha * (1.0 - progress * 0.5)));
-			filledCircleRGBA(surface, star_x, star_y, size / 4,
-				255, 255, 255, alpha);
-		}
-		return;
-	}
+}
 
-	switch(kind % 4) {
+#define SKY_CLASSIC_VARIANTS 3
+
+// The three classic sky objects: pulsing star, comet and shooting star.
+static void sky_event_classic(const SkyEvent *event, int variant) {
+	SKY_EVENT_UNPACK(event);
+	switch(variant) {
 		case 0: {
 			int pulse_radius = size + (int)(progress * size * 2);
 			filledCircleRGBA(surface, x, y, size / 2 + 1,
@@ -1847,14 +1930,7 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			}
 			break;
 		}
-		case 1:
-			draw_battle_ship(surface, x, y, size, direction,
-				181, 190, 198, alpha);
-			thickLineRGBA(surface, x - direction * size, y,
-				x - direction * size * 3, y + size / 3,
-				1, 161, 190, 218, (Uint8)(alpha * 0.55));
-			break;
-		case 2: {
+		case 1: {
 			int tail_x = x - direction * size * 4;
 			int tail_y = y - size;
 			thickLineRGBA(surface, x, y, tail_x, tail_y,
@@ -1881,20 +1957,53 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 	}
 }
 
+static void (*const sky_event_kinds[])(const SkyEvent *) = {
+	sky_event_23, sky_event_24, sky_event_25, sky_event_26, sky_event_27,
+	sky_event_28, sky_event_29, sky_event_30, sky_event_31, sky_event_32,
+	sky_event_33, sky_event_34, sky_event_35, sky_event_36, sky_event_37,
+	sky_event_38, sky_event_39, sky_event_40, sky_event_41, sky_event_42
+};
+static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
+	== RARE_SKY_KINDS, "RARE_SKY_KINDS does not match sky_event_kinds[]");
+
+static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_RARE_SKY, ticks, &window)) return;
+
+	SkyEvent event;
+	event.surface = surface;
+	event.ticks = ticks;
+	event.scale = scale;
+	event.seed = window.seed;
+	event.phase = window.phase;
+	event.progress = window.progress;
+	event.fade = window.fade;
+	event.direction = (window.seed & 1) ? 1 : -1;
+	event.y = surface->h * (8 + (window.seed >> 8) % 39) / 100;
+	int margin = scale / 12;
+	event.x = event.direction > 0
+		? -margin + (int)(window.progress * (surface->w + 2.0 * margin))
+		: surface->w + margin - (int)(window.progress * (surface->w + 2.0 * margin));
+	event.size = scale / (26 + (window.seed >> 16) % 24);
+	if(event.size < 4) event.size = 4;
+	event.alpha = (Uint8)(150 * window.fade);
+
+	// Kinds >= RARE_SKY_CLASSIC_KINDS are thinned out by rare_sky_accept().
+	int kind = effect_kind(&EFFECT_RARE_SKY, (window.seed >> 24) % RARE_SKY_KINDS);
+	if(kind < RARE_SKY_CLASSIC_KINDS) {
+		sky_event_classic(&event, kind % SKY_CLASSIC_VARIANTS);
+	} else {
+		sky_event_kinds[kind - RARE_SKY_CLASSIC_KINDS](&event);
+	}
+}
+
 static void render_foreground_event(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 180000;
-	const Uint32 duration = 6500;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	if(seed % 2 != 0 || phase >= duration) return;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	int kind = seed % 4;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 650.0, phase)
-		* (1.0 - smooth_step(duration - 900.0, duration, phase));
+	EffectWindow window;
+	if(!effect_window(&EFFECT_FOREGROUND, ticks, &window)) return;
+	Uint32 seed = window.seed;
+	int kind = effect_kind(&EFFECT_FOREGROUND, seed % 4);
+	double progress = window.progress;
+	double fade = window.fade;
 	int count = 24 + kind * 7;
 	for(int particle = 0; particle < count; particle++) {
 		Uint32 particle_seed = (Uint32)particle * 1664525u + seed;
@@ -1940,21 +2049,11 @@ static void render_foreground_event(SDL_Surface *surface, Uint32 ticks, int scal
 }
 
 static void render_rare_screen_fade(SDL_Surface *surface, Uint32 ticks) {
-	const Uint32 cycle = 300000;
-	const Uint32 duration = 12000;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	if(seed % 4 != 0) return;
-	Uint32 start = (seed >> 16) % (cycle - duration);
-	if(phase < start || phase >= start + duration) return;
-
-	Uint32 event_phase = phase - start;
-	double fade = smooth_step(0.0, 1800.0, event_phase)
-		* (1.0 - smooth_step(duration - 1800.0, duration, event_phase));
-	Uint8 color = (seed & 0x80) ? 255 : 0;
+	EffectWindow window;
+	if(!effect_window(&EFFECT_SCREEN_FADE, ticks, &window)) return;
+	Uint8 color = (window.seed & 0x80) ? 255 : 0;
 	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		color, color, color, (Uint8)(255 * fade));
+		color, color, color, (Uint8)(255 * window.fade));
 }
 
 void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
@@ -2025,9 +2124,9 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 					}
 				}
 
-				double far_edge = 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
-				double middle_edge = 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
-				double near_edge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+				double far_edge = ridge_height(RIDGE_FAR, nx);
+				double middle_edge = ridge_height(RIDGE_MIDDLE, nx);
+				double near_edge = ridge_height(RIDGE_NEAR, nx);
 				double ground_noise = smooth_noise(nx * 28.0, ny * 32.0, 1237);
 				double far_cover = smooth_step(far_edge - 0.014, far_edge + 0.014, ny);
 				red = blend_channel(red, (Uint8)(35 + 17 * ground_noise), far_cover);
@@ -2094,7 +2193,7 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		+ weather.lightning * 12 + weather.aurora * 12 + weather.sunshine * 33);
 	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 		(Uint8)tint_red, (Uint8)tint_green, (Uint8)tint_blue, tint_alpha);
-	render_fullscreen_event(surface, ticks, scale);
+	render_fullscreen_event(surface, ticks, scale, &weather);
 	render_weather_effects(surface, ticks, &weather, scale);
 	render_alien_weather(surface, ticks, scale);
 	render_world_jump(surface, ticks, scale);
@@ -2148,51 +2247,28 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		}
 	}
 
-	if(!render_fleet_battle(surface, ticks, scale)
-		&& !render_background_battle(surface, ticks, scale)) {
-		render_battle_flyby(surface, ticks, scale);
-	}
+	// Battles, flyby and rare sky events never overlap (see GROUP_SKY).
+	render_fleet_battle(surface, ticks, scale);
+	render_background_battle(surface, ticks, scale);
+	render_battle_flyby(surface, ticks, scale);
 	render_rare_sky_event(surface, ticks, scale);
 	render_long_scene(surface, ticks, scale);
 
-	for(int i = 0; i < 10; i++) {
-		unsigned int mote = (unsigned int)i * 2246822519u + 3266489917u;
-		int base_x = (mote % surface->w + ticks / (45 + i % 4 * 13)) % surface->w;
-		double nx = (double)base_x / surface->w;
-		double ridge = 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
-		int y = surface->h * (ridge + 0.035) + (int)(sin(ticks / (520.0 + i * 47) + i) * scale * 0.018);
-		filledCircleRGBA(surface, base_x, y, 1, 200, 206, 164,
-			(Uint8)(35 + 30 * (0.5 + 0.5 * sin(ticks / (230.0 + i * 31) + i))));
-	}
-
-	// Autumn leaves: a distinct seasonal feature, denser and with a small
-	// leaf silhouette so autumn reads clearly on its own.
-	double autumn_strength = weather.season[2];
-	int autumn = (int)(autumn_strength * 46);
+	int autumn = weather.season[2] * 16;
 	for(int i = 0; i < autumn; i++) {
 		unsigned int seed = (unsigned int)i * 2246822519u + 3266489917u;
-		int drift = (int)(ticks / (26 + i % 5 * 7));
-		int fall = (int)(ticks * (3 + i % 4) / 46);
-		int x = (seed + drift) % surface->w;
-		int y = (seed / 11 + fall) % surface->h;
-		int sway = (int)(sin(ticks / (300.0 + i % 7 * 40) + i * 1.7) * scale * 0.016);
-		Uint8 alpha = (Uint8)(70 + 110 * autumn_strength);
-		int leaf = 2 + i % 3;
-		int tilt = (i & 1) ? sway / 2 : -sway / 2;
-		Uint8 lr = (Uint8)(150 + (i * 37) % 80);
-		Uint8 lg = (Uint8)(58 + (i * 23) % 55);
-		Uint8 lb = (Uint8)(28 + (i * 17) % 35);
-		thickLineRGBA(surface, x + sway, y, x + sway + tilt, y + leaf,
-			2, lr, lg, lb, alpha);
-		filledCircleRGBA(surface, x + sway, y, leaf, lr, lg, lb,
-			(Uint8)(alpha * 0.85));
+		int x = (seed + ticks / (32 + i % 5 * 9)) % surface->w;
+		int y = (seed / 11 + ticks * (2 + i % 3) / 55) % surface->h;
+		int sway = (int)(sin(ticks / 370.0 + i * 1.7) * scale * 0.012);
+		Uint8 alpha = (Uint8)(55 + 90 * weather.season[2]);
+		thickLineRGBA(surface, x, y, x + sway + 2, y + 3,
+			2, (Uint8)(154 + i % 3 * 20), (Uint8)(76 + i % 4 * 13), 43, alpha);
 	}
 
 	unsigned int rain_seed = 0x7f4a7c15u;
 	double storm_strength = smooth_step(0.25, 0.75, weather.lightning);
-	double rain_share = 1.0 - weather.snow * 0.45;
 	int rain_count = (int)(surface->w * surface->h / 1650.0 * weather.rain
-		* (1.0 + storm_strength * 2.0) * rain_share);
+		* (1.0 + storm_strength * 2.0));
 	if(rain_count > MAX_RAIN_DROPS) rain_count = MAX_RAIN_DROPS;
 	for(int i = 0; i < rain_count; i++) {
 		rain_seed = rain_seed * 1664525u + 1013904223u;
@@ -2211,8 +2287,7 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 			154, 174, 207, alpha);
 	}
 
-	double snow_share = 1.0 - weather.rain * 0.45;
-	int snow_count = (int)(surface->w * surface->h / 3400.0 * weather.snow * snow_share);
+	int snow_count = (int)(surface->w * surface->h / 3400.0 * weather.snow);
 	for(int i = 0; i < snow_count; i++) {
 		unsigned int seed = (unsigned int)i * 1664525u + 1013904223u;
 		int x = (seed + ticks / (12 + i % 7 * 4)) % surface->w;
@@ -2230,23 +2305,15 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 void blit_digits(SDL_Surface *surface, SDL_Rect *rect, int spc, char digits[], SDL_Color color) {
 	SDL_Surface *glyph;
 	SDL_Rect coords;
-	// The cached glyphs are rendered at full FONT_COLOR. The flip animation
-	// passes a dimmed color for the scaling half, so render those on the fly.
-	bool use_cache = color.r == FONT_COLOR.r && color.g == FONT_COLOR.g
-		&& color.b == FONT_COLOR.b;
 
 	if(digits[1]) {
 		int gap = spc + spc / 2;
-		SDL_Surface *first_glyph = use_cache ? digit_glyphs[digits[0] - '0']
-			: TTF_RenderGlyph_Blended(font_time, digits[0], color);
-		SDL_Surface *second_glyph = use_cache ? digit_glyphs[digits[1] - '0']
-			: TTF_RenderGlyph_Blended(font_time, digits[1], color);
+		SDL_Surface *first_glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
+		SDL_Surface *second_glyph = TTF_RenderGlyph_Blended(font_time, digits[1], color);
 		if(!first_glyph || !second_glyph) {
 			fprintf(stderr, "Unable to render clock digits: %s\n", TTF_GetError());
-			if(!use_cache) {
-				if(first_glyph) SDL_FreeSurface(first_glyph);
-				if(second_glyph) SDL_FreeSurface(second_glyph);
-			}
+			if(first_glyph) SDL_FreeSurface(first_glyph);
+			if(second_glyph) SDL_FreeSurface(second_glyph);
 			return;
 		}
 		int total_width = first_glyph->w + gap + second_glyph->w;
@@ -2254,24 +2321,17 @@ void blit_digits(SDL_Surface *surface, SDL_Rect *rect, int spc, char digits[], S
 		coords.y = rect->y + (rect->h - first_glyph->h) / 2;
 		SDL_BlitSurface(first_glyph, 0, surface, &coords);
 		coords.x += first_glyph->w + gap;
+		SDL_FreeSurface(first_glyph);
 		coords.y = rect->y + (rect->h - second_glyph->h) / 2;
 		SDL_BlitSurface(second_glyph, 0, surface, &coords);
-		if(!use_cache) {
-			SDL_FreeSurface(first_glyph);
-			SDL_FreeSurface(second_glyph);
-		}
+		SDL_FreeSurface(second_glyph);
 	} else {
 		// single digit
-		glyph = use_cache ? digit_glyphs[digits[0] - '0']
-			: TTF_RenderGlyph_Blended(font_time, digits[0], color);
-		if(!glyph) {
-			fprintf(stderr, "Unable to render clock digits: %s\n", TTF_GetError());
-			return;
-		}
+		glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
 		coords.x = rect->x + (rect->w - glyph->w) / 2;
 		coords.y = rect->y + (rect->h - glyph->h) / 2;
 		SDL_BlitSurface(glyph, 0, surface, &coords);
-		if(!use_cache) SDL_FreeSurface(glyph);
+		SDL_FreeSurface(glyph);
 	}
 }
 
@@ -2373,6 +2433,10 @@ void render_digits(SDL_Surface *surface, SDL_Rect *background, char digits[], ch
 	SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 0x35, 0x3a, 0x49));
 }
 
+// Backdrop picture reused by the frames of one flip while an overlay is showing.
+static SDL_Surface *flip_backdrop;
+static bool flip_backdrop_valid = false;
+
 void render_clock(int maxsteps, int step, bool ambient_frame) {
 	static Uint32 last_profile_report;
 	char buffer[3], buffer2[3];
@@ -2399,45 +2463,75 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 		burnin_y = new_burnin_y;
 		moved = true;
 	}
+	Uint32 now = scene_time();
+	// The screen buffer is not preserved between frames, so anything drawn over
+	// the cards (foreground particles, screen fades) must start from a freshly
+	// drawn backdrop, or its alpha would pile up on the previous frame.
+	bool overlay_active = effect_is_active(&EFFECT_FOREGROUND, now)
+		|| effect_is_active(&EFFECT_SCREEN_FADE, now);
+	bool backdrop_redrawn = moved || ambient_frame || overlay_active;
 	if(moved || ambient_frame) {
 		Uint32 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
-		render_backdrop(screen, SDL_GetTicks());
+		render_backdrop(screen, now);
 		if(profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
+		flip_backdrop_valid = false;
+	} else if(overlay_active) {
+		// Flip frame with an overlay: render the backdrop once, then reuse that
+		// picture for the rest of the flip so frames stay cheap.
+		if(!(flip_backdrop_valid && flip_backdrop
+			&& SDL_BlitSurface(flip_backdrop, NULL, screen, NULL) == 0)) {
+			Uint32 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
+			render_backdrop(screen, now);
+			if(profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
+			if(flip_backdrop && (flip_backdrop->w != screen->w || flip_backdrop->h != screen->h)) {
+				SDL_FreeSurface(flip_backdrop);
+				flip_backdrop = NULL;
+			}
+			if(!flip_backdrop) {
+				flip_backdrop = SDL_ConvertSurface(screen, screen->format, SDL_SWSURFACE);
+				flip_backdrop_valid = flip_backdrop != NULL;
+			} else {
+				flip_backdrop_valid = SDL_BlitSurface(screen, NULL, flip_backdrop, NULL) == 0;
+			}
+		}
 	}
 	bool time_changed = _time->tm_hour != past_h || _time->tm_min != past_m;
-	bool redraw = ambient_frame || (moved && !time_changed);
+	bool redraw = ambient_frame || (backdrop_redrawn && !time_changed);
 	int render_steps = redraw ? 20 : maxsteps;
 	int render_step = redraw ? 19 : step;
+	bool card_drawn[2] = { false, false };
 
 	// draw hours
-	if(_time->tm_hour != past_h || redraw || moved) {
+	if(_time->tm_hour != past_h || backdrop_redrawn) {
 		int h = twentyfourh ? _time->tm_hour : (_time->tm_hour + 11) % 12 + 1;
 		// past_h is stored in 24-hour form; convert it the same way as h
 		// so the flip animation shows the previous 12-hour value.
 		int prev_h = twentyfourh ? past_h : (past_h + 11) % 12 + 1;
-		int hour_steps = render_steps;
-		int hour_step = render_step;
-		if(moved && _time->tm_hour == past_h) {
-			hour_steps = 20;
-			hour_step = 19;
-		}
+		// A card the backdrop just painted over is redrawn as it is, not mid-flip.
+		bool hour_static = backdrop_redrawn && (redraw || _time->tm_hour == past_h);
+		int hour_steps = hour_static ? 20 : render_steps;
+		int hour_step = hour_static ? 19 : render_step;
 		if(leadingzero) {
 			snprintf(buffer, 3, "%02d", h);
-			snprintf(buffer2, 3, "%02d", redraw ? h : prev_h);
+			snprintf(buffer2, 3, "%02d", hour_static ? h : prev_h);
 		} else {
 			snprintf(buffer, 3, "%d", h);
-			snprintf(buffer2, 3, "%d", redraw ? h : prev_h);
+			snprintf(buffer2, 3, "%d", hour_static ? h : prev_h);
 		}
 		render_digits(screen, &hourBackground, buffer, buffer2, hour_steps, hour_step);
 		// draw am/pm
 		if(!twentyfourh) render_ampm(screen, &hourBackground, _time->tm_hour >= 12);
+		card_drawn[0] = true;
 	}
 
 	// draw minutes
-	if(_time->tm_min != past_m || redraw) {
+	if(_time->tm_min != past_m || backdrop_redrawn) {
+		bool min_static = backdrop_redrawn && (redraw || _time->tm_min == past_m);
 		snprintf(buffer, 3, "%02d", _time->tm_min);
-		snprintf(buffer2, 3, "%02d", redraw ? _time->tm_min : past_m);
-		render_digits(screen, &minBackground, buffer, buffer2, render_steps, render_step);
+		snprintf(buffer2, 3, "%02d", min_static ? _time->tm_min : past_m);
+		render_digits(screen, &minBackground, buffer, buffer2,
+			min_static ? 20 : render_steps, min_static ? 19 : render_step);
+		card_drawn[1] = true;
 	}
 
 	if(_time->tm_yday != date_surface_yday) {
@@ -2453,7 +2547,7 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			date_surface_yday = _time->tm_yday;
 		}
 	}
-	if((redraw || moved || _time->tm_yday != past_yday)
+	if((backdrop_redrawn || _time->tm_yday != past_yday)
 		&& date_surface_cache && date_surface_yday == _time->tm_yday) {
 		SDL_Rect date_coords;
 		date_coords.x = (screen->w - date_surface_cache->w) / 2 + burnin_x;
@@ -2462,10 +2556,12 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 		past_yday = _time->tm_yday;
 	}
 
-	SceneWeather weather = get_scene_weather(SDL_GetTicks());
+	SceneWeather weather = get_scene_weather(now);
 	SDL_Rect *clock_cards[] = { &hourBackground, &minBackground };
 	for(size_t card_index = 0; card_index < sizeof(clock_cards) / sizeof(clock_cards[0]); card_index++) {
 		SDL_Rect *card = clock_cards[card_index];
+		// Only weather over cards drawn this frame, or it would build up on stale ones.
+		if(!card_drawn[card_index]) continue;
 		SDL_SetClipRect(screen, card);
 		int drops = (int)(card->w / 42.0 * weather.rain);
 		for(int i = 0; i < drops; i++) {
@@ -2474,7 +2570,7 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			int length = 4 + (seed >> 24) % 7;
 			int speed = 7 + (seed >> 12) % 7;
 			int drop_y = card->y
-				+ (int)((seed + SDL_GetTicks() * speed / 90) % card->h);
+				+ (int)((seed + now * speed / 90) % card->h);
 			Uint8 alpha = (Uint8)(24 + (seed >> 18) % 30);
 			thickLineRGBA(screen, drop_x, drop_y, drop_x - 1, drop_y - length,
 				1, 151, 174, 211, alpha);
@@ -2484,14 +2580,14 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			Uint32 seed = (Uint32)(i + card_index * 61) * 1664525u + 1013904223u;
 			int flake_x = card->x + seed % card->w;
 			int flake_y = card->y
-				+ (int)((seed + SDL_GetTicks() * (2 + (seed >> 16) % 4) / 80) % card->h);
+				+ (int)((seed + now * (2 + (seed >> 16) % 4) / 80) % card->h);
 			pixelRGBA(screen, flake_x, flake_y, 208, 221, 236, 110);
 		}
 	}
 	SDL_SetClipRect(screen, NULL);
 	int scene_scale = screen->h < screen->w ? screen->h : screen->w;
-	render_foreground_event(screen, SDL_GetTicks(), scene_scale);
-	render_rare_screen_fade(screen, SDL_GetTicks());
+	render_foreground_event(screen, now, scene_scale);
+	render_rare_screen_fade(screen, now);
 
 	// flip backbuffer
 	SDL_Flip(screen);
@@ -2549,10 +2645,30 @@ Uint32 update_time(Uint32 interval, void *param) {
 	return interval;
 }
 
+// Returns the value that follows option argv[*i] and advances *i, or NULL (with a message) if it is missing.
+static const char *option_value(int argc, char **argv, int *i) {
+	if(*i + 1 >= argc) {
+		fprintf(stderr, "Option %s needs a value\n", argv[*i]);
+		return NULL;
+	}
+	return argv[++*i];
+}
+
+static bool parse_int_in_range(const char *text, long min, long max, long *value) {
+	char *end = NULL;
+	errno = 0;
+	long parsed = strtol(text, &end, 0);
+	if(errno != 0 || end == text || *end != '\0' || parsed < min || parsed > max) return false;
+	*value = parsed;
+	return true;
+}
+
 int main(int argc, char** argv ) {
 	char *wid_env;
 	static char sdlwid[100];
 	double display_scale_factor = 1;
+	bool seed_given = false;
+	Uint32 scene_seed = 0;
 	profile_rendering = getenv("GLUQLO_PROFILE") != NULL;
 
 	Uint32 wid = 0;
@@ -2572,6 +2688,8 @@ int main(int argc, char** argv ) {
 			printf("  -h\t\tCustom height\n");
 			printf("  -r\t\tCustom resolution in WxH format\n");
 			printf("  -s\t\tCustom display scale factor\n");
+			printf("  -effect NAME[:KIND]\tShow only one scheduled effect, repeating (NAME 'list' lists them)\n");
+			printf("  -seed N\tStart the scenery (season, weather, effects) at a fixed point instead of a random one\n");
 			return 0;
 		} else if(strcmp("-root", argv[i]) == 0 || strcmp("-f", argv[i]) == 0 || strcmp("--fullscreen", argv[i]) == 0) {
 			fullscreen = true;
@@ -2584,30 +2702,112 @@ int main(int argc, char** argv ) {
 		} else if(strcmp("-leadingzero", argv[i]) == 0) {
 			leadingzero = true;
 		} else if(strcmp("-r", argv[i]) == 0 || strcmp("--resolution", argv[i]) == 0) {
-			char *resolution = argv[i+1];
-			char *val = strtok(resolution, "x");
-			width = atoi(val);
-			val = strtok(NULL, "x");
-			height = atoi(val);
-			i++;
-		} else if(strcmp("-w", argv[i]) == 0) {
-			width = atoi(argv[i+1]);
-			i++;
-		} else if(strcmp("-h", argv[i]) == 0) {
-			height = atoi(argv[i+1]);
-			i++;
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			int parsed_width, parsed_height;
+			char trailing;
+			if(sscanf(value, "%dx%d%c", &parsed_width, &parsed_height, &trailing) != 2
+				|| parsed_width < 1 || parsed_width > 16384
+				|| parsed_height < 1 || parsed_height > 16384) {
+				fprintf(stderr, "Invalid resolution -- %s (expected WxH, e.g. 1280x720)\n", value);
+				return 1;
+			}
+			width = parsed_width;
+			height = parsed_height;
+		} else if(strcmp("-w", argv[i]) == 0 || strcmp("-h", argv[i]) == 0) {
+			bool is_width = argv[i][1] == 'w';
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			long parsed;
+			if(!parse_int_in_range(value, 1, 16384, &parsed)) {
+				fprintf(stderr, "Invalid %s -- %s\n", is_width ? "width" : "height", value);
+				return 1;
+			}
+			if(is_width) width = (int)parsed;
+			else height = (int)parsed;
 		} else if(strcmp("-s", argv[i]) == 0) {
-			display_scale_factor = atof(argv[i+1]);
-			i++;
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			char *end = NULL;
+			double parsed = strtod(value, &end);
+			if(end == value || *end != '\0' || !(parsed > 0.0 && parsed <= 16.0)) {
+				fprintf(stderr, "Invalid scale factor -- %s (expected a number above 0)\n", value);
+				return 1;
+			}
+			display_scale_factor = parsed;
 		} else if(strcmp("-window-id", argv[i]) == 0) {
-			wid = strtol(argv[i+1], (char **) NULL, 0);
-			i++;
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			long parsed;
+			if(!parse_int_in_range(value, 1, 0xffffffffL, &parsed)) {
+				fprintf(stderr, "Invalid window id -- %s\n", value);
+				return 1;
+			}
+			wid = (Uint32)parsed;
+		} else if(strcmp("-seed", argv[i]) == 0) {
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			long parsed;
+			if(!parse_int_in_range(value, 0, 0xffffffffL, &parsed)) {
+				fprintf(stderr, "Invalid seed -- %s (expected a number)\n", value);
+				return 1;
+			}
+			scene_seed = (Uint32)parsed;
+			seed_given = true;
+		} else if(strcmp("-effect", argv[i]) == 0) {
+			const char *effect_value = option_value(argc, argv, &i);
+			if(!effect_value) {
+				fprintf(stderr, "Try -effect list for the available effects.\n");
+				return 1;
+			}
+			char effect_arg[64];
+			snprintf(effect_arg, sizeof(effect_arg), "%s", effect_value);
+			if(strcmp(effect_arg, "list") == 0) {
+				for(size_t effect = 0; effect < effect_count; effect++) {
+					if(effect_table[effect]->kind_count > 0) {
+						printf("%s (kinds 0-%d)\n", effect_table[effect]->name,
+							effect_table[effect]->kind_count - 1);
+					} else {
+						printf("%s\n", effect_table[effect]->name);
+					}
+				}
+				return 0;
+			}
+			char *kind_separator = strchr(effect_arg, ':');
+			if(kind_separator) *kind_separator = '\0';
+			forced_effect = find_effect(effect_arg);
+			if(!forced_effect) {
+				printf("Unknown effect -- %s\n", effect_arg);
+				printf("Try -effect list for the available effects.\n");
+				return 1;
+			}
+			if(kind_separator) {
+				char *kind_end = NULL;
+				long requested = strtol(kind_separator + 1, &kind_end, 10);
+				if(kind_end == kind_separator + 1 || *kind_end != '\0'
+					|| requested < 0 || requested >= forced_effect->kind_count) {
+					if(forced_effect->kind_count > 0) {
+						printf("Effect %s takes a kind from 0 to %d\n",
+							forced_effect->name, forced_effect->kind_count - 1);
+					} else {
+						printf("Effect %s has no kinds\n", forced_effect->name);
+					}
+					return 1;
+				}
+				forced_kind = (int)requested;
+			}
 		} else {
-			printf("Invalid option -- %s\n", argv[i]);
-			printf("Try --help for more information.\n");
-			return 0;
+			fprintf(stderr, "Invalid option -- %s\n", argv[i]);
+			fprintf(stderr, "Try --help for more information.\n");
+			return 1;
 		}
 	}
+
+	// Each launch starts at a different point of the season/weather/effect schedule.
+	// -effect starts at 0 so the chosen effect begins straight away.
+	if(forced_effect) scene_offset = 0;
+	else if(seed_given) scene_offset = scene_offset_from_seed(scene_seed);
+	else scene_offset = random_scene_offset();
 
 	/* If no window argument, check environment */
 	if(wid == 0) {
@@ -2619,12 +2819,17 @@ int main(int argc, char** argv ) {
 	/* Get win attrs if we've been given a window, otherwise we'll use our own */
 	if(wid != 0) {
 		if ((display = XOpenDisplay(NULL)) != NULL) { /* Use the default display */
-			XGetWindowAttributes(display, (Window) wid, &windowAttributes);
+			Status attributes_status = XGetWindowAttributes(display, (Window) wid, &windowAttributes);
 			XCloseDisplay(display);
-			snprintf(sdlwid, 100, "SDL_WINDOWID=0x%X", wid);
-			putenv(sdlwid); /* Tell SDL to use this window */
-			width = windowAttributes.width;
-			height = windowAttributes.height;
+			if(attributes_status) {
+				snprintf(sdlwid, 100, "SDL_WINDOWID=0x%X", wid);
+				putenv(sdlwid); /* Tell SDL to use this window */
+				width = windowAttributes.width;
+				height = windowAttributes.height;
+			} else {
+				fprintf(stderr, "Unable to read attributes of window 0x%X\n", wid);
+				wid = 0;
+			}
 		}
 	}
 
@@ -2678,10 +2883,9 @@ int main(int argc, char** argv ) {
 		fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
 		return 1;
 	}
-	init_glyph_cache();
 
 	// Draw the layered forest before placing the clock over it.
-	render_backdrop(screen, SDL_GetTicks());
+	render_backdrop(screen, scene_time());
 
 	// calculate box coordinates
 	int rectsize;
@@ -2762,8 +2966,8 @@ int main(int argc, char** argv ) {
 		fprintf(stderr, "Unable to start clock timer: %s\n", SDL_GetError());
 		SDL_FreeSurface(bg);
 		if(backdrop_base) SDL_FreeSurface(backdrop_base);
+		if(flip_backdrop) SDL_FreeSurface(flip_backdrop);
 		if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
-		free_glyph_cache();
 		TTF_CloseFont(font_time);
 		TTF_CloseFont(font_mode);
 		TTF_CloseFont(font_date);
@@ -2827,8 +3031,8 @@ int main(int argc, char** argv ) {
 
 	SDL_FreeSurface(bg);
 	if(backdrop_base) SDL_FreeSurface(backdrop_base);
+	if(flip_backdrop) SDL_FreeSurface(flip_backdrop);
 	if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
-	free_glyph_cache();
 
 	TTF_CloseFont(font_time);
 	TTF_CloseFont(font_mode);
