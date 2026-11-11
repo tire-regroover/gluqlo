@@ -428,6 +428,233 @@ static void draw_bird(SDL_Surface *surface, int x, int y, int size, int wing_lif
 	aalineRGBA(surface, x + joint_x, joint_y, x + span, tip_y, shade, shade_g, shade_b, 145);
 }
 
+// A ship, drawn as a silhouette rather than as a set of primitives. At this
+// size only three things read: the outline, one lit edge, and the engine
+// glow. A ring plus a disc reads as a mouse pointer; a point with a stepped
+// trail reads as a wine bottle. A long tapered hull with a rim light and a
+// hot stern reads as a ship.
+//
+// dir is +1 for nose-right, -1 for nose-left. tilt shears the hull vertically
+// so a banking ship reads as banking rather than as a flat cut-out.
+static void soft_glow(SDL_Surface *surface, int cx, int cy, int radius,
+	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+
+// Three alien races, each with its own hull language. At this scale only the
+// silhouette reads, so each race is defined by outline rather than detail.
+//   0 — the Blade: a needle prow and swept fins. Hostile red lamps.
+//   1 — the Hive: a segmented teardrop carapace, no fins. Amber biolume.
+//   2 — the Anvil: a blunt industrial wedge, cut square at the stern. Cold
+//       blue lamps and twin hull bars.
+//
+// dir is +1 for nose-right, -1 for nose-left. tilt shears the hull vertically
+// so a banking ship reads as banking rather than as a flat cut-out.
+static void soft_glow(SDL_Surface *surface, int cx, int cy, int radius,
+	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+
+static void draw_ship(SDL_Surface *surface, int x, int y, int length,
+	int dir, int tilt, Uint8 alpha, int engine_heat, int race) {
+	if(length < 10) length = 10;
+	if(race < 0 || race > 2) race = 0;
+
+	// Engine colour is the fastest way to tell the races apart at a glance.
+	Uint8 er = 236, eg = 118, eb = 62;                // Blade: hostile orange
+	if(race == 1) { er = 150; eg = 232; eb = 118; }   // Hive: bio green
+	if(race == 2) { er = 140; eg = 196; eb = 255; }   // Anvil: cold blue
+
+	// Hull tones. A near-black hull on a near-black sky is invisible, so the
+	// lit face sits a few steps above the sky and the shadow a few below.
+	// Without that split the hull reads as a hole in the sky.
+	Uint8 hr = 46, hg = 54, hb = 76;
+	Uint8 sr = 20, sg = 25, sb = 38;
+	Uint8 rr = 168, rg = 190, rb = 226;
+	if(race == 1) {
+		hr = 44; hg = 58; hb = 46;
+		sr = 18; sg = 26; sb = 22;
+		rr = 150; rg = 200; rb = 140;
+	} else if(race == 2) {
+		hr = 52; hg = 58; hb = 74;
+		sr = 22; sg = 26; sb = 36;
+		rr = 186; rg = 206; rb = 240;
+	}
+
+	if(race == 0) {
+		// --- The Blade: needle prow, swept fins, red lamps ---------------
+		int half = length / 7;
+		if(half < 3) half = 3;
+		// Fins first, so the hull sits on top of them. A fin needs a base
+		// roughly as long as it is deep, otherwise the triangle collapses
+		// into a scratch: a 65%-of-length base with a 5px apex reads as a
+		// hairline, not a fin.
+		for(int side = -1; side <= 1; side += 2) {
+			Sint16 fx[3], fy[3];
+			fx[0] = (Sint16)(x + dir * (-34) * length / 100);
+			fy[0] = (Sint16)(y + side * half * 80 / 100);
+			fx[1] = (Sint16)(x + dir * (-74) * length / 100);
+			fy[1] = (Sint16)(y + side * half * 80 / 100);
+			fx[2] = (Sint16)(x + dir * (-100) * length / 100);
+			fy[2] = (Sint16)(y + side * half * 240 / 100);
+			filledPolygonRGBA(surface, fx, fy, 3, hr, hg, hb, alpha);
+			aalineRGBA(surface, fx[0], fy[0], fx[2], fy[2], rr, rg, rb, alpha);
+		}
+		static const int px[9] = { 100, 55, 10, -45, -100, -100, -45, 10, 55 };
+		static const int py[9] = { 0, -50, -95, -100, -75, 75, 100, 95, 50 };
+		Sint16 hx[9], hy[9];
+		for(int i = 0; i < 9; i++) {
+			hx[i] = (Sint16)(x + dir * px[i] * length / 100);
+			hy[i] = (Sint16)(y + py[i] * half / 100 + tilt * px[i] / 100);
+		}
+		filledPolygonRGBA(surface, hx, hy, 9, hr, hg, hb, alpha);
+		// Shadow along the lower half, so the hull has a lit face and a dark
+		// one instead of reading as a flat cut-out.
+		static const int sx[8] = { 55, 10, -45, -100, -100, -45, 10, 55 };
+		static const int sy[8] = { 50, 95, 100, 75, 15, 30, 25, 15 };
+		Sint16 shx[8], shy[8];
+		for(int i = 0; i < 8; i++) {
+			shx[i] = (Sint16)(x + dir * sx[i] * length / 100);
+			shy[i] = (Sint16)(y + sy[i] * half / 100 + tilt * sx[i] / 100);
+		}
+		filledPolygonRGBA(surface, shx, shy, 8, sr, sg, sb, alpha);
+		// Rim light along the upper edge only, fading aft.
+		aalineRGBA(surface, hx[0], hy[0], hx[1], hy[1], rr, rg, rb, alpha);
+		aalineRGBA(surface, hx[1], hy[1], hx[2], hy[2],
+			(Uint8)(rr * 3 / 4), (Uint8)(rg * 3 / 4), (Uint8)(rb * 3 / 4), alpha);
+		aalineRGBA(surface, hx[2], hy[2], hx[3], hy[3],
+			(Uint8)(rr / 2), (Uint8)(rg / 2), (Uint8)(rb / 2), alpha);
+		aalineRGBA(surface, hx[3], hy[3], hx[4], hy[4],
+			(Uint8)(rr / 3), (Uint8)(rg / 3), (Uint8)(rb / 3), alpha);
+		// Running lights: hostile red.
+		for(int lamp = 0; lamp < 3; lamp++) {
+			int lx = x + dir * (length / 3 - lamp * length / 8);
+			int ly = y - half / 3 + tilt * (length / 3 - lamp * length / 8) / length;
+			pixelRGBA(surface, lx, ly, 240, 64, 48, alpha);
+		}
+	} else if(race == 1) {
+		// --- The Hive: segmented teardrop carapace, amber biolume --------
+		// No fins and no spine. The mass itself is the threat: it swells to
+		// its widest a third back, then tapers to a point.
+		int half = length / 5;
+		if(half < 3) half = 3;
+		enum { HIVE_PTS = 16 };
+		Sint16 hx[HIVE_PTS * 2], hy[HIVE_PTS * 2];
+		for(int i = 0; i < HIVE_PTS; i++) {
+			double t = (double)i / (HIVE_PTS - 1);
+			double along = 100.0 - t * 200.0;
+			double w = sin(pow(t, 0.62) * 3.14159265359);
+			int px = x + dir * (int)(along * length / 100);
+			int py = y + tilt * (int)(along / 100);
+			hx[i] = (Sint16)px;
+			hy[i] = (Sint16)(py - w * half);
+			hx[HIVE_PTS * 2 - 1 - i] = (Sint16)px;
+			hy[HIVE_PTS * 2 - 1 - i] = (Sint16)(py + w * half);
+		}
+		filledPolygonRGBA(surface, hx, hy, HIVE_PTS * 2, hr, hg, hb, alpha);
+		// Shadow: the lower half of the carapace. Walk the bottom edge from
+		// stern to prow, then close straight back to the stern. Both ends sit
+		// on the centreline, so that closing edge IS the centreline and the
+		// result is exactly the lower half. Tracing only the bottom edge and
+		// closing it fills a thin lens instead.
+		Sint16 shx[HIVE_PTS + 1], shy[HIVE_PTS + 1];
+		for(int i = 0; i < HIVE_PTS; i++) {
+			int idx = HIVE_PTS * 2 - 1 - i;
+			shx[i] = hx[idx];
+			shy[i] = hy[idx];
+		}
+		shx[HIVE_PTS] = (Sint16)(x - dir * length);
+		shy[HIVE_PTS] = (Sint16)(y - tilt);
+		filledPolygonRGBA(surface, shx, shy, HIVE_PTS + 1, sr, sg, sb, alpha);
+		// Segment ridges across the carapace. These are what make it read as
+		// a living thing rather than a smooth pod.
+		for(int seg = 1; seg < 7; seg++) {
+			double t = (double)seg / 7;
+			double along = 100.0 - t * 200.0;
+			double w = sin(pow(t, 0.62) * 3.14159265359);
+			int sx = x + dir * (int)(along * length / 100);
+			int sy = y + tilt * (int)(along / 100);
+			int sw = (int)(w * half);
+			if(sw < 1) continue;
+			aalineRGBA(surface, sx, sy - sw, sx, sy + sw,
+				(Uint8)(hr + 26), (Uint8)(hg + 30), (Uint8)(hb + 22), alpha);
+		}
+		// A lit ridge along the upper edge, in the same amber as the lamps.
+		for(int i = 0; i < HIVE_PTS - 1; i++) {
+			aalineRGBA(surface, hx[i], hy[i], hx[i + 1], hy[i + 1],
+				rr, rg, rb, alpha);
+		}
+		// Bioluminescent nodes along the spine.
+		for(int lamp = 0; lamp < 4; lamp++) {
+			double t = 0.18 + lamp * 0.18;
+			double along = 100.0 - t * 200.0;
+			double w = sin(pow(t, 0.62) * 3.14159265359);
+			int lx = x + dir * (int)(along * length / 100);
+			int ly = y + tilt * (int)(along / 100) - (int)(w * half * 0.45);
+			pixelRGBA(surface, lx, ly, 196, 244, 152, alpha);
+		}
+	} else {
+		// --- The Anvil: blunt industrial wedge, cold blue lamps ----------
+		// Cut square at the stern. Two parallel hull bars run its length, so
+		// it reads as built rather than grown.
+		int half = length / 6;
+		if(half < 3) half = 3;
+		static const int px[7] = { 100, 72, 34, -100, -100, 34, 72 };
+		static const int py[7] = { 0, -55, -100, -100, 100, 100, 55 };
+		Sint16 hx[7], hy[7];
+		for(int i = 0; i < 7; i++) {
+			hx[i] = (Sint16)(x + dir * px[i] * length / 100);
+			hy[i] = (Sint16)(y + py[i] * half / 100 + tilt * px[i] / 100);
+		}
+		filledPolygonRGBA(surface, hx, hy, 7, hr, hg, hb, alpha);
+		// Shadow along the lower half.
+		static const int sx[6] = { 72, 34, -100, -100, 34, 72 };
+		static const int sy[6] = { 55, 100, 100, 25, 25, 25 };
+		Sint16 shx[6], shy[6];
+		for(int i = 0; i < 6; i++) {
+			shx[i] = (Sint16)(x + dir * sx[i] * length / 100);
+			shy[i] = (Sint16)(y + sy[i] * half / 100 + tilt * sx[i] / 100);
+		}
+		filledPolygonRGBA(surface, shx, shy, 6, sr, sg, sb, alpha);
+		// Twin hull bars: two dark channels running the length of the wedge.
+		for(int side = -1; side <= 1; side += 2) {
+			int by = y + side * half * 34 / 100;
+			thickLineRGBA(surface,
+				x + dir * length * 40 / 100, by,
+				x - dir * length * 92 / 100, by, 2, 8, 10, 16, alpha);
+		}
+		// Rim light along the upper edge, and a hard highlight on the prow.
+		aalineRGBA(surface, hx[0], hy[0], hx[1], hy[1], rr, rg, rb, alpha);
+		aalineRGBA(surface, hx[1], hy[1], hx[2], hy[2],
+			(Uint8)(rr * 3 / 4), (Uint8)(rg * 3 / 4), (Uint8)(rb * 3 / 4), alpha);
+		aalineRGBA(surface, hx[2], hy[2], hx[3], hy[3],
+			(Uint8)(rr / 2), (Uint8)(rg / 2), (Uint8)(rb / 2), alpha);
+		// Cold blue lamps in a row along the prow face.
+		for(int lamp = 0; lamp < 3; lamp++) {
+			int lx = x + dir * length * (34 - lamp * 12) / 100;
+			int ly = y - half * 40 / 100 + tilt * (34 - lamp * 12) / 100;
+			pixelRGBA(surface, lx, ly, 176, 218, 255, alpha);
+		}
+	}
+
+	// Engine: a hot core at the stern with a short exhaust plume. The plume
+	// is what sells motion.
+	int ex = x - dir * length * 96 / 100;
+	int ey = y - tilt * 96 / 100;
+	int half_e = length / 6;
+	if(half_e < 3) half_e = 3;
+	if(engine_heat > 0) {
+		int plume = length / 4;
+		for(int step = 1; step <= 6; step++) {
+			double t = (double)step / 6;
+			int wx = ex - dir * (int)(t * plume);
+			int w = (int)(half_e / 3.0 * (1.0 - t) + 1.0);
+			thickLineRGBA(surface, wx, ey, wx - dir, ey, w,
+				er, eg, eb, (Uint8)(engine_heat / 3 * (1.0 - t)));
+		}
+		soft_glow(surface, ex, ey, half_e / 2 + 1, er, eg, eb,
+			engine_heat / 3);
+		soft_glow(surface, ex, ey, half_e / 4 + 1, 255, 240, 220,
+			engine_heat / 2);
+	}
+}
+
 static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale) {
 	const Uint32 cycle = 90000;
 	Uint32 slot = ticks / cycle;
@@ -578,7 +805,7 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 	double progress = (double)phase / duration;
 	double fade = smooth_step(0.0, 6000.0, phase)
 		* (1.0 - smooth_step(duration - 7000.0, duration, phase));
-	int kind = seed % 7;
+	int kind = seed % 8;
 
 	if(kind == 0) {
 		// Ridges emerging from haze as the light comes up. Each rank is ONE
@@ -721,7 +948,7 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 			thickLineRGBA(surface, sx, sy, sx - 2, sy + streak_len, 1,
 				186, 202, 220, (Uint8)(44 * fade * edge));
 		}
-	} else {
+	} else if(kind == 6) {
 		// A distant forest at dusk. The canopy is a noise-driven silhouette
 		// rather than a row of triangles: individual trees are never resolved,
 		// only the ragged edge of the mass, which is what a treeline actually
@@ -762,6 +989,90 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 			soft_band(surface, base_y - scale / 26, base_y + scale / 10,
 				150, 164, 186, (int)((8 + rank * 3) * fade));
 		}
+	} else {
+		// A distant engagement, seen from far enough away that no ship is
+		// larger than a sliver. Two lines pass each other in the dark; the
+		// only light is engine glow, tracer fire, and the occasional hit
+		// blooming on a hull. Nothing is close enough to read as a model,
+		// which is what keeps it from looking like a toy.
+		Uint8 alpha = (Uint8)(150 * fade);
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			8, 10, 20, (Uint8)(46 * fade));
+		int horizon = surface->h * 62 / 100;
+		int span = surface->w + 400;
+		// A band of light along the engagement line, so the eye has something
+		// to read the silhouettes against. Without it the hulls vanish.
+		soft_band(surface, horizon - scale / 4, horizon + scale / 4,
+			74, 88, 128, (int)(58 * fade));
+		// The two lines: one receding, one advancing, each ship on its own
+		// lane so neither line is ever straight.
+		for(int side = 0; side < 2; side++) {
+			int dir = side == 0 ? 1 : -1;
+			int line_y = horizon + (side == 0 ? -scale / 10 : scale / 12);
+			for(int ship = 0; ship < 6; ship++) {
+				unsigned int s = (unsigned int)ship * 2246822519u
+					+ (unsigned int)side * 3266489917u + seed;
+				int lane = (int)((s % 1000) / 1000.0 * surface->h * 0.14)
+					- surface->h / 11;
+				int travel = (int)((Uint64)ticks
+					* (40 + (s >> 10) % 60) / 1000);
+				int x = (travel + (int)(s % 1000)) % span - 200;
+				if(dir < 0) x = span - x - 200;
+				int y = line_y + lane;
+				// Big enough to read as a hull. Anything under ~30px at this
+				// distance is a speck, which is what made the old ones
+				// invisible.
+				int len = scale / (6 + (s >> 20) % 4);
+				if(len < 34) len = 34;
+				// Each side is a different race, so the two lines read as two
+				// fleets rather than one fleet mirrored.
+				draw_ship(surface, x, y, len, dir, 0,
+					(Uint8)(alpha * 1.4), (int)(alpha * 0.9),
+					side == 0 ? 0 : 2);
+			}
+		}
+		// Tracer fire: bright streaks crossing the gap between the lines.
+		// Drawn as a streak with a head, not as a dot — a dot reads as bokeh,
+		// a streak reads as fire.
+		for(int tracer = 0; tracer < 30; tracer++) {
+			unsigned int s = (unsigned int)tracer * 1664525u + seed;
+			double t = fmod((s % 1000) / 1000.0 + progress * 2.4, 1.0);
+			int from_x = (int)((s >> 10) % (unsigned int)surface->w);
+			int from_y = horizon - scale / 10
+				+ (int)((s >> 20) % (unsigned int)(scale / 5 + 1));
+			int to_x = from_x + (int)((s >> 4) % 300) - 150;
+			int to_y = horizon + scale / 12;
+			int px = from_x + (int)((to_x - from_x) * t);
+			int py = from_y + (int)((to_y - from_y) * t);
+			double life = sin(t * 3.14159265359);
+			int a = (int)(alpha * 1.1 * life);
+			if(a < 3) continue;
+			// The streak trails well behind the head along the flight path.
+			int tail_x = px - (to_x - from_x) / 5;
+			int tail_y = py - (to_y - from_y) / 5;
+			thickLineRGBA(surface, tail_x, tail_y, px, py, 2,
+				246, 206, 148, (Uint8)(a / 2));
+			thickLineRGBA(surface, tail_x, tail_y, px, py, 1,
+				255, 232, 190, (Uint8)a);
+			soft_glow(surface, px, py, scale / 150, 255, 226, 176, a);
+		}
+		// Hits: a bloom on a hull, then a fading ember. Kept small — a large
+		// glow reads as a planet, not as a hit.
+		for(int hit = 0; hit < 6; hit++) {
+			unsigned int s = (unsigned int)hit * 2246822519u + seed;
+			double t = fmod((s % 1000) / 1000.0 + progress * 1.3, 1.0);
+			int hx = (int)((s >> 10) % (unsigned int)surface->w);
+			int hy = horizon + (int)((s >> 20) % (unsigned int)(scale / 4 + 1))
+				- scale / 8;
+			double burst = t < 0.10 ? t / 0.10 : 1.0 - (t - 0.10) / 0.90;
+			if(burst <= 0.0) continue;
+			int a = (int)(alpha * 0.55 * burst);
+			soft_glow(surface, hx, hy, scale / 110, 240, 158, 84, a);
+			soft_glow(surface, hx, hy, scale / 260, 255, 236, 198, a * 2);
+		}
+		// The whole engagement sits in haze, so it reads as distance.
+		soft_band(surface, horizon - scale / 7, horizon + scale / 5,
+			96, 108, 138, (int)(30 * fade));
 	}
 }
 
@@ -1223,30 +1534,44 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					(Uint8)(alpha * 0.30 * strength));
 			}
 		} else if(kind == 42) {
-			// A derelict station, far off and tumbling. No hull is drawn: only
-			// the lit edges catch the light, so it reads as a structure rather
-			// than a shape. A ring plus a disc read as a mouse pointer, so the
-			// silhouette is a long spine with a cross-member instead.
-			int body = size * 4;
+			// A derelict station, far off and tumbling. Built as a silhouette:
+			// a long spine, a ring seen almost edge-on, and a cluster of
+			// modules. A ring plus a disc read as a mouse pointer, so the ring
+			// is drawn as a flattened ellipse and the spine carries the shape.
+			int body = size * 5;
 			double tumble = progress * 0.9;
 			int spine_len = (int)(body * (0.55 + 0.45 * fabs(cos(tumble))));
-			int spine_tilt = (int)(sin(tumble) * body * 0.30);
-			// Spine: a thin lit line, brighter at one end.
-			thickLineRGBA(surface, x - spine_len, y - spine_tilt,
-				x + spine_len, y + spine_tilt, 2,
-				96, 108, 128, (Uint8)(alpha * 0.55));
-			thickLineRGBA(surface, x - spine_len, y - spine_tilt,
-				x, y, 1, 150, 164, 186, (Uint8)(alpha * 0.70));
-			// Cross-member, foreshortened as it turns.
-			int cross = (int)(body * 0.42 * fabs(sin(tumble)));
-			thickLineRGBA(surface, x, y - cross, x, y + cross, 1,
-				120, 132, 154, (Uint8)(alpha * 0.50));
-			// A single warm window, and a faint halo where the hull catches
-			// the sky.
-			soft_glow(surface, x + spine_len / 3, y + spine_tilt / 3,
-				scale / 90, 214, 196, 158, (int)(alpha * 0.35));
-			soft_glow(surface, x, y, scale / 40, 88, 100, 124,
-				(int)(alpha * 0.16));
+			int tilt = (int)(sin(progress * 1.7) * body * 0.22);
+			// Hull: a dark elongated body, not a line.
+			int hull_h = scale / 150;
+			if(hull_h < 2) hull_h = 2;
+			Sint16 hx[4], hy[4];
+			hx[0] = (Sint16)(x + spine_len);
+			hy[0] = (Sint16)(y + tilt);
+			hx[1] = (Sint16)(x + spine_len / 4);
+			hy[1] = (Sint16)(y + tilt / 4 - hull_h);
+			hx[2] = (Sint16)(x - spine_len);
+			hy[2] = (Sint16)(y - tilt - hull_h / 2);
+			hx[3] = (Sint16)(x - spine_len);
+			hy[3] = (Sint16)(y - tilt + hull_h / 2);
+			filledPolygonRGBA(surface, hx, hy, 4, 12, 15, 24, alpha);
+			// Rim light along the top edge only.
+			aalineRGBA(surface, hx[0], hy[0], hx[1], hy[1], 128, 146, 176, alpha);
+			aalineRGBA(surface, hx[1], hy[1], hx[2], hy[2], 84, 100, 128, alpha);
+			// The ring, foreshortened to a sliver as it turns edge-on.
+			int ring_rx = (int)(body * 0.55);
+			int ring_ry = (int)(body * 0.55 * fabs(sin(tumble)) * 0.55) + 1;
+			ellipseRGBA(surface, x, y, ring_rx, ring_ry,
+				96, 112, 140, (Uint8)(alpha * 0.55));
+			// A few lit windows along the spine, and a warm core.
+			for(int win = 0; win < 5; win++) {
+				int wx = x - spine_len + spine_len * 2 * win / 5;
+				int wy = y - tilt + tilt * 2 * win / 5 - hull_h / 3;
+				pixelRGBA(surface, wx, wy, 226, 208, 168,
+					(Uint8)(alpha * 0.75));
+			}
+			soft_glow(surface, x, y, scale / 70, 210, 190, 150,
+				(int)(alpha * 0.30));
 		} else if(kind == 43) {
 			// Only the running lights of something moving out there. No hull,
 			// no shape, just points holding formation.
@@ -1593,10 +1918,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				}
 			}
 		} else {
-			// A single craft high up. No hull, no nose, no tail: a bright point
-			// with a soft halo and a wake that tapers away. The stepped wake
-			// used to read as a wine bottle, so the trail is now a smooth
-			// gradient of decreasing width.
+			// A single craft crossing high up, seen from below and behind. The
+			// hull is a silhouette with one lit edge; the wake is a smooth
+			// taper, not a row of dashes. A bright point with a stepped trail
+			// read as a wine bottle, which is why the hull is drawn at all.
 			int craft_x = direction > 0
 				? -scale / 20
 					+ (int)(progress * (surface->w + scale / 10.0))
@@ -1604,19 +1929,22 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					- (int)(progress * (surface->w + scale / 10.0));
 			int craft_y = surface->h * (12 + (seed >> 8) % 22) / 100
 				+ (int)(sin(progress * 3.14159265359) * scale * 0.02);
-			int wake = scale / 6;
-			for(int step = 1; step <= 10; step++) {
-				double t = (double)step / 10;
+			int hull_len = scale / 13;
+			if(hull_len < 30) hull_len = 30;
+			// Wake first, so the hull sits on top of it. Nested widths give a
+			// taper with no visible steps.
+			int wake = hull_len * 5;
+			for(int step = 1; step <= 12; step++) {
+				double t = (double)step / 12;
 				int wx = craft_x - direction * (int)(t * wake);
-				int wy = craft_y + (int)(t * t * scale * 0.012);
-				// Width and alpha both fall off smoothly.
-				int w = (int)(3.0 * (1.0 - t) + 1.0);
+				int wy = craft_y + (int)(t * t * scale * 0.010);
+				int w = (int)(hull_len / 5.0 * (1.0 - t) + 1.0);
 				thickLineRGBA(surface, wx, wy, wx - direction, wy, w,
-					206, 218, 240, (Uint8)(alpha * 0.34 * (1.0 - t)));
+					150, 176, 214, (Uint8)(alpha * 0.22 * (1.0 - t)));
 			}
-			soft_glow(surface, craft_x, craft_y, scale / 34, 222, 232, 250,
-				(int)(alpha * 0.55));
-			filledCircleRGBA(surface, craft_x, craft_y, 1, 250, 252, 255, alpha);
+			draw_ship(surface, craft_x, craft_y, hull_len, direction,
+				(int)(sin(progress * 3.14159265359) * hull_len * 0.10),
+				alpha, (int)(alpha * 0.55), (int)(seed >> 20) % 3);
 		}
 		return;
 	}
@@ -1693,61 +2021,12 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 }
 
 static void render_foreground_event(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 180000;
-	const Uint32 duration = 6500;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	if(seed % 2 != 0 || phase >= duration) return;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	int kind = seed % 4;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 650.0, phase)
-		* (1.0 - smooth_step(duration - 900.0, duration, phase));
-	int count = 24 + kind * 7;
-	for(int particle = 0; particle < count; particle++) {
-		Uint32 particle_seed = (Uint32)particle * 1664525u + seed;
-		int start_x = particle_seed % surface->w;
-		int start_y = (particle_seed >> 9) % surface->h;
-		int speed = 3 + (particle_seed >> 20) % 8;
-		int drift = (int)(ticks / (30 + speed * 7));
-		int particle_x = (start_x + drift + surface->w) % surface->w;
-		int particle_y = start_y;
-		Uint8 red = 191, green = 204, blue = 215;
-		Uint8 alpha = (Uint8)((18 + (particle_seed >> 24) % 32) * fade);
-		if(kind == 0) {
-			particle_y = (start_y + drift * 2) % surface->h;
-			particle_x += (int)(sin(ticks / 500.0 + particle) * scale * 0.02);
-			red = 207;
-			green = (Uint8)(91 + particle % 5 * 18);
-			blue = 54;
-			thickLineRGBA(surface, particle_x, particle_y,
-				particle_x - 2, particle_y + 4, 1, red, green, blue, alpha);
-		} else if(kind == 1) {
-			particle_y = (start_y - drift + surface->h) % surface->h;
-			red = 245;
-			green = (Uint8)(112 + particle % 4 * 18);
-			blue = 67;
-			filledCircleRGBA(surface, particle_x, particle_y, 1 + particle % 2,
-				red, green, blue, alpha);
-		} else if(kind == 2) {
-			particle_y = (start_y + drift * 3) % surface->h;
-			red = 167;
-			green = 213;
-			blue = 231;
-			filledCircleRGBA(surface, particle_x, particle_y, 1 + particle % 2,
-				red, green, blue, alpha);
-		} else {
-			particle_y = surface->h * (28 + particle_seed % 58) / 100
-				- (int)(progress * scale * (0.025 + particle % 3 * 0.01));
-			int radius = scale / 230;
-			if(radius < 2) radius = 2;
-			filledCircleRGBA(surface, particle_x, particle_y, radius,
-				153, 167, 180, (Uint8)(alpha * 0.3));
-		}
-	}
+	// Deliberately empty. This used to spawn drifting motes in front of the
+	// clock, which read as fireflies and pulled the eye away from the time.
+	// The backdrop already carries enough movement.
+	(void)surface;
+	(void)ticks;
+	(void)scale;
 }
 
 static void render_rare_screen_fade(SDL_Surface *surface, Uint32 ticks) {
@@ -2015,16 +2294,6 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 
 	render_rare_sky_event(surface, ticks, scale);
 	render_long_scene(surface, ticks, scale);
-
-	for(int i = 0; i < 10; i++) {
-		unsigned int mote = (unsigned int)i * 2246822519u + 3266489917u;
-		int base_x = (mote % surface->w + ticks / (45 + i % 4 * 13)) % surface->w;
-		double nx = (double)base_x / surface->w;
-		double ridge = 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
-		int y = surface->h * (ridge + 0.035) + (int)(sin(ticks / (520.0 + i * 47) + i) * scale * 0.018);
-		filledCircleRGBA(surface, base_x, y, 1, 200, 206, 164,
-			(Uint8)(35 + 30 * (0.5 + 0.5 * sin(ticks / (230.0 + i * 31) + i))));
-	}
 
 	// Autumn: leaf litter drifting on the wind. Drawn as small soft motes with
 	// a faint warm tint rather than bright dots, so they read as debris in the
