@@ -713,39 +713,42 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 				186, 202, 220, (Uint8)(44 * fade * edge));
 		}
 	} else {
-		// A distant treeline at dusk, each rank paler than the one in front so
-		// the forest recedes into haze instead of ending in a hard silhouette.
+		// A distant forest at dusk. The canopy is a noise-driven silhouette
+		// rather than a row of triangles: individual trees are never resolved,
+		// only the ragged edge of the mass, which is what a treeline actually
+		// looks like from a distance.
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			17, 20, 32, (Uint8)(34 * fade));
 		for(int rank = 0; rank < 4; rank++) {
-			int rank_y = surface->h * (70 + rank * 5) / 100;
-			Uint8 shade = (Uint8)(44 + rank * 20);
-			Uint8 alpha = (Uint8)((190 - rank * 30) * fade);
-			// A solid base under the rank so the trees merge into one mass
-			// instead of standing as separate triangles.
-			boxRGBA(surface, 0, rank_y, surface->w - 1, surface->h - 1,
-				shade, (Uint8)(shade + 8), (Uint8)(shade + 18), alpha);
-			int trees = 26 + rank * 9;
-			for(int tree = 0; tree < trees; tree++) {
-				unsigned int s = (unsigned int)tree * 2654435761u
-					+ (unsigned int)rank * 40503u + seed;
-				// Irregular spacing: hash-jittered slots, so no visible rhythm.
-				int slot_w = surface->w / trees;
-				int tx = tree * slot_w + (int)((s % 1000) / 1000.0 * slot_w * 1.6)
-					- slot_w / 3;
-				int th = (int)(scale * (0.045 + (s >> 8) % 55 / 1000.0)
+			int base_y = surface->h * (70 + rank * 5) / 100;
+			Uint8 shade = (Uint8)(40 + rank * 18);
+			Uint8 alpha = (Uint8)((185 - rank * 28) * fade);
+			int previous_x = 0;
+			int previous_y = base_y;
+			// Fine steps so the canopy edge is smooth, not faceted.
+			for(int segment = 1; segment <= 160; segment++) {
+				double t = (double)segment / 160;
+				int px = (int)(t * surface->w);
+				// Three octaves: broad clumps, individual crowns, fine twigs.
+				double canopy =
+					smooth_noise(t * 9.0 + rank * 4.7, rank * 2.3, 2111) * 0.55
+					+ smooth_noise(t * 34.0 + rank * 1.9, rank * 3.1, 2237) * 0.30
+					+ smooth_noise(t * 90.0, rank * 1.3, 2371) * 0.15;
+				int py = base_y - (int)((canopy - 0.30) * scale * 0.13
 					* (1.0 - rank * 0.10));
-				if(th < 3) continue;
-				// Width varies independently of height, so the crowns differ.
-				int half_w = th / 4 + (int)((s >> 20) % 3) * th / 12;
-				filledTrigonRGBA(surface, tx, rank_y - th,
-					tx - half_w, rank_y, tx + half_w, rank_y,
-					shade, (Uint8)(shade + 8), (Uint8)(shade + 18), alpha);
+				filledTrigonRGBA(surface, previous_x, previous_y, px, py,
+					px, surface->h, shade, (Uint8)(shade + 7),
+					(Uint8)(shade + 16), alpha);
+				filledTrigonRGBA(surface, previous_x, previous_y,
+					px, surface->h, previous_x, surface->h,
+					shade, (Uint8)(shade + 7), (Uint8)(shade + 16), alpha);
+				previous_x = px;
+				previous_y = py;
 			}
-			// Haze between ranks, so each layer sits behind the next. Kept wide
-			// and faint so it reads as air rather than a horizontal stripe.
-			soft_band(surface, rank_y - scale / 22, rank_y + scale / 14,
-				150, 164, 186, (int)((7 + rank * 3) * fade));
+			// Haze pooling along the base of each rank, so the layers separate
+			// by depth rather than by outline.
+			soft_band(surface, base_y - scale / 26, base_y + scale / 10,
+				150, 164, 186, (int)((8 + rank * 3) * fade));
 		}
 	}
 }
