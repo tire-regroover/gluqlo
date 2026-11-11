@@ -2067,6 +2067,9 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 	// draw hours
 	if(_time->tm_hour != past_h || redraw || moved) {
 		int h = twentyfourh ? _time->tm_hour : (_time->tm_hour + 11) % 12 + 1;
+		// past_h is stored in 24-hour form; convert it the same way as h
+		// so the flip animation shows the previous 12-hour value.
+		int prev_h = twentyfourh ? past_h : (past_h + 11) % 12 + 1;
 		int hour_steps = render_steps;
 		int hour_step = render_step;
 		if(moved && _time->tm_hour == past_h) {
@@ -2075,10 +2078,10 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 		}
 		if(leadingzero) {
 			snprintf(buffer, 3, "%02d", h);
-			snprintf(buffer2, 3, "%02d", redraw ? h : past_h);
+			snprintf(buffer2, 3, "%02d", redraw ? h : prev_h);
 		} else {
 			snprintf(buffer, 3, "%d", h);
-			snprintf(buffer2, 3, "%d", redraw ? h : past_h);
+			snprintf(buffer2, 3, "%d", redraw ? h : prev_h);
 		}
 		render_digits(screen, &hourBackground, buffer, buffer2, hour_steps, hour_step);
 		// draw am/pm
