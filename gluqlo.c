@@ -1110,6 +1110,17 @@ static bool render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 	return true;
 }
 
+// Defined further down; declared here so the long scenes can use the
+// soft-light helpers without reordering the file.
+static void soft_glow(SDL_Surface *surface, int cx, int cy, int radius,
+	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+static void set_pixel_glow(SDL_Surface *surface, int x, int y,
+	Uint8 red, Uint8 green, Uint8 blue, int alpha);
+static void soft_band(SDL_Surface *surface, int y0, int y1,
+	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+static void soft_column(SDL_Surface *surface, int cx, int base_y, int height,
+	int half_width, Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+
 static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 	const Uint32 cycle = 210000;
 	Uint32 slot = ticks / cycle;
@@ -1208,73 +1219,65 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 			}
 		}
 	} else if(kind == 4) {
-		// Field of flowers blooming and swaying in the breeze.
-		int flower_count = 14 + (seed >> 8) % 10;
-		for(int flower = 0; flower < flower_count; flower++) {
-			int flower_x = surface->w * (4 + flower * 92 / flower_count) / 100
-				+ (int)(sin(ticks / (700.0 + flower * 37) + flower) * scale * 0.006);
-			double nx = (double)flower_x / surface->w;
-			double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-			int base_y = (int)(surface->h * ridge);
-			double growth = smooth_step(0.05 + flower * 0.02, 0.6 + flower * 0.02, progress);
-			int stem_height = (int)(scale * (0.02 + (flower % 3) * 0.008) * growth);
-			if(stem_height < 2) continue;
-			int sway = (int)(sin(ticks / (500.0 + flower * 41) + flower * 1.3) * scale * 0.008);
-			int head_x = flower_x + sway;
-			int head_y = base_y - stem_height;
-			Uint8 alpha = (Uint8)(170 * fade);
-			thickLineRGBA(surface, flower_x, base_y, head_x, head_y,
-				1, 58, 92, 58, alpha);
-			Uint8 petal_red = (Uint8)(150 + (flower * 53) % 90);
-			Uint8 petal_green = (Uint8)(60 + (flower * 29) % 60);
-			Uint8 petal_blue = (Uint8)(90 + (flower * 71) % 110);
-			for(int petal = 0; petal < 5; petal++) {
-				double angle = petal * 1.25663706144 + ticks / 3000.0;
-				int petal_x = head_x + (int)(cos(angle) * stem_height / 3);
-				int petal_y = head_y + (int)(sin(angle) * stem_height / 3);
-				filledCircleRGBA(surface, petal_x, petal_y, stem_height / 6 + 1,
-					petal_red, petal_green, petal_blue, alpha);
-			}
-			filledCircleRGBA(surface, head_x, head_y, stem_height / 5,
-				240, 210, 90, alpha);
+		// Mist filling a valley at dawn: layered veils that thicken toward the
+		// floor, with the far ridge dissolving into them. No hard edges.
+		int ridge_y = surface->h * 62 / 100;
+		double drift = sin(ticks / 9000.0) * scale * 0.012;
+		for(int layer = 0; layer < 5; layer++) {
+			int top = ridge_y + (int)(layer * scale * 0.045 + drift * layer);
+			int bottom = surface->h * (74 + layer * 5) / 100;
+			soft_band(surface, top, bottom, 196, 208, 220,
+				(int)((26 + layer * 9) * fade));
 		}
+		// A low sun behind the mist, only its glow reaching through.
+		int sun_x = surface->w * (30 + (seed >> 8) % 40) / 100;
+		soft_glow(surface, sun_x, ridge_y - scale / 14, scale / 6,
+			246, 226, 196, (int)(34 * fade));
+		soft_glow(surface, sun_x, ridge_y - scale / 14, scale / 16,
+			252, 240, 214, (int)(26 * fade));
 	} else if(kind == 5) {
-		// Geyser erupting from the ground.
-		int geyser_x = surface->w * (30 + (seed >> 8) % 40) / 100;
-		double nx = (double)geyser_x / surface->w;
-		double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-		int base_y = (int)(surface->h * ridge);
-		double eruption = smooth_step(0.1, 0.35, progress)
-			* (1.0 - smooth_step(0.75, 0.9, progress));
-		if(eruption > 0.0) {
-			int plume_height = (int)(scale * 0.16 * eruption);
-			int plume_width = scale / 60;
-			if(plume_width < 2) plume_width = 2;
-			Uint8 alpha = (Uint8)(150 * fade * eruption);
-			thickLineRGBA(surface, geyser_x, base_y, geyser_x, base_y - plume_height,
-				plume_width, 150, 190, 205, alpha);
-			for(int droplet = 0; droplet < 12; droplet++) {
-				unsigned int drop_seed = (unsigned int)droplet * 2246822519u + seed;
-				double angle = (drop_seed % 6283) / 1000.0;
-				int distance = (int)((drop_seed >> 8) % (plume_height / 2 + 1));
-				int drop_x = geyser_x + (int)(cos(angle) * distance);
-				int drop_y = base_y - plume_height + (int)(sin(angle) * distance);
-				filledCircleRGBA(surface, drop_x, drop_y, 1 + droplet % 2,
-					170, 205, 215, (Uint8)(alpha * 0.7));
-			}
+		// A slow curtain of rain crossing the valley, lit from behind so it
+		// reads as a sheet of water rather than individual drops.
+		int curtain_x = surface->w * (10 + (int)(progress * 80)) / 100;
+		int curtain_w = scale / 5;
+		soft_column(surface, curtain_x, surface->h * 92 / 100,
+			surface->h * 62 / 100, curtain_w / 2,
+			168, 186, 206, (int)(30 * fade));
+		for(int streak = 0; streak < 90; streak++) {
+			unsigned int s = (unsigned int)streak * 1664525u + seed;
+			int sx = curtain_x - curtain_w / 2 + (int)((s % 1000) / 1000.0 * curtain_w);
+			int sy = (int)((s >> 10) % (Uint32)(surface->h * 70 / 100))
+				+ (int)(ticks / 12.0) % (surface->h * 70 / 100);
+			sy = sy % (surface->h * 70 / 100);
+			thickLineRGBA(surface, sx, sy, sx - 2, sy + scale / 90, 1,
+				186, 202, 220, (Uint8)(38 * fade));
 		}
 	} else {
+		// A distant treeline at dusk, each rank paler than the one in front so
+		// the forest recedes into haze instead of ending in a hard silhouette.
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			17, 20, 32, (Uint8)(34 * fade));
-		int figure_x = surface->w * (25 + seed % 50) / 100;
-		int figure_y = surface->h * 83 / 100;
-		int figure_height = scale / 10;
-		filledTrigonRGBA(surface, figure_x, figure_y - figure_height,
-			figure_x - figure_height / 3, figure_y,
-			figure_x + figure_height / 3, figure_y, 12, 16, 25,
-			(Uint8)(150 * fade));
-		filledCircleRGBA(surface, figure_x, figure_y - figure_height,
-			figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
+		for(int rank = 0; rank < 4; rank++) {
+			int rank_y = surface->h * (74 + rank * 5) / 100;
+			Uint8 shade = (Uint8)(26 + rank * 16);
+			Uint8 alpha = (Uint8)((150 - rank * 26) * fade);
+			int trees = 16 + rank * 5;
+			for(int tree = 0; tree < trees; tree++) {
+				unsigned int s = (unsigned int)tree * 2654435761u
+					+ (unsigned int)rank * 40503u + seed;
+				int tx = surface->w * tree / trees
+					+ (int)((s % 100) / 100.0 * surface->w / trees);
+				int th = (int)(scale * (0.020 + (s >> 8) % 22 / 1000.0)
+					* (1.0 - rank * 0.12));
+				if(th < 2) continue;
+				filledTrigonRGBA(surface, tx, rank_y - th,
+					tx - th / 3, rank_y, tx + th / 3, rank_y,
+					shade, (Uint8)(shade + 6), (Uint8)(shade + 14), alpha);
+			}
+			// Haze between ranks, so each layer sits behind the next.
+			soft_band(surface, rank_y - scale / 40, rank_y + scale / 30,
+				150, 164, 186, (int)((10 + rank * 4) * fade));
+		}
 	}
 }
 
