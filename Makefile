@@ -1,12 +1,14 @@
-CC=g++
+CXX?=g++
 FONTDIR=$(DESTDIR)/usr/share/gluqlo
-CFLAGS=-Wall -o gluqlo gluqlo.c `sdl-config --libs --cflags` -DFONT='"$(FONTDIR)/gluqlo.ttf"'
-LDFLAGS=-lX11 -lSDL_ttf -lSDL_gfx
+# gluqlo.c is C++ (it uses bool and mixed declarations), so say so explicitly.
+CXXFLAGS?=-O2
+CXXFLAGS+=-Wall -x c++ `sdl-config --cflags` -DFONT='"$(FONTDIR)/gluqlo.ttf"'
+LDFLAGS=`sdl-config --libs` -lX11 -lSDL_ttf -lSDL_gfx
 
 all: gluqlo
 
 gluqlo: gluqlo.c
-	$(CC) $(CFLAGS) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -o gluqlo gluqlo.c $(LDFLAGS)
 
 install:
 	strip gluqlo

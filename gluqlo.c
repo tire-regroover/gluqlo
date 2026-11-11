@@ -224,6 +224,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 43
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
+#define HILL_EVENT_KINDS 9          // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -285,17 +286,23 @@ static const EffectSpec EFFECT_FULLSCREEN = {
 	"fullscreen", 90000, 1, 0, false, 0,
 	6500, 4000, 9, true, 1300, 1200, 4, GROUP_TAKEOVER, 3, fullscreen_accept };
 static const EffectSpec EFFECT_FLEET_BATTLE = {
-	"fleet_battle", 240000, 1, 3, false, 0,
+	"fleet_battle", 240000, 1, 6, false, 0,
 	60000, 0, 0, false, 1400, 2200, 0, GROUP_SKY, 0, NULL };
 static const EffectSpec EFFECT_BACKGROUND_BATTLE = {
-	"background_battle", 90000, 1, 4, false, 0,
+	"background_battle", 90000, 1, 9, false, 0,
 	32000, 0, 0, false, 900, 1700, 0, GROUP_SKY, 1, NULL };
 static const EffectSpec EFFECT_RARE_SKY = {
 	"rare_sky", 48000, 0, 3, true, 2246822519u,
 	4200, 3200, 8, true, 350, 400, RARE_SKY_KINDS, GROUP_SKY, 2, rare_sky_accept };
 static const EffectSpec EFFECT_BATTLE_FLYBY = {
-	"battle_flyby", 60000, 1, 0, false, 0,
-	18000, 0, 0, false, 900, 1100, 0, GROUP_SKY, 3, NULL };
+	"battle_flyby", 60000, 1, 6, false, 0,
+	14000, 0, 0, false, 900, 1100, 0, GROUP_SKY, 4, NULL };
+static const EffectSpec EFFECT_DOGFIGHT = {
+	"dogfight", 75000, 1, 4, false, 0,
+	18000, 0, 0, true, 900, 1100, 0, GROUP_SKY, 3, NULL };
+static const EffectSpec EFFECT_HILL_EVENT = {
+	"hill_event", 120000, 0, 2, false, 2654435761u,
+	36000, 22000, 8, true, 4000, 5000, HILL_EVENT_KINDS, GROUP_TAKEOVER, 4, NULL };
 static const EffectSpec EFFECT_FOREGROUND = {
 	"foreground", 180000, 1, 2, false, 2246822519u,
 	6500, 0, 0, false, 650, 900, 4, GROUP_NONE, 0, NULL };
@@ -307,7 +314,7 @@ static const EffectSpec *const effect_table[] = {
 	&EFFECT_ALIEN_WEATHER, &EFFECT_WORLD_JUMP, &EFFECT_LONG_SCENE,
 	&EFFECT_RARE_SKY, &EFFECT_FULLSCREEN, &EFFECT_FOREGROUND,
 	&EFFECT_SCREEN_FADE, &EFFECT_BATTLE_FLYBY, &EFFECT_BACKGROUND_BATTLE,
-	&EFFECT_FLEET_BATTLE
+	&EFFECT_FLEET_BATTLE, &EFFECT_DOGFIGHT, &EFFECT_HILL_EVENT
 };
 static const size_t effect_count = sizeof(effect_table) / sizeof(effect_table[0]);
 
@@ -820,6 +827,10 @@ typedef struct {
 	bool accent_on;
 	bool eye;                  // a glowing eye in the middle instead of a slit
 	int nose, tail;            // extent of the hull along x
+	int weapon;                // main weapon, fired from the nose (WEAPON_*)
+	ShipPoint turrets[4];      // gun turret mounts on the hull, if any
+	int turret_count;
+	int turret_weapon;         // what the turrets fire
 } ShipDesign;
 
 typedef struct {
@@ -833,6 +844,39 @@ static const ShipTeam ship_teams[2] = {
 		{90, 190, 255}, {150, 235, 255} },
 	{ { {19, 11, 8}, {36, 21, 15}, {55, 34, 24}, {88, 64, 48} },
 		{255, 150, 70}, {255, 208, 120} }
+};
+
+/*
+ * Weapons
+ *
+ * The weapon families are modelled on X4: Foundations. Each one has its own
+ * look and its own timing: pulse lasers and mass drivers throw many fast bolts,
+ * beam emitters hold a continuous beam, plasma is a slow heavy orb, flak bursts
+ * into shrapnel short of the target, missiles and swarms curve in leaving smoke,
+ * torpedoes are huge and slow, and the railgun charges before it fires.
+ * Small ships carry one gun; mid-size and big ships also have turrets.
+ */
+enum { WEAPON_PULSE, WEAPON_BEAM, WEAPON_PLASMA, WEAPON_MASS_DRIVER, WEAPON_FLAK,
+	WEAPON_MISSILE, WEAPON_SWARM, WEAPON_TORPEDO, WEAPON_RAIL, WEAPON_COUNT };
+
+typedef struct {
+	double impact_ms;          // time from firing until a shot reaches the target
+	double life_ms;            // time until nothing of a shot is left on screen
+	int shots;                 // shots in one volley
+	double gap_ms;             // time between the shots of a volley
+	double blast;              // size of the impact, in shot-size units
+} WeaponSpec;
+
+static const WeaponSpec weapon_specs[WEAPON_COUNT] = {
+	{ 260.0, 820.0, 3, 90.0, 0.16 },     // pulse laser
+	{ 420.0, 1100.0, 1, 0.0, 0.20 },     // beam emitter (the beam itself lasts 900 ms)
+	{ 720.0, 1320.0, 1, 0.0, 0.50 },     // plasma cannon
+	{ 200.0, 650.0, 6, 42.0, 0.10 },     // mass driver
+	{ 480.0, 1030.0, 1, 0.0, 0.40 },     // flak
+	{ 950.0, 1500.0, 1, 0.0, 0.45 },     // missile
+	{ 880.0, 1430.0, 5, 75.0, 0.25 },    // swarm missiles
+	{ 1500.0, 2100.0, 1, 0.0, 0.90 },    // torpedo
+	{ 300.0, 850.0, 1, 0.0, 0.30 }       // railgun (charges for 300 ms, then fires)
 };
 
 static const ShipPoint hull_dagger[] = {{45,0},{30,-3},{12,-5},{-4,-14},{-20,-22},{-14,-8},{-26,-5},{-28,0}};
@@ -867,35 +911,45 @@ static const int ship_big_designs[] = { 7, 8 };              // leviathan, wedge
 static const ShipDesign ship_designs[] = {
 	// 0 dagger
 	{ SHIP_OUTLINE(hull_dagger), { SHIP_OUTLINE(spine_dagger), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-28,-3}, {-28,3}, {0,0} }, 2, { {34,0}, {22,0} }, true, false, 45, -28 },
+		{ {-28,-3}, {-28,3}, {0,0} }, 2, { {34,0}, {22,0} }, true, false, 45, -28,
+		WEAPON_RAIL, { {0,0} }, 0, WEAPON_PULSE },
 	// 1 manta
 	{ SHIP_OUTLINE(hull_manta), { SHIP_OUTLINE(spine_manta), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {26,0}, {12,0} }, true, false, 32, -32 },
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {26,0}, {12,0} }, true, false, 32, -32,
+		WEAPON_SWARM, { {0,0} }, 0, WEAPON_PULSE },
 	// 2 hammerhead
 	{ SHIP_OUTLINE(hull_hammerhead), { SHIP_OUTLINE(spine_hammerhead), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-30,-4}, {-30,4}, {0,0} }, 2, { {36,-15}, {36,15} }, true, false, 38, -30 },
+		{ {-30,-4}, {-30,4}, {0,0} }, 2, { {36,-15}, {36,15} }, true, false, 38, -30,
+		WEAPON_FLAK, { {30,-12}, {30,12}, {-12,0} }, 3, WEAPON_MASS_DRIVER },
 	// 3 mandible
 	{ SHIP_OUTLINE(hull_mandible), { SHIP_OUTLINE(spine_mandible), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {0,0}, {0,0} }, false, true, 38, -32 },
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {0,0}, {0,0} }, false, true, 38, -32,
+		WEAPON_PLASMA, { {-6,-8}, {-6,8}, {-22,0} }, 3, WEAPON_PULSE },
 	// 4 trident
 	{ SHIP_OUTLINE(hull_trident), { SHIP_OUTLINE(spine_trident), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {38,0}, {26,0} }, true, false, 46, -30 },
+		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {38,0}, {26,0} }, true, false, 46, -30,
+		WEAPON_MISSILE, { {16,-9}, {16,9}, {-12,0} }, 3, WEAPON_FLAK },
 	// 5 scythe
 	{ SHIP_OUTLINE(hull_scythe), { SHIP_OUTLINE(spine_scythe), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {24,0}, {10,0} }, true, false, 30, -30 },
+		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {24,0}, {10,0} }, true, false, 30, -30,
+		WEAPON_BEAM, { {0,0} }, 0, WEAPON_PULSE },
 	// 6 bat
 	{ SHIP_OUTLINE(hull_bat), { SHIP_OUTLINE(spine_bat), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {20,0}, {8,0} }, true, false, 26, -32 },
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {20,0}, {8,0} }, true, false, 26, -32,
+		WEAPON_PULSE, { {0,0} }, 0, WEAPON_PULSE },
 	// 7 leviathan
 	{ SHIP_OUTLINE(hull_leviathan), { SHIP_OUTLINE(spine_leviathan), SHIP_NO_OUTLINE },
 		spikes_leviathan, 4,
-		{ {-50,-2}, {-50,2}, {0,0} }, 2, { {44,0}, {30,0} }, true, false, 52, -50 },
+		{ {-50,-2}, {-50,2}, {0,0} }, 2, { {44,0}, {30,0} }, true, false, 52, -50,
+		WEAPON_TORPEDO, { {30,0}, {8,0}, {-14,0}, {-34,0} }, 4, WEAPON_MASS_DRIVER },
 	// 8 wedge
 	{ SHIP_OUTLINE(hull_wedge), { SHIP_OUTLINE(plate_wedge), SHIP_OUTLINE(top_wedge) }, NULL, 0,
-		{ {-36,-10}, {-36,0}, {-36,10} }, 3, { {26,0}, {8,0} }, true, false, 42, -36 },
+		{ {-36,-10}, {-36,0}, {-36,10} }, 3, { {26,0}, {8,0} }, true, false, 42, -36,
+		WEAPON_PULSE, { {10,0}, {-10,-6}, {-10,6}, {-26,0} }, 4, WEAPON_BEAM },
 	// 9 forward-swept
 	{ SHIP_OUTLINE(hull_swept), { SHIP_OUTLINE(spine_swept), SHIP_NO_OUTLINE }, NULL, 0,
-		{ {-26,-3}, {-26,3}, {0,0} }, 2, { {28,0}, {16,0} }, true, false, 36, -26 }
+		{ {-26,-3}, {-26,3}, {0,0} }, 2, { {28,0}, {16,0} }, true, false, 36, -26,
+		WEAPON_MASS_DRIVER, { {0,0} }, 0, WEAPON_PULSE }
 };
 
 // Maps design coordinates (tenths of a unit, origin at the design's own
@@ -1132,6 +1186,36 @@ static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_inde
 		thickLineRGBA(surface, x1, y1, x2, y2, 1,
 			team->accent[0], team->accent[1], team->accent[2], 255);
 	}
+	// Gun turrets: a round mount with barrels that look different for each weapon.
+	for(int turret = 0; turret < design->turret_count; turret++) {
+		int cx, cy;
+		ship_to_pixels(&xf, design->turrets[turret][0], design->turrets[turret][1], &cx, &cy);
+		int base = (int)(xf.scale * 3.4 + 0.5);
+		if(base < 2) base = 2;
+		double forward_x = direction * xf.cos_pitch, forward_y = -xf.sin_pitch;
+		double across_x = -forward_y, across_y = forward_x;
+		int weapon = design->turret_weapon;
+		double barrel = base * (weapon == WEAPON_FLAK ? 1.7 : 2.5);
+		int barrels = weapon == WEAPON_MASS_DRIVER ? 2 : 1;
+		int barrel_width = (weapon == WEAPON_FLAK || base >= 4) ? 3 : 2;
+		filledCircleRGBA(surface, cx, cy, base + 1, 8, 10, 18, 255);
+		for(int b = 0; b < barrels; b++) {
+			double shift = barrels == 2 ? (b ? 0.5 : -0.5) * base : 0.0;
+			int sx = cx + (int)(across_x * shift), sy = cy + (int)(across_y * shift);
+			int ex = sx + (int)(forward_x * barrel), ey = sy + (int)(forward_y * barrel);
+			thickLineRGBA(surface, sx, sy, ex, ey, barrel_width + 2, 8, 10, 18, 255);
+			thickLineRGBA(surface, sx, sy, ex, ey, barrel_width,
+				team->tone[2][0], team->tone[2][1], team->tone[2][2], 255);
+			if(weapon == WEAPON_BEAM || weapon == WEAPON_PULSE) {
+				filledCircleRGBA(surface, ex, ey, 1,
+					team->accent[0], team->accent[1], team->accent[2], 255);
+			}
+		}
+		filledCircleRGBA(surface, cx, cy, base, team->tone[2][0], team->tone[2][1],
+			team->tone[2][2], 255);
+		filledCircleRGBA(surface, cx - base / 3, cy - base / 3, (base + 2) / 3,
+			team->tone[3][0], team->tone[3][1], team->tone[3][2], 255);
+	}
 	if(design->eye) {
 		int eye_x, eye_y;
 		ship_to_pixels(&xf, 0, 0, &eye_x, &eye_y);
@@ -1167,10 +1251,8 @@ static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_inde
 	SDL_SetClipRect(surface, &previous_clip);
 }
 
-// Draws a ship of the given role. `variety` picks one of the designs of that role.
-static void draw_ship_role(SDL_Surface *surface, int x, int y, int role,
-	unsigned int variety, int length, int direction, int team_index, Uint8 opacity,
-	double pitch = 0.0) {
+// The design that `variety` picks among the ships of a role.
+static int ship_design_index(int role, unsigned int variety) {
 	const int *designs = ship_small_designs;
 	int count = (int)(sizeof(ship_small_designs) / sizeof(ship_small_designs[0]));
 	if(role == SHIP_MID) {
@@ -1180,8 +1262,394 @@ static void draw_ship_role(SDL_Surface *surface, int x, int y, int role,
 		designs = ship_big_designs;
 		count = (int)(sizeof(ship_big_designs) / sizeof(ship_big_designs[0]));
 	}
-	draw_ship_design(surface, x, y, designs[variety % (unsigned int)count], length,
+	return designs[variety % (unsigned int)count];
+}
+
+// Draws a ship of the given role. `variety` picks one of the designs of that role.
+static void draw_ship_role(SDL_Surface *surface, int x, int y, int role,
+	unsigned int variety, int length, int direction, int team_index, Uint8 opacity,
+	double pitch = 0.0) {
+	draw_ship_design(surface, x, y, ship_design_index(role, variety), length,
 		direction, team_index, opacity, pitch);
+}
+
+// Where a point of a design (the nose, a turret) ends up on screen.
+static void ship_mount_point(int design_index, int x, int y, int length, int direction,
+	double pitch, int tx, int ty, double *out_x, double *out_y) {
+	const ShipDesign *design = &ship_designs[design_index];
+	double scale = length / (double)(design->nose - design->tail);
+	double middle = (design->nose + design->tail) / 2.0;
+	double along = (tx - middle) * scale;
+	double down = ty * scale;
+	*out_x = x + direction * (along * cos(pitch) + down * sin(pitch));
+	*out_y = y - along * sin(pitch) + down * cos(pitch);
+}
+
+/*
+ * Weapon and explosion effects
+ *
+ * Both are stateless: given how many milliseconds ago a shot was fired they
+ * draw exactly what is on screen now.
+ */
+static const Uint8 weapon_team_colors[2][3] = { { 110, 205, 235 }, { 255, 165, 105 } };
+
+static unsigned int fx_hash(unsigned int a, unsigned int b) {
+	unsigned int value = a * 2654435761u + b * 2246822519u + 0x9e3779b9u;
+	value ^= value >> 15;
+	value *= 2246822519u;
+	value ^= value >> 13;
+	return value;
+}
+
+static Uint8 weapon_alpha(double alpha) {
+	if(alpha < 0.0) alpha = 0.0;
+	if(alpha > 255.0) alpha = 255.0;
+	return (Uint8)alpha;
+}
+
+// Radius a shot of a ship `length` pixels long is drawn at.
+static double weapon_unit(int length) {
+	double unit = 10.0 + length * 0.25;
+	return unit > 34.0 ? 34.0 : unit;
+}
+
+// A soft round glow: a faint halo, a brighter body and a hot core.
+static void weapon_glow(SDL_Surface *surface, double x, double y, double radius,
+	const Uint8 *color, double alpha) {
+	int r = (int)(radius + 0.5);
+	if(r < 1) r = 1;
+	filledCircleRGBA(surface, (int)x, (int)y, r * 2, color[0], color[1], color[2],
+		weapon_alpha(alpha * 0.22));
+	filledCircleRGBA(surface, (int)x, (int)y, r + r / 2, color[0], color[1], color[2],
+		weapon_alpha(alpha * 0.55));
+	filledCircleRGBA(surface, (int)x, (int)y, (r + 1) / 2, 255, 255, 255, weapon_alpha(alpha));
+}
+
+// An explosion `age` ms after it began: a white flash, a fireball of overlapping
+// blobs that cools from yellow through orange to grey smoke, a shockwave ring,
+// glowing debris, and for a destroyed ship tumbling hull fragments and two
+// smaller blasts after the first.
+static void draw_explosion(SDL_Surface *surface, double x, double y, double age,
+	double radius, bool big, unsigned int seed, int team, double fade) {
+	if(radius < 2.0) radius = 2.0;
+	double life = big ? 1700.0 : 380.0 + radius * 10.0;
+	if(!big && life > 900.0) life = 900.0;
+	if(age < 0.0 || age >= life || fade <= 0.0) return;
+	double p = age / life;
+	double inv = 1.0 - p;
+
+	static const Uint8 stops[4][3] = {
+		{ 255, 238, 190 }, { 246, 142, 62 }, { 118, 50, 34 }, { 60, 58, 66 } };
+	double position = p * 3.0;
+	int stop = (int)position;
+	if(stop > 2) stop = 2;
+	double between = position - stop;
+	Uint8 red = ship_mix(stops[stop][0], stops[stop + 1][0], between);
+	Uint8 green = ship_mix(stops[stop][1], stops[stop + 1][1], between);
+	Uint8 blue = ship_mix(stops[stop][2], stops[stop + 1][2], between);
+	double body = 215.0 * fade * pow(inv, 1.3);
+	int blobs = big ? 9 : 5;
+	for(int blob = 0; blob < blobs; blob++) {
+		unsigned int h = fx_hash(seed, blob);
+		double angle = (h % 6283) / 1000.0;
+		double spread = ((h >> 12) % 100) / 100.0;
+		double distance = radius * (0.15 + 0.7 * spread) * (0.3 + 0.7 * sqrt(p));
+		double size = radius * (0.35 + 0.35 * ((h >> 20) % 100) / 100.0)
+			* (0.3 + 0.7 * smooth_step(0.0, 0.3, p));
+		filledCircleRGBA(surface, (int)(x + cos(angle) * distance),
+			(int)(y + sin(angle) * distance), (int)size + 1,
+			red, green, blue, weapon_alpha(body * 0.8));
+	}
+	if(p < 0.3) {
+		double hot = 1.0 - p / 0.3;
+		filledCircleRGBA(surface, (int)x, (int)y, (int)(radius * (0.2 + 0.6 * hot)) + 1,
+			255, 250, 235, weapon_alpha(240.0 * fade * hot));
+	}
+	double ring = radius * (0.5 + 2.2 * sqrt(p));
+	circleRGBA(surface, (int)x, (int)y, (int)ring, 255, 214, 160,
+		weapon_alpha(170.0 * fade * inv * inv));
+	if(big) {
+		circleRGBA(surface, (int)x, (int)y, (int)(ring * 0.7), 255, 180, 110,
+			weapon_alpha(120.0 * fade * inv * inv));
+	}
+	int pieces = big ? 16 : 8;
+	for(int piece = 0; piece < pieces; piece++) {
+		unsigned int h = fx_hash(seed + 77u, piece);
+		double angle = (h % 6283) / 1000.0;
+		double speed = radius * (1.2 + 2.0 * ((h >> 12) % 100) / 100.0);
+		double reach = speed * (1.0 - pow(inv, 2.2));
+		double trail = radius * 0.55 * inv;
+		thickLineRGBA(surface, (int)(x + cos(angle) * reach), (int)(y + sin(angle) * reach),
+			(int)(x + cos(angle) * (reach - trail)), (int)(y + sin(angle) * (reach - trail)),
+			1, 255, 215 - piece * 3, 120, weapon_alpha(230.0 * fade * inv));
+	}
+	if(big) {
+		const ShipTeam *hull = &ship_teams[team];
+		for(int fragment = 0; fragment < 6; fragment++) {
+			unsigned int h = fx_hash(seed + 191u, fragment);
+			double angle = (h % 6283) / 1000.0;
+			double speed = radius * (0.5 + 1.1 * ((h >> 12) % 100) / 100.0);
+			double reach = speed * (1.0 - pow(inv, 1.6));
+			double cx = x + cos(angle) * reach;
+			double cy = y + sin(angle) * reach * 0.8;
+			double spin = ((h >> 8) % 628) / 100.0 + p * (3.0 + fragment);
+			double size = radius * 0.2;
+			int px[3], py[3];
+			for(int corner = 0; corner < 3; corner++) {
+				double corner_angle = spin + corner * 2.0944;
+				double corner_size = size * (corner == 0 ? 1.5 : 0.8);
+				px[corner] = (int)(cx + cos(corner_angle) * corner_size);
+				py[corner] = (int)(cy + sin(corner_angle) * corner_size);
+			}
+			Uint8 piece_alpha = weapon_alpha(255.0 * fade * inv);
+			filledTrigonRGBA(surface, px[0], py[0], px[1], py[1], px[2], py[2],
+				hull->tone[2][0], hull->tone[2][1], hull->tone[2][2], piece_alpha);
+			lineRGBA(surface, px[0], py[0], px[1], py[1], hull->glow[0], hull->glow[1],
+				hull->glow[2], weapon_alpha(piece_alpha * 0.8));
+		}
+		if(age > 160.0) {
+			draw_explosion(surface, x + radius * 0.6, y - radius * 0.25, age - 160.0,
+				radius * 0.55, false, seed + 1u, team, fade);
+		}
+		if(age > 340.0) {
+			draw_explosion(surface, x - radius * 0.55, y + radius * 0.3, age - 340.0,
+				radius * 0.5, false, seed + 2u, team, fade);
+		}
+	}
+}
+
+// Point on the route of a guided shot: the straight line from the muzzle to the
+// target, bent sideways by up to `bend` pixels half way.
+static void weapon_route(double fx, double fy, double dx, double dy, double nx, double ny,
+	double fraction, double bend, double *x, double *y) {
+	double arc = fraction < 1.0 ? bend * sin(3.14159265359 * fraction) : 0.0;
+	*x = fx + dx * fraction + nx * arc;
+	*y = fy + dy * fraction + ny * arc;
+}
+
+/*
+ * One shot of `weapon`, fired from (fx, fy) at (tx, ty), `age` ms ago.
+ * outcome: 0 the shot misses (guided weapons are shot down half way),
+ *          1 it hits, 2 it hits and destroys the target (the caller draws that).
+ * `unit` is the size of a shot in pixels (see weapon_unit), `shot` the index
+ * of the shot within its volley.
+ */
+static void draw_weapon_shot(SDL_Surface *surface, int weapon, int shot, double fx, double fy,
+	double tx, double ty, double age, double unit, int team, double fade, int outcome,
+	unsigned int seed) {
+	const WeaponSpec *spec = &weapon_specs[weapon];
+	if(age < 0.0 || age >= spec->life_ms || fade <= 0.0) return;
+	const Uint8 *color = weapon_team_colors[team];
+	bool guided = weapon == WEAPON_MISSILE || weapon == WEAPON_SWARM || weapon == WEAPON_TORPEDO;
+	if(guided && outcome == 0) {
+		// Shot down by point defence before it arrives.
+		tx = fx + (tx - fx) * 0.7;
+		ty = fy + (ty - fy) * 0.7;
+	}
+	double dx = tx - fx, dy = ty - fy;
+	double span = sqrt(dx * dx + dy * dy);
+	if(span < 1.0) span = 1.0;
+	double ux = dx / span, uy = dy / span;
+	double nx = -uy, ny = ux;
+	double p = age / spec->impact_ms;
+	double after = age - spec->impact_ms;
+	bool lands = outcome != 0 || guided;
+	bool arrived = lands && p >= 1.0;
+	double miss_fade = 1.0;
+	if(!lands && p > 1.0) miss_fade = 1.0 - (p - 1.0) / (spec->life_ms / spec->impact_ms - 1.0);
+	double blast = unit * spec->blast * 1.6;
+	if(age < 90.0 && weapon != WEAPON_RAIL && weapon != WEAPON_BEAM) {
+		weapon_glow(surface, fx, fy, unit * 0.2 * (1.0 - age / 90.0), color, 230.0 * fade);
+	}
+
+	switch(weapon) {
+		case WEAPON_PULSE: {
+			if(!arrived) {
+				double hx = fx + dx * p, hy = fy + dy * p;
+				double tail = unit * 0.55;
+				thickLineRGBA(surface, (int)(hx - ux * tail), (int)(hy - uy * tail),
+					(int)hx, (int)hy, 2, color[0], color[1], color[2],
+					weapon_alpha(170.0 * fade * miss_fade));
+				thickLineRGBA(surface, (int)(hx - ux * tail * 0.55), (int)(hy - uy * tail * 0.55),
+					(int)hx, (int)hy, 1, 255, 255, 255, weapon_alpha(240.0 * fade * miss_fade));
+			}
+			break;
+		}
+		case WEAPON_MASS_DRIVER: {
+			double offset = ((shot % 3) - 1) * unit * 0.1;
+			if(!arrived) {
+				double hx = fx + dx * p + nx * offset, hy = fy + dy * p + ny * offset;
+				double tail = unit * 0.55;
+				thickLineRGBA(surface, (int)(hx - ux * tail), (int)(hy - uy * tail),
+					(int)hx, (int)hy, 1, 255, 232, 160, weapon_alpha(235.0 * fade * miss_fade));
+				pixelRGBA(surface, (int)hx, (int)hy, 255, 255, 255, weapon_alpha(255.0 * fade));
+			}
+			break;
+		}
+		case WEAPON_PLASMA: {
+			static const Uint8 plasma[3] = { 140, 255, 170 };
+			if(!arrived) {
+				double radius = unit * 0.2 * (1.0 + 0.12 * sin(age / 45.0));
+				for(int k = 5; k >= 1; k--) {
+					double pk = p - k * 0.05;
+					if(pk < 0.0) continue;
+					weapon_glow(surface, fx + dx * pk, fy + dy * pk, radius * (1.0 - k * 0.13),
+						plasma, 150.0 * fade * miss_fade * (1.0 - k / 6.0));
+				}
+				weapon_glow(surface, fx + dx * p, fy + dy * p, radius, plasma,
+					235.0 * fade * miss_fade);
+			} else if(outcome != 0 && after < 500.0) {
+				circleRGBA(surface, (int)tx, (int)ty, (int)(unit * 0.3 + after * unit * 0.0018),
+					plasma[0], plasma[1], plasma[2], weapon_alpha(200.0 * fade * (1.0 - after / 500.0)));
+			}
+			break;
+		}
+		case WEAPON_FLAK: {
+			double bx = fx + dx * 0.92, by = fy + dy * 0.92;
+			if(p < 1.0) {
+				double hx = fx + dx * 0.92 * p, hy = fy + dy * 0.92 * p;
+				double tail = unit * 0.4;
+				thickLineRGBA(surface, (int)(hx - ux * tail), (int)(hy - uy * tail),
+					(int)hx, (int)hy, 2, 255, 185, 90, weapon_alpha(210.0 * fade));
+				pixelRGBA(surface, (int)hx, (int)hy, 255, 255, 255, weapon_alpha(255.0 * fade));
+			} else if(after < 560.0) {
+				double burst = after / 560.0;
+				for(int piece = 0; piece < 14; piece++) {
+					unsigned int h = fx_hash(seed + 5u, piece);
+					double angle = piece * 0.4488 + (h % 100) * 0.003;
+					double near_edge = unit * (0.15 + 0.95 * sqrt(burst));
+					double far_edge = near_edge + unit * 0.4 * (1.0 - burst);
+					thickLineRGBA(surface, (int)(bx + cos(angle) * near_edge),
+						(int)(by + sin(angle) * near_edge), (int)(bx + cos(angle) * far_edge),
+						(int)(by + sin(angle) * far_edge), 1, 255, 215, 120,
+						weapon_alpha(235.0 * fade * (1.0 - burst)));
+				}
+				filledCircleRGBA(surface, (int)bx, (int)by, (int)(unit * 0.3 * (0.5 + burst)) + 1,
+					110, 96, 84, weapon_alpha(110.0 * fade * (1.0 - burst)));
+				if(after < 140.0) {
+					filledCircleRGBA(surface, (int)bx, (int)by, (int)(unit * 0.45),
+						255, 245, 210, weapon_alpha(230.0 * fade * (1.0 - after / 140.0)));
+				}
+			}
+			if(outcome == 1) draw_explosion(surface, bx, by, after, blast, false, seed, team, fade);
+			return;
+		}
+		case WEAPON_MISSILE:
+		case WEAPON_SWARM:
+		case WEAPON_TORPEDO: {
+			bool swarm = weapon == WEAPON_SWARM, torpedo = weapon == WEAPON_TORPEDO;
+			double bend = torpedo ? 0.0
+				: swarm ? unit * (0.9 + 0.35 * (shot % 3)) * (shot % 2 ? 1.0 : -1.0)
+				: unit * 0.7 * ((seed & 1) ? 1.0 : -1.0);
+			double step = torpedo ? 0.035 : 0.05;
+			double smoke_size = torpedo ? 3.0 : (swarm ? 1.0 : 1.5);
+			double smoke_fade = p < 1.0 ? 1.0
+				: 1.0 - after / (spec->life_ms - spec->impact_ms);
+			if(smoke_fade < 0.0) smoke_fade = 0.0;
+			double reach = p < 1.0 ? p : 1.0;
+			for(int k = 1; k <= 10; k++) {
+				double pk = reach - k * step;
+				if(pk < 0.0) break;
+				double sx, sy;
+				weapon_route(fx, fy, dx, dy, nx, ny, pk, bend, &sx, &sy);
+				filledCircleRGBA(surface, (int)sx, (int)sy, (int)(smoke_size + k / 3.0),
+					176, 176, 188, weapon_alpha(90.0 * fade * smoke_fade * (1.0 - k / 11.0)));
+			}
+			if(p < 1.0) {
+				double hx, hy, ax, ay;
+				weapon_route(fx, fy, dx, dy, nx, ny, p, bend, &hx, &hy);
+				weapon_route(fx, fy, dx, dy, nx, ny, p + 0.01, bend, &ax, &ay);
+				double bx = ax - hx, by = ay - hy;
+				double bl = sqrt(bx * bx + by * by);
+				if(bl < 0.001) { bx = ux; by = uy; } else { bx /= bl; by /= bl; }
+				double body = unit * (torpedo ? 0.7 : (swarm ? 0.22 : 0.42));
+				int width = torpedo ? 3 : (swarm ? 1 : 2);
+				double tail_x = hx - bx * body, tail_y = hy - by * body;
+				double flame = body * (0.9 + 0.3 * sin(age / 25.0 + shot));
+				static const Uint8 flame_color[3] = { 255, 170, 80 };
+				static const Uint8 torpedo_flame[3] = { 120, 190, 255 };
+				weapon_glow(surface, tail_x, tail_y, torpedo ? unit * 0.28 : unit * 0.12,
+					torpedo ? torpedo_flame : flame_color, 200.0 * fade);
+				thickLineRGBA(surface, (int)tail_x, (int)tail_y,
+					(int)(tail_x - bx * flame), (int)(tail_y - by * flame), width,
+					255, 200, 120, weapon_alpha(210.0 * fade));
+				thickLineRGBA(surface, (int)tail_x, (int)tail_y, (int)hx, (int)hy, width + (torpedo ? 1 : 0),
+					torpedo ? 150 : 205, torpedo ? 160 : 208, torpedo ? 190 : 218, weapon_alpha(255.0 * fade));
+				filledCircleRGBA(surface, (int)hx, (int)hy, torpedo ? 2 : 1,
+					255, torpedo ? 90 : 255, torpedo ? 80 : 255, weapon_alpha(255.0 * fade));
+			}
+			if(arrived && outcome != 2) {
+				draw_explosion(surface, tx, ty, after, blast, torpedo && outcome == 1,
+					seed, team, fade);
+			}
+			return;
+		}
+		case WEAPON_RAIL: {
+			if(age < 300.0) {
+				double charge = age / 300.0;
+				weapon_glow(surface, fx, fy, unit * 0.5 * charge, color, 230.0 * fade * charge);
+				for(int tick = 0; tick < 4; tick++) {
+					double angle = tick * 1.5708 + 0.4;
+					double outer = unit * (1.1 - 0.8 * charge);
+					lineRGBA(surface, (int)(fx + cos(angle) * outer), (int)(fy + sin(angle) * outer),
+						(int)(fx + cos(angle) * outer * 0.6), (int)(fy + sin(angle) * outer * 0.6),
+						255, 255, 255, weapon_alpha(210.0 * fade * charge));
+				}
+			} else {
+				double since = age - 300.0;
+				double f = (1.0 - since / 550.0) * fade;
+				double ex = tx, ey = ty;
+				if(outcome == 0) { ex = tx + ux * span * 0.6; ey = ty + uy * span * 0.6; }
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)ex, (int)ey, 5,
+					color[0], color[1], color[2], weapon_alpha(70.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)ex, (int)ey, 3,
+					color[0], color[1], color[2], weapon_alpha(150.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)ex, (int)ey, 1,
+					255, 255, 255, weapon_alpha(255.0 * f));
+				circleRGBA(surface, (int)fx, (int)fy, (int)(unit * 0.15 + since * unit * 0.001),
+					color[0], color[1], color[2], weapon_alpha(170.0 * f));
+				if(outcome == 1) draw_explosion(surface, tx, ty, since, blast, false, seed, team, fade);
+			}
+			return;
+		}
+		case WEAPON_BEAM: {
+			if(age < 900.0) {
+				double sweep = outcome == 0
+					? unit * 1.1 * (1.0 - 2.0 * age / 900.0)
+					: unit * 0.06 * sin(age / 23.0);
+				double ex = tx + nx * sweep, ey = ty + ny * sweep;
+				double reach = smooth_step(0.0, 70.0, age);
+				double hx = fx + (ex - fx) * reach, hy = fy + (ey - fy) * reach;
+				double f = smooth_step(0.0, 60.0, age) * (1.0 - smooth_step(650.0, 900.0, age)) * fade;
+				int thick = 1 + (int)(unit / 16.0);
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)hx, (int)hy, thick * 2 + 3,
+					color[0], color[1], color[2], weapon_alpha(50.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)hx, (int)hy, thick + 1,
+					color[0], color[1], color[2], weapon_alpha(130.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)hx, (int)hy, thick,
+					255, 255, 255, weapon_alpha(245.0 * f));
+				weapon_glow(surface, fx, fy, unit * 0.22, color, 220.0 * f);
+				weapon_glow(surface, hx, hy, unit * 0.28, color, 220.0 * f);
+				if(outcome != 0 && reach >= 1.0) {
+					for(int spark = 0; spark < 4; spark++) {
+						unsigned int h = fx_hash(seed + (unsigned int)(age / 45.0), spark);
+						double angle = (h % 6283) / 1000.0;
+						double length = unit * (0.3 + ((h >> 12) % 60) / 100.0);
+						lineRGBA(surface, (int)hx, (int)hy, (int)(hx + cos(angle) * length),
+							(int)(hy + sin(angle) * length), 255, 230, 170, weapon_alpha(220.0 * f));
+					}
+				}
+			}
+			if(outcome == 1 && after > 0.0) {
+				draw_explosion(surface, tx, ty, after, blast, false, seed, team, fade);
+			}
+			return;
+		}
+	}
+	// Pulse, mass driver and plasma end in a small blast where they hit.
+	if(arrived && outcome == 1) {
+		draw_explosion(surface, tx, ty, after, blast < 2.0 ? 2.0 : blast, false, seed, team, fade);
+	}
 }
 
 static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale,
@@ -1251,15 +1719,13 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
  * the effect began. A dogfight is made of pairs of ships, one of each team.
  * Each pair flies several passes across the sky. In a pass the leader flies a
  * route of wide loops, and the chaser follows the same route a little behind,
- * closing and dropping back, and fires at it. Most shots miss; one hits. The
- * leader that was hit trails smoke for the rest of the pass, and on the last
- * pass it is destroyed. The next pass goes the other way with the roles swapped.
+ * closing and dropping back, and fires its weapon at it. Most volleys miss; one
+ * hits. The leader that was hit trails smoke for the rest of the pass, and on
+ * the last pass it is destroyed. The next pass goes the other way with the
+ * roles swapped.
  */
 #define DOG_BURSTS 5            // volleys the chaser fires in a pass
-#define DOG_BOLTS 3             // shots in a volley
-#define DOG_HIT_BURST 3         // the volley that hits (its second shot)
-#define DOG_BOLT_GAP 80.0       // ms between the shots of a volley
-#define DOG_BOLT_FLIGHT 240.0   // ms a shot takes to reach its target
+#define DOG_HIT_BURST 3         // the volley that hits (the middle shot of it)
 
 typedef struct {
 	SDL_Surface *surface;
@@ -1283,11 +1749,7 @@ typedef struct {
 } DogPose;
 
 static unsigned int dog_hash(unsigned int a, unsigned int b) {
-	unsigned int value = a * 2654435761u + b * 2246822519u + 0x9e3779b9u;
-	value ^= value >> 15;
-	value *= 2246822519u;
-	value ^= value >> 13;
-	return value;
+	return fx_hash(a, b);
 }
 
 // A point of the looping route of pair `pair` on pass `pass`; u runs 0..1 across the screen.
@@ -1315,7 +1777,7 @@ static void dog_pose(const Dogfight *fight, int pair, int role, double t, DogPos
 	double local = t - pair * fight->stagger_ms;
 	if(local < 0.0 || local >= fight->pass_count * fight->pass_ms) return;
 	int pass = (int)(local / fight->pass_ms);
-	double u = (local - pass * fight->pass_ms) / fight->pass_ms * 1.2;
+	double u = (local - pass * fight->pass_ms) / fight->pass_ms * 1.15;
 	if(role == 1) u -= 0.1 * (1.0 + 0.4 * sin(u * 9.0 + pair + pass));
 	double before_x, before_y, after_x, after_y;
 	dog_route_point(fight, pair, pass, u - 0.003, &before_x, &before_y);
@@ -1335,40 +1797,15 @@ static void dog_pose(const Dogfight *fight, int pair, int role, double t, DogPos
 	pose->visible = pose->x > -fight->length && pose->x < fight->surface->w + fight->length;
 }
 
-static double dog_shot_time(const Dogfight *fight, int burst, int bolt) {
-	return (0.20 + 0.14 * burst) * fight->pass_ms + bolt * DOG_BOLT_GAP;
+// When, within a pass, a volley starts; and when its shot number `bolt` is fired.
+static double dog_shot_time(const Dogfight *fight, int burst, int bolt, int weapon) {
+	return (0.18 + 0.15 * burst) * fight->pass_ms + bolt * weapon_specs[weapon].gap_ms;
 }
 
-// When, within a pass, the leader is hit.
-static double dog_hit_time(const Dogfight *fight) {
-	return dog_shot_time(fight, DOG_HIT_BURST, 1) + DOG_BOLT_FLIGHT;
-}
-
-static void dog_draw_blast(SDL_Surface *surface, double x, double y, double age,
-	double radius, bool destroyed, double fade) {
-	double life = destroyed ? 1100.0 : 450.0;
-	if(age < 0.0 || age >= life) return;
-	double progress = age / life;
-	Uint8 alpha = (Uint8)(230 * fade * (1.0 - progress));
-	// A bright flash that shrinks away quickly, inside a ring that grows and fades.
-	double flash = 1.0 - smooth_step(0.0, 0.4, progress);
-	double ring = radius * (0.3 + 1.5 * progress);
-	filledCircleRGBA(surface, (int)x, (int)y, (int)(radius * (0.2 + 0.5 * flash)),
-		255, 238, 200, (Uint8)(alpha * (0.4 + 0.6 * flash)));
-	filledCircleRGBA(surface, (int)x, (int)y, (int)(radius * (0.4 + 0.3 * progress)),
-		240, 120, 60, (Uint8)(alpha * 0.22));
-	circleRGBA(surface, (int)x, (int)y, (int)ring, 255, 175, 95, alpha);
-	circleRGBA(surface, (int)x, (int)y, (int)ring + 1, 255, 140, 70, (Uint8)(alpha * 0.6));
-	if(destroyed) {
-		for(int spark = 0; spark < 9; spark++) {
-			double angle = spark * 0.69813170079 + 0.4;
-			double near_edge = radius * (0.5 + 1.8 * progress);
-			double far_edge = near_edge + radius * 0.5;
-			thickLineRGBA(surface, (int)(x + cos(angle) * near_edge),
-				(int)(y + sin(angle) * near_edge), (int)(x + cos(angle) * far_edge),
-				(int)(y + sin(angle) * far_edge), 1, 255, 190, 120, alpha);
-		}
-	}
+// When, within a pass, the leader is hit by the chaser's weapon.
+static double dog_hit_time(const Dogfight *fight, int weapon) {
+	return dog_shot_time(fight, DOG_HIT_BURST, weapon_specs[weapon].shots / 2, weapon)
+		+ weapon_specs[weapon].impact_ms;
 }
 
 static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, int scale,
@@ -1381,12 +1818,12 @@ static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, in
 	fight.pass_count = pass_count;
 	fight.pass_ms = (window->duration - 800.0) / (pass_count + (pair_count - 1) * stagger);
 	fight.stagger_ms = fight.pass_ms * stagger;
-	fight.length = scale / 28;
-	if(fight.length < 16) fight.length = 16;
+	fight.length = scale / 34;
+	if(fight.length < 14) fight.length = 14;
 	double t = window->phase;
 	double fade = window->fade;
 	Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
-	static const Uint8 bolt_colors[2][3] = { { 143, 204, 224 }, { 245, 164, 112 } };
+	double unit = weapon_unit(fight.length);
 
 	for(int pair = 0; pair < pair_count; pair++) {
 		double local = t - pair * fight.stagger_ms;
@@ -1395,7 +1832,14 @@ static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, in
 		double pass_age = local - pass * fight.pass_ms;
 		bool last_pass = pass == pass_count - 1;
 		double pass_start = pair * fight.stagger_ms + pass * fight.pass_ms;
-		bool leader_hit = pass_age >= dog_hit_time(&fight);
+		// The chaser is the second ship; it and the leader swap teams every pass.
+		int chaser_team = (1 + pass) % 2, leader_team = pass % 2;
+		int chaser_design = ship_design_index(SHIP_SMALL,
+			dog_hash(fight.seed, pair * 2 + chaser_team) >> 4);
+		int weapon = ship_designs[chaser_design].weapon;
+		const WeaponSpec *spec = &weapon_specs[weapon];
+		double hit_time = dog_hit_time(&fight, weapon);
+		bool leader_hit = pass_age >= hit_time;
 		bool leader_destroyed = leader_hit && last_pass;
 
 		// Engine trails, and smoke behind the leader once it has been hit.
@@ -1417,7 +1861,7 @@ static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, in
 			if(role == 0 && leader_hit) {
 				for(int puff = 1; puff <= 9; puff++) {
 					double puff_time = t - puff * 110.0;
-					if(puff_time - pass_start < dog_hit_time(&fight)) break;
+					if(puff_time - pass_start < hit_time) break;
 					DogPose smoke;
 					dog_pose(&fight, pair, 0, puff_time, &smoke);
 					if(!smoke.visible || smoke.pass != pose.pass) break;
@@ -1443,22 +1887,24 @@ static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, in
 			}
 		}
 
-		// Shots from the chaser at the leader.
+		// Shots from the chaser at the leader, using the chaser's own weapon.
 		for(int burst = 0; burst < DOG_BURSTS; burst++) {
 			if(last_pass && burst > DOG_HIT_BURST) break;
-			for(int bolt = 0; bolt < DOG_BOLTS; bolt++) {
-				double fired = pass_start + dog_shot_time(&fight, burst, bolt);
+			for(int bolt = 0; bolt < spec->shots; bolt++) {
+				double fired = pass_start + dog_shot_time(&fight, burst, bolt, weapon);
 				double age = t - fired;
-				bool hit = burst == DOG_HIT_BURST && bolt == 1;
-				if(age < 0.0 || age >= DOG_BOLT_FLIGHT + (hit ? 1200.0 : 0.0)) continue;
+				if(age < 0.0 || age >= spec->life_ms) continue;
+				bool hit = burst == DOG_HIT_BURST && bolt == spec->shots / 2;
+				// A beam stays on its target, so it follows both ships live.
+				bool live = weapon == WEAPON_BEAM;
 				DogPose shooter, target;
-				dog_pose(&fight, pair, 1, fired, &shooter);
-				dog_pose(&fight, pair, 0, fired + DOG_BOLT_FLIGHT, &target);
+				dog_pose(&fight, pair, 1, live ? t : fired, &shooter);
+				dog_pose(&fight, pair, 0, live ? t : fired + spec->impact_ms, &target);
 				if(!shooter.visible || !target.visible) continue;
-				double aim_x = shooter.direction * cos(shooter.pitch);
-				double aim_y = -sin(shooter.pitch);
-				double from_x = shooter.x + aim_x * fight.length * 0.5;
-				double from_y = shooter.y + aim_y * fight.length * 0.5;
+				double from_x, from_y;
+				ship_mount_point(chaser_design, (int)shooter.x, (int)shooter.y, fight.length,
+					shooter.direction, shooter.pitch, ship_designs[chaser_design].nose, 0,
+					&from_x, &from_y);
 				double to_x = target.x, to_y = target.y;
 				if(!hit) {
 					// Misses pass to one side or the other of the target.
@@ -1469,34 +1915,80 @@ static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, in
 					to_x += -dy / span * side;
 					to_y += dx / span * side;
 				}
-				if(age < DOG_BOLT_FLIGHT) {
-					double flight = age / DOG_BOLT_FLIGHT;
-					double bolt_x = from_x + (to_x - from_x) * flight;
-					double bolt_y = from_y + (to_y - from_y) * flight;
-					double dx = to_x - from_x, dy = to_y - from_y;
-					double span = sqrt(dx * dx + dy * dy) + 1.0;
-					double tail = fight.length * 0.45;
-					const Uint8 *color = bolt_colors[shooter.team];
-					Uint8 bolt_alpha = (Uint8)(235 * fade);
-					thickLineRGBA(surface, (int)(bolt_x - dx / span * tail),
-						(int)(bolt_y - dy / span * tail), (int)bolt_x, (int)bolt_y, 2,
-						color[0], color[1], color[2], (Uint8)(bolt_alpha * 0.55));
-					thickLineRGBA(surface, (int)(bolt_x - dx / span * tail * 0.6),
-						(int)(bolt_y - dy / span * tail * 0.6), (int)bolt_x, (int)bolt_y, 1,
-						255, 255, 255, bolt_alpha);
-				} else if(hit) {
-					dog_draw_blast(surface, to_x, to_y, age - DOG_BOLT_FLIGHT,
-						fight.length * (last_pass ? 0.95 : 0.4), last_pass, fade);
-				}
+				draw_weapon_shot(surface, weapon, bolt, from_x, from_y, to_x, to_y, age, unit,
+					chaser_team, fade, hit ? (last_pass ? 2 : 1) : 0,
+					dog_hash(fight.seed, pair * 64 + pass * 16 + burst * 4 + bolt));
 			}
+		}
+
+		// The destroyed leader blows up where it was when the shot landed.
+		if(leader_destroyed) {
+			DogPose last;
+			dog_pose(&fight, pair, 0, pass_start + hit_time, &last);
+			draw_explosion(surface, last.x, last.y, pass_age - hit_time, fight.length * 1.0,
+				true, dog_hash(fight.seed, pair * 5 + 1), leader_team, fade);
 		}
 	}
 }
 
-// One pair of small ships chasing each other in loops, then trading places.
+// The old flyby: one ship from each side crosses the sky, firing pulse bolts at the
+// other and passing it in the middle. Nothing is hit.
 static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
+	Uint32 phase = window.phase;
+
+	int size = scale / 170;
+	if(size < 4) size = 4;
+	int length = scale / 38;
+	if(length < 14) length = 14;
+	double fade = window.fade;
+	double progress = window.progress;
+	int left_x = (int)(-length + progress * (surface->w + 2.0 * length));
+	int right_x = surface->w - left_x;
+	int center_y = surface->h * 11 / 100;
+	int arc = (int)(sin(progress * 6.28318530718) * scale * 0.018);
+	int maneuver = (int)(sin(progress * 12.56637061436) * scale * 0.014);
+	int left_y = center_y + arc + maneuver;
+	int right_y = center_y - arc - maneuver;
+	Uint8 alpha = (Uint8)(150 * fade);
+	Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+
+	draw_ship_role(surface, left_x, left_y, SHIP_SMALL, window.seed >> 4,
+		length, 1, 0, opacity);
+	draw_ship_role(surface, right_x, right_y, SHIP_SMALL, window.seed >> 11,
+		length, -1, 1, opacity);
+
+	Uint32 volley_phase = phase % 2600;
+	if(volley_phase < 300 && progress > 0.08 && progress < 0.94) {
+		int bolt_length = scale / 18;
+		if(bolt_length < 12) bolt_length = 12;
+		Uint8 bolt_alpha = (Uint8)(alpha * 0.8);
+		thickLineRGBA(surface, left_x + length / 2, left_y,
+			left_x + length / 2 + bolt_length, left_y - size / 3,
+			1, 143, 204, 224, bolt_alpha);
+		thickLineRGBA(surface, right_x - length / 2, right_y,
+			right_x - length / 2 - bolt_length, right_y + size / 3,
+			1, 220, 164, 126, bolt_alpha);
+	}
+	if(volley_phase > 1850 && volley_phase < 2250) {
+		double hit_progress = (double)(volley_phase - 1850) / 400.0;
+		int impact_x = surface->w / 2
+			+ (int)(sin(phase / 1700.0) * scale * 0.045);
+		int impact_y = center_y + (int)(sin(phase / 950.0) * scale * 0.025);
+		Uint8 impact_alpha = (Uint8)(alpha * (1.0 - hit_progress));
+		int radius = size / 2 + (int)(size * hit_progress);
+		filledCircleRGBA(surface, impact_x, impact_y, radius,
+			219, 158, 111, (Uint8)(impact_alpha * 0.65));
+		filledCircleRGBA(surface, impact_x, impact_y, size / 4,
+			238, 216, 177, impact_alpha);
+	}
+}
+
+// One pair of small ships chasing each other in loops, then trading places.
+static void render_dogfight_effect(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
 	render_dogfight(surface, &window, scale, 1, 2, 0.0);
 }
 
@@ -1507,62 +1999,218 @@ static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int sca
 	render_dogfight(surface, &window, scale, 2 + (window.seed >> 5) % 2, 3, 0.35);
 }
 
+/*
+ * Fleet battle
+ *
+ * Two fleets close, hold and trade fire. Like every effect it is stateless: a
+ * ship's place is a function of time, each gun fires on a schedule of its own,
+ * and a shot is drawn from how long ago it was fired. The losing fleet loses its
+ * ships one at a time in the second half of the battle (the last one survives and
+ * retreats); the winners' guns favour a ship that is about to die, so every
+ * destruction is preceded by hits.
+ */
+typedef struct {
+	SDL_Surface *surface;
+	int scale;
+	Uint32 seed;
+	double start;               // scene time the battle began
+	double duration;
+	int winner;                 // the side that does not lose ships
+	int size, fighter_size;
+	int count[2];
+	int center_y;
+} Fleet;
+
+// Time between volleys of each weapon (ms); turrets fire half as often again.
+static const double weapon_period[WEAPON_COUNT] = {
+	1300.0, 3400.0, 2800.0, 1700.0, 2100.0, 3800.0, 3400.0, 6500.0, 4200.0 };
+
+static double fleet_progress(const Fleet *fleet, double t) {
+	return (t - fleet->start) / fleet->duration;
+}
+
+static void fleet_pose(const Fleet *fleet, int side, int ship, double t, double *x, double *y) {
+	double progress = fleet_progress(fleet, t);
+	double approach = smooth_step(0.04, 0.31, progress);
+	double retreat = smooth_step(0.78, 0.97, progress);
+	int width = fleet->surface->w;
+	double anchor;
+	if(side == 0) {
+		double hold = width * (0.37 + 0.008 * sin(t / 3600.0));
+		anchor = -fleet->size * 6 + approach * (hold + fleet->size * 6)
+			- (fleet->winner == 0 ? 0.0 : retreat * width * 0.62);
+	} else {
+		double hold = width * (0.63 + 0.008 * sin(t / 3900.0 + 1.7));
+		anchor = width + fleet->size * 6 - approach * (width - hold + fleet->size * 6)
+			+ (fleet->winner == 1 ? 0.0 : retreat * width * 0.62);
+	}
+	int direction = side == 0 ? 1 : -1;
+	int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
+	double offset = direction * ((ship + 1) / 2) * fleet->size * 3;
+	double weave = sin(t / (510.0 + ship * 127) + ship * 1.8 + side * 2.4) * fleet->scale * 0.009;
+	double arc = sin(t / 1900.0 + progress * 8.0) * fleet->scale * 0.010;
+	*x = anchor + offset + weave;
+	*y = fleet->center_y + (side == 0 ? arc : -arc) + lane * fleet->scale / 36.0
+		+ sin(t / (370.0 + ship * 83) + ship * 1.3) * fleet->size * 0.75;
+}
+
+static int fleet_role(const Fleet *fleet, int side, int ship) {
+	unsigned int type = fleet->seed >> ((ship * 3 + side * 7) % 24);
+	if(ship == 0 && ((fleet->seed >> (side + 2)) & 1)) return SHIP_BIG;
+	if(type % 3 == 0) return SHIP_MID;
+	return SHIP_SMALL;
+}
+
+static int fleet_length(const Fleet *fleet, int ship, int role) {
+	if(role == SHIP_BIG) return fleet->size * 10;
+	if(role == SHIP_MID) return fleet->size * 7;
+	return (fleet->fighter_size + (ship % 3 == 0 ? 2 : 0)) * 5;
+}
+
+static int fleet_design(const Fleet *fleet, int side, int ship) {
+	unsigned int variety = (fleet->seed >> 9) + ship * 5 + side * 3;
+	return ship_design_index(fleet_role(fleet, side, ship), variety);
+}
+
+// Scene time at which a ship of the losing fleet is destroyed; -1 for any other ship.
+static double fleet_death(const Fleet *fleet, int side, int ship) {
+	if(side == fleet->winner || ship == fleet->count[side] - 1) return -1.0;
+	double when = 0.46 + 0.34 * (fx_hash(fleet->seed, side * 16 + ship) % 100) / 100.0;
+	return fleet->start + when * fleet->duration;
+}
+
+// Draws the shots in the air now from every gun of one ship.
+static void fleet_fire(const Fleet *fleet, int side, int ship, double now, double fade) {
+	int design_index = fleet_design(fleet, side, ship);
+	const ShipDesign *design = &ship_designs[design_index];
+	int length = fleet_length(fleet, ship, fleet_role(fleet, side, ship));
+	double unit = weapon_unit(length);
+	double death = fleet_death(fleet, side, ship);
+	int direction = side == 0 ? 1 : -1;
+	int enemy = 1 - side;
+	for(int gun = 0; gun < 1 + design->turret_count; gun++) {
+		int weapon = gun == 0 ? design->weapon : design->turret_weapon;
+		const WeaponSpec *spec = &weapon_specs[weapon];
+		unsigned int gun_hash = fx_hash(fleet->seed, 1000 + side * 200 + ship * 20 + gun);
+		double period = weapon_period[weapon] * (gun == 0 ? 1.0 : 1.5)
+			* (0.85 + 0.3 * (gun_hash % 100) / 100.0);
+		double offset = (gun_hash >> 8) % (unsigned int)period;
+		double volley = (spec->shots - 1) * spec->gap_ms;
+		double since = now - fleet->start - offset;
+		if(since < 0.0) continue;
+		int newest = (int)(since / period);
+		double earliest = since - spec->life_ms - volley;
+		int oldest = earliest < 0.0 ? 0 : (int)(earliest / period);
+		int mount_x = gun == 0 ? design->nose : design->turrets[gun - 1][0];
+		int mount_y = gun == 0 ? 0 : design->turrets[gun - 1][1];
+		for(int k = oldest; k <= newest; k++) {
+			double volley_start = fleet->start + offset + k * period;
+			double volley_progress = fleet_progress(fleet, volley_start);
+			if(volley_progress < 0.14 || volley_progress > 0.9) continue;
+			if(death >= 0.0 && volley_start >= death) continue;
+			unsigned int volley_hash = fx_hash(gun_hash, k);
+			double lands = volley_start + spec->impact_ms;
+			// Prefer a ship that is about to be destroyed.
+			int target = -1;
+			bool finishing = false;
+			for(int j = 0; j < fleet->count[enemy]; j++) {
+				double d = fleet_death(fleet, enemy, j);
+				if(d > lands && d < lands + 1500.0 && volley_hash % 100 < 70) {
+					target = j;
+					finishing = true;
+					break;
+				}
+			}
+			if(target < 0) {
+				int first = (volley_hash >> 8) % fleet->count[enemy];
+				for(int tries = 0; tries < fleet->count[enemy]; tries++) {
+					int j = (first + tries) % fleet->count[enemy];
+					double d = fleet_death(fleet, enemy, j);
+					if(d < 0.0 || d > lands) {
+						target = j;
+						break;
+					}
+				}
+			}
+			if(target < 0) continue;
+			bool hit = finishing || (volley_hash >> 16) % 100 < 40;
+			int target_length = fleet_length(fleet, target, fleet_role(fleet, enemy, target));
+			for(int bolt = 0; bolt < spec->shots; bolt++) {
+				double fired = volley_start + bolt * spec->gap_ms;
+				double age = now - fired;
+				if(age < 0.0 || age >= spec->life_ms) continue;
+				// A beam stays on its target, so it follows both ships live.
+				bool live = weapon == WEAPON_BEAM;
+				double sx, sy, tx, ty, mx, my;
+				fleet_pose(fleet, side, ship, live ? now : fired, &sx, &sy);
+				fleet_pose(fleet, enemy, target, live ? now : fired + spec->impact_ms, &tx, &ty);
+				ship_mount_point(design_index, (int)sx, (int)sy, length, direction, 0.0,
+					mount_x, mount_y, &mx, &my);
+				double dx = tx - mx, dy = ty - my;
+				double span = sqrt(dx * dx + dy * dy) + 1.0;
+				if(hit) {
+					// Hits spread over the hull.
+					ty += ((bolt + k) % 3 - 1) * target_length * 0.12;
+				} else {
+					double side_offset = ((volley_hash >> 4) % 2 ? 1.0 : -1.0)
+						* target_length * (0.5 + 0.25 * (bolt % 3));
+					tx += -dy / span * side_offset;
+					ty += dx / span * side_offset;
+				}
+				draw_weapon_shot(fleet->surface, weapon, bolt, mx, my, tx, ty, age, unit,
+					side, fade, hit ? 1 : 0, fx_hash(volley_hash, bolt));
+			}
+		}
+	}
+}
+
 static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_FLEET_BATTLE, ticks, &window)) return;
-	Uint32 phase = window.phase;
+	Fleet fleet;
+	fleet.surface = surface;
+	fleet.scale = scale;
+	fleet.seed = window.seed;
+	fleet.start = (double)ticks - window.phase;
+	fleet.duration = window.duration;
+	fleet.winner = (window.seed ^ (window.seed >> 13) ^ (window.seed >> 23)) & 1;
+	fleet.size = scale / 72;
+	if(fleet.size < 10) fleet.size = 10;
+	fleet.fighter_size = fleet.size / 2;
+	if(fleet.fighter_size < 7) fleet.fighter_size = 7;
+	fleet.count[0] = 3 + (window.seed >> 4) % 4;
+	fleet.count[1] = 3 + (window.seed >> 12) % 4;
+	fleet.center_y = surface->h * 12 / 100;
 	Uint32 seed = window.seed;
-	int winner = (seed ^ (seed >> 13) ^ (seed >> 23)) & 1;
 	double progress = window.progress;
 	double fade = window.fade;
-	double approach = smooth_step(0.04, 0.31, progress);
-	double retreat = smooth_step(0.78, 0.97, progress);
-	double defeat = smooth_step(0.48, 0.84, progress);
-	int size = scale / 72;
-	if(size < 10) size = 10;
-	int fighter_size = size / 2;
-	if(fighter_size < 7) fighter_size = 7;
-	double left_hold = surface->w * (0.37 + 0.008 * sin(ticks / 3600.0));
-	double right_hold = surface->w * (0.63 + 0.008 * sin(ticks / 3900.0 + 1.7));
-	int left_x = (int)(-size * 6 + approach * (left_hold + size * 6)
-		- (winner == 0 ? 0 : retreat * surface->w * 0.62));
-	int right_x = (int)(surface->w + size * 6
-		- approach * (surface->w - right_hold + size * 6)
-		+ (winner == 1 ? 0 : retreat * surface->w * 0.62));
-	int center_y = surface->h * 12 / 100;
-	int arc = (int)(sin(ticks / 1900.0 + progress * 8.0) * scale * 0.010);
-	int left_count = 3 + (seed >> 4) % 4;
-	int right_count = 3 + (seed >> 12) % 4;
-	Uint8 left_opacity = (Uint8)(SHIP_OPACITY * fade * (winner == 0 ? 1.0 : 1.0 - defeat * 0.75));
-	Uint8 right_opacity = (Uint8)(SHIP_OPACITY * fade * (winner == 1 ? 1.0 : 1.0 - defeat * 0.75));
+	double now = ticks;
+	Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
 
+	// The ships. One that is about to be destroyed burns and trails smoke.
 	for(int side = 0; side < 2; side++) {
 		int direction = side == 0 ? 1 : -1;
-		int count = side == 0 ? left_count : right_count;
-		int anchor_x = side == 0 ? left_x : right_x;
-		int side_arc = side == 0 ? arc : -arc;
-		Uint8 side_opacity = side == 0 ? left_opacity : right_opacity;
-
-		for(int ship = 0; ship < count; ship++) {
-			int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
-			int offset = direction * ((ship + 1) / 2) * size * 3;
-			int weave = (int)(sin(ticks / (510.0 + ship * 127)
-				+ ship * 1.8 + side * 2.4) * scale * 0.009);
-			int ship_x = anchor_x + offset + weave;
-			int ship_y = center_y + side_arc + lane * scale / 36
-				+ (int)(sin(ticks / (370.0 + ship * 83) + ship * 1.3) * size * 0.75);
-			unsigned int type = seed >> ((ship * 3 + side * 7) % 24);
-			unsigned int variety = (seed >> 9) + ship * 5 + side * 3;
-			if(ship == 0 && ((seed >> (side + 2)) & 1)) {
-				draw_ship_role(surface, ship_x, ship_y, SHIP_BIG, variety,
-					size * 10, direction, side, side_opacity);
-			} else if(type % 3 == 0) {
-				draw_ship_role(surface, ship_x, ship_y, SHIP_MID, variety,
-					size * 7, direction, side, side_opacity);
-			} else {
-				draw_ship_role(surface, ship_x, ship_y, SHIP_SMALL, variety,
-					(fighter_size + (ship % 3 == 0 ? 2 : 0)) * 5, direction, side,
-					side_opacity);
+		for(int ship = 0; ship < fleet.count[side]; ship++) {
+			double death = fleet_death(&fleet, side, ship);
+			if(death >= 0.0 && now >= death) continue;
+			double x, y;
+			fleet_pose(&fleet, side, ship, now, &x, &y);
+			int role = fleet_role(&fleet, side, ship);
+			int length = fleet_length(&fleet, ship, role);
+			if(death >= 0.0 && now > death - 3500.0) {
+				for(int puff = 1; puff <= 9; puff++) {
+					double px, py;
+					fleet_pose(&fleet, side, ship, now - puff * 110.0, &px, &py);
+					filledCircleRGBA(surface, (int)(px - direction * length * 0.3), (int)py,
+						2 + puff / 2 + length / 30, 150, 150, 160,
+						weapon_alpha(85.0 * fade * (1.0 - puff / 10.0)));
+				}
+			}
+			draw_ship_design(surface, (int)floor(x + 0.5), (int)floor(y + 0.5),
+				fleet_design(&fleet, side, ship), length, direction, side, opacity);
+			if(death >= 0.0 && now > death - 3500.0) {
+				weapon_glow(surface, x - direction * length * 0.15, y - length * 0.04,
+					length * 0.09, weapon_team_colors[1], fade * (110.0 + 90.0 * sin(now / 55.0 + ship)));
 			}
 		}
 	}
@@ -1573,50 +2221,187 @@ static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 		int reserves = 1 + (seed >> 20) % 3;
 		for(int side = 0; side < 2; side++) {
 			int direction = side == 0 ? 1 : -1;
-			int anchor_x = side == 0 ? left_x : right_x;
+			double anchor_x, anchor_y;
+			fleet_pose(&fleet, side, 0, now, &anchor_x, &anchor_y);
 			for(int ship = 0; ship < reserves; ship++) {
-				int x = anchor_x - direction * (int)(surface->w * 0.16 * (1.0 - reinforcement))
-					- direction * ship * fighter_size * 3;
-				int y = center_y + (side == 0 ? arc : -arc)
-					+ (ship - reserves / 2) * scale / 25;
+				int x = (int)anchor_x - direction * (int)(surface->w * 0.16 * (1.0 - reinforcement))
+					- direction * ship * fleet.fighter_size * 3;
+				int y = (int)anchor_y + (ship - reserves / 2) * scale / 25;
 				draw_ship_role(surface, x, y, SHIP_SMALL, (seed >> 13) + ship * 5 + side * 3,
-					fighter_size * 5, direction, side,
+					fleet.fighter_size * 5, direction, side,
 					(Uint8)(SHIP_OPACITY * 0.85 * fade * reinforcement));
 			}
 		}
 	}
 
-	Uint32 volley_phase = (phase + (seed >> 9)) % 1800;
-	if(volley_phase < 280 && progress > 0.14 && progress < 0.88) {
-		double shot_progress = (double)volley_phase / 280.0;
-		for(int bolt = 0; bolt < 4; bolt++) {
-			int lane_y = center_y + (bolt - 1) * scale / 34;
-			int shot_x = left_x + size * 3
-				+ (int)((right_x - left_x - size * 6) * shot_progress);
-			int shot_y = lane_y + (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 38);
-			thickLineRGBA(surface, shot_x - size * 2, shot_y, shot_x, shot_y,
-				2, 135, 200, 230, (Uint8)(92 * fade));
-			shot_x = right_x - size * 3
-				- (int)((right_x - left_x - size * 6) * shot_progress);
-			shot_y = lane_y - (int)(sin(shot_progress * 3.14159265359 + bolt) * scale / 38);
-			thickLineRGBA(surface, shot_x + size * 2, shot_y, shot_x, shot_y,
-				2, 239, 154, 108, (Uint8)(92 * fade));
+	// Weapons fire, and the doomed ships blow up.
+	for(int side = 0; side < 2; side++) {
+		for(int ship = 0; ship < fleet.count[side]; ship++) {
+			fleet_fire(&fleet, side, ship, now, fade);
 		}
 	}
+	for(int side = 0; side < 2; side++) {
+		for(int ship = 0; ship < fleet.count[side]; ship++) {
+			double death = fleet_death(&fleet, side, ship);
+			if(death < 0.0 || now < death || now - death >= 1700.0) continue;
+			double x, y;
+			fleet_pose(&fleet, side, ship, death, &x, &y);
+			int length = fleet_length(&fleet, ship, fleet_role(&fleet, side, ship));
+			draw_explosion(surface, x, y, now - death, length * 0.55 + 6.0, true,
+				fx_hash(seed, 300 + side * 16 + ship), side, fade);
+		}
+	}
+}
 
-	Uint32 impact_phase = (phase + (seed >> 16)) % 2300;
-	if(progress > 0.22 && progress < 0.86 && impact_phase < 300) {
-		unsigned int blast_seed = seed ^ 0xa511e9b3u ^ (phase / 450 * 0x9e3779b9u);
-		int loser_x = winner == 0 ? right_x : left_x;
-		int blast_x = loser_x + (int)(blast_seed % (unsigned int)(size * 10 + 1)) - size * 5;
-		int blast_y = center_y + (int)((blast_seed >> 8) % (unsigned int)(scale / 10 + 1))
-			- scale / 20;
-		int blast_radius = size / 3 + (int)(size * impact_phase / 900.0);
-		Uint8 blast_alpha = (Uint8)(130 * fade * (1.0 - impact_phase / 300.0));
-		filledCircleRGBA(surface, blast_x, blast_y, blast_radius,
-			225, 119, 72, blast_alpha);
-		circleRGBA(surface, blast_x, blast_y, blast_radius + size / 2,
-			255, 201, 137, (Uint8)(blast_alpha * 0.8));
+// Screen row of ridge `layer` at pixel column x.
+static double ground_y(SDL_Surface *surface, int layer, double x) {
+	double nx = x / surface->w;
+	if(nx < 0.0) nx = 0.0;
+	if(nx > 0.999) nx = 0.999;
+	return surface->h * ridge_height(layer, nx);
+}
+
+/*
+ * The garden: plants grow on the near ridge, one after another. There are five
+ * kinds (round trees, pines, cypresses, flowering bushes and giant glowing
+ * mushrooms) in one of three colour themes (lush, autumn, blossom), with grass
+ * sprouting between them. Saplings shoot up, canopies fill out, trees sway in
+ * the wind, and late in the event the bushes flower and the trees bear fruit.
+ */
+static void draw_hill_garden(SDL_Surface *surface, Uint32 ticks, int scale, Uint32 seed,
+	double progress, double fade) {
+	static const Uint8 themes[3][3][3] = {
+		{ { 44, 84, 60 }, { 96, 154, 88 }, { 245, 238, 200 } },     // lush
+		{ { 118, 58, 30 }, { 214, 130, 52 }, { 232, 196, 76 } },    // autumn
+		{ { 58, 96, 72 }, { 116, 170, 116 }, { 248, 152, 196 } }    // blossom
+	};
+	const Uint8 *dark = themes[seed % 3][0];
+	const Uint8 *light = themes[seed % 3][1];
+	const Uint8 *flower = themes[seed % 3][2];
+	int width = surface->w;
+	Uint8 alpha = (Uint8)(215 * fade);
+	scale = scale * 17 / 10;     // plants are drawn larger than the other hill things
+
+	// Grass first, so the plants stand in it.
+	for(int blade = 0; blade < 96; blade++) {
+		unsigned int h = fx_hash(seed, 500 + blade);
+		double x = width * (blade + 0.5) / 96.0 + (int)(h % 9) - 4;
+		double sprout = smooth_step(0.02, 0.3, progress - (h % 11) * 0.012);
+		double length = scale * (0.010 + (h >> 8) % 8 * 0.002) * sprout;
+		if(length < 1.0) continue;
+		double sway = sin(ticks / 650.0 + blade * 0.8) * length * 0.35;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		thickLineRGBA(surface, (int)x, (int)base, (int)(x + sway), (int)(base - length), 1,
+			(Uint8)(dark[0] + 20), (Uint8)(dark[1] + 24), (Uint8)(dark[2] + 14),
+			(Uint8)(alpha * 0.8));
+	}
+
+	const int plants = 11;
+	for(int plant = 0; plant < plants; plant++) {
+		unsigned int h = fx_hash(seed, plant);
+		double r = (h % 100) / 100.0;
+		double x = width * (0.05 + 0.9 * plant / (plants - 1.0)) + (int)((h >> 8) % 36) - 18;
+		double start = 0.03 + plant * 0.028;
+		double growth = smooth_step(start, start + 0.45, progress);
+		double canopy = smooth_step(start + 0.28, start + 0.65, progress);
+		if(growth <= 0.0) continue;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double sway = sin(ticks / 900.0 + plant * 1.3) * scale * 0.004 * canopy;
+		// A fixed mix of the five kinds, rotated by the seed, so every garden has some of each.
+		static const int species_plan[11] = { 0, 1, 3, 0, 2, 1, 4, 0, 3, 1, 2 };
+		int species = species_plan[(plant + seed) % 11];
+		int bx = (int)x, by = (int)base;
+
+		if(species == 0) {
+			// Round tree: a trunk and a crown of overlapping blobs, lit from above.
+			double th = scale * (0.030 + 0.014 * r) * growth;
+			int tx = (int)(x + sway * 0.3), ty = (int)(base - th);
+			thickLineRGBA(surface, bx, by, tx, ty, 2 + (int)(growth * 2), 54, 40, 34, alpha);
+			double crown = scale * (0.022 + 0.008 * r) * canopy;
+			for(int blob = 0; blob < 5; blob++) {
+				double angle = blob * 1.2566 + r * 3.0;
+				int cx = (int)(x + sway + cos(angle) * crown * 0.75);
+				int cy = (int)(base - th - crown * 0.4 + sin(angle) * crown * 0.5);
+				filledCircleRGBA(surface, cx, cy, (int)(crown * 0.62) + 1,
+					dark[0], dark[1], dark[2], alpha);
+			}
+			for(int blob = 0; blob < 3; blob++) {
+				double angle = blob * 2.1 + r * 3.0 + 0.6;
+				int cx = (int)(x + sway + cos(angle) * crown * 0.5 - crown * 0.15);
+				int cy = (int)(base - th - crown * 0.75 + sin(angle) * crown * 0.3);
+				filledCircleRGBA(surface, cx, cy, (int)(crown * 0.4) + 1,
+					light[0], light[1], light[2], (Uint8)(alpha * 0.85));
+			}
+			double fruit = smooth_step(0.72, 0.9, progress);
+			if(fruit > 0.0 && canopy > 0.9) {
+				for(int f = 0; f < 5; f++) {
+					double angle = f * 1.7 + r * 5.0;
+					int fx = (int)(x + sway + cos(angle) * crown * 0.8);
+					int fy = (int)(base - th - crown * 0.4 + sin(angle) * crown * 0.5);
+					filledCircleRGBA(surface, fx, fy, 2, flower[0], flower[1], flower[2],
+						(Uint8)(alpha * fruit));
+				}
+			}
+		} else if(species == 1) {
+			// Pine: stacked tiers that widen toward the ground.
+			double th = scale * (0.045 + 0.016 * r) * growth;
+			thickLineRGBA(surface, bx, by, bx, (int)(base - th * 0.25), 2, 54, 40, 34, alpha);
+			for(int tier = 0; tier < 4; tier++) {
+				double tier_base = base - th * (0.12 + tier * 0.2);
+				double tier_width = scale * 0.017 * (1.0 - tier * 0.2) * (0.3 + 0.7 * canopy);
+				double tier_top = tier_base - th * 0.3;
+				int shift = (int)(sway * (tier + 1) * 0.35);
+				filledTrigonRGBA(surface, (int)(x - tier_width) + shift / 2, (int)tier_base,
+					(int)(x + tier_width) + shift / 2, (int)tier_base, bx + shift, (int)tier_top,
+					dark[0], dark[1], dark[2], alpha);
+				filledTrigonRGBA(surface, (int)(x - tier_width * 0.5) + shift / 2, (int)tier_base - 1,
+					bx + shift / 2, (int)tier_base - 1, bx + shift, (int)tier_top,
+					light[0], light[1], light[2], (Uint8)(alpha * 0.6));
+			}
+		} else if(species == 2) {
+			// Cypress: a tall slim flame of leaves.
+			double ch = scale * (0.05 + 0.018 * r) * growth;
+			double cw = scale * 0.0085 * (0.4 + 0.6 * canopy);
+			filledEllipseRGBA(surface, (int)(x + sway * 0.6), (int)(base - ch * 0.5), (int)cw + 1,
+				(int)(ch * 0.5) + 1, dark[0], dark[1], dark[2], alpha);
+			filledEllipseRGBA(surface, (int)(x + sway * 0.6 - cw * 0.3), (int)(base - ch * 0.55),
+				(int)(cw * 0.45) + 1, (int)(ch * 0.4) + 1, light[0], light[1], light[2],
+				(Uint8)(alpha * 0.7));
+		} else if(species == 3) {
+			// Bush that comes into flower late in the event.
+			double bush = scale * 0.018 * growth;
+			for(int blob = 0; blob < 3; blob++) {
+				filledCircleRGBA(surface, (int)(x + (blob - 1) * bush * 0.8 + sway * 0.4),
+					(int)(base - bush * 0.6), (int)(bush * (blob == 1 ? 0.8 : 0.6)) + 1,
+					dark[0], dark[1], dark[2], alpha);
+			}
+			double bloom = smooth_step(0.5 + start * 0.4, 0.78 + start * 0.4, progress);
+			for(int f = 0; f < 9; f++) {
+				unsigned int fh = fx_hash(h, f);
+				int fx = (int)(x + ((int)(fh % 100) - 50) * bush * 0.022 + sway * 0.4);
+				int fy = (int)(base - bush * (0.4 + (fh >> 8) % 60 / 100.0));
+				if((fh >> 16) % 100 > bloom * 100.0) continue;
+				filledCircleRGBA(surface, fx, fy, 2, flower[0], flower[1], flower[2], alpha);
+				pixelRGBA(surface, fx, fy, 255, 255, 235, alpha);
+			}
+		} else {
+			// Giant mushroom with a softly glowing cap.
+			double mh = scale * (0.026 + 0.010 * r) * growth;
+			double cap = scale * 0.016 * (0.3 + 0.7 * canopy);
+			boxRGBA(surface, bx - 2, (int)(base - mh), bx + 2, by, 150, 142, 130, alpha);
+			double pulse = 0.65 + 0.35 * sin(ticks / 420.0 + plant);
+			filledCircleRGBA(surface, bx, (int)(base - mh), (int)(cap * 1.8) + 1,
+				light[0], light[1], light[2], (Uint8)(26 * fade * pulse * canopy));
+			filledEllipseRGBA(surface, bx, (int)(base - mh), (int)cap + 1, (int)(cap * 0.7) + 1,
+				dark[0] + 40, dark[1] + 10, dark[2] + 20, alpha);
+			boxRGBA(surface, bx - (int)cap - 1, (int)(base - mh), bx + (int)cap + 1,
+				(int)(base - mh) + 2, 30, 24, 30, alpha);
+			for(int spot = 0; spot < 3; spot++) {
+				filledCircleRGBA(surface, bx + (int)((spot - 1) * cap * 0.55),
+					(int)(base - mh - cap * 0.3 - (spot == 1 ? cap * 0.15 : 0)), 1 + (int)(cap * 0.12),
+					190, 255, 230, (Uint8)(235 * fade * pulse * canopy));
+			}
+		}
 	}
 }
 
@@ -1629,36 +2414,7 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 		int kind = effect_kind(&EFFECT_LONG_SCENE, seed % 5);
 
 		if(kind == 0) {
-			for(int tree = 0; tree < 7; tree++) {
-				int tree_x = surface->w * (8 + tree * 13) / 100;
-				double nx = (double)tree_x / surface->w;
-				double ridge = ridge_height(RIDGE_NEAR, nx);
-				int base_y = (int)(surface->h * ridge);
-				double growth = smooth_step(0.03 + tree * 0.025, 0.72 + tree * 0.025, progress);
-				int tree_height = (int)(scale * (0.035 + (tree % 3) * 0.012) * growth);
-				if(tree_height < 2) continue;
-				Uint8 alpha = (Uint8)(175 * fade);
-				thickLineRGBA(surface, tree_x, base_y, tree_x, base_y - tree_height,
-					2 + tree % 2, 61, 72, 61, alpha);
-				for(int branch = 1; branch <= 3; branch++) {
-					int branch_y = base_y - tree_height * branch / 4;
-					int branch_length = tree_height * (4 - branch) / 5;
-					thickLineRGBA(surface, tree_x, branch_y,
-						tree_x - branch_length, branch_y - branch_length / 2,
-						2, 67, 82, 66, alpha);
-					thickLineRGBA(surface, tree_x, branch_y,
-						tree_x + branch_length, branch_y - branch_length / 2,
-						2, 67, 82, 66, alpha);
-					if(growth > 0.72) {
-						filledCircleRGBA(surface, tree_x - branch_length,
-							branch_y - branch_length / 2, branch_length / 3 + 1,
-							74, 112, 78, alpha);
-						filledCircleRGBA(surface, tree_x + branch_length,
-							branch_y - branch_length / 2, branch_length / 3 + 1,
-							86, 124, 83, alpha);
-					}
-				}
-			}
+			draw_hill_garden(surface, ticks, scale, seed, progress, fade);
 		} else if(kind == 1) {
 			int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
 			boxRGBA(surface, 0, flood_y, surface->w - 1, surface->h - 1,
@@ -1721,6 +2477,462 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 				figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
 		}
 	}
+
+/*
+ * Hill events
+ *
+ * Things that happen on the hills. Each is a small function taking a HillEvent.
+ * They stand on the near ridge (the one below the clock cards, so they are
+ * seen), except the volcano, which sits on the middle ridge at one edge of the
+ * screen. `t` is seconds since the event began, `progress` runs 0..1 over it,
+ * and `fade` fades the whole thing in and out. To add one: write hill_xxx(),
+ * append it to hill_event_kinds[] and bump HILL_EVENT_KINDS.
+ */
+typedef struct {
+	SDL_Surface *surface;
+	Uint32 ticks;
+	int scale;
+	Uint32 seed;
+	double t;
+	double progress;
+	double fade;
+	int direction;         // 1: things go left to right, -1: right to left
+} HillEvent;
+
+// A repeatable random number in 0..1 for the event.
+static double hill_random(const HillEvent *event, int a, int b) {
+	return (fx_hash(event->seed + a * 7919u, b) % 1000) / 1000.0;
+}
+
+// A small walking figure with a lantern on a pole.
+static void hill_walker(SDL_Surface *surface, double x, double ground, double height,
+	int direction, double step, bool lantern, double fade, double t, int index) {
+	Uint8 alpha = weapon_alpha(235.0 * fade);
+	double hip = ground - height * 0.45;
+	double swing = sin(step) * height * 0.22;
+	int width = height > 22 ? 3 : 2;
+	thickLineRGBA(surface, (int)x, (int)hip, (int)(x + swing), (int)ground, width, 12, 15, 22, alpha);
+	thickLineRGBA(surface, (int)x, (int)hip, (int)(x - swing), (int)ground, width, 12, 15, 22, alpha);
+	thickLineRGBA(surface, (int)x, (int)hip, (int)(x + direction * height * 0.05),
+		(int)(ground - height * 0.8), width + 1, 14, 18, 26, alpha);
+	filledCircleRGBA(surface, (int)(x + direction * height * 0.07), (int)(ground - height * 0.92),
+		(int)(height * 0.1) + 1, 14, 18, 26, alpha);
+	if(lantern) {
+		double hand_x = x + direction * height * 0.2, hand_y = ground - height * 0.58;
+		double lamp_x = x + direction * height * 0.42, lamp_y = ground - height * 0.5;
+		thickLineRGBA(surface, (int)hand_x, (int)hand_y, (int)lamp_x, (int)(lamp_y - height * 0.1), 1,
+			12, 15, 22, alpha);
+		static const Uint8 warm[3] = { 255, 190, 100 };
+		weapon_glow(surface, lamp_x, lamp_y, height * 0.11 * (0.9 + 0.1 * sin(t * 9.0 + index)),
+			warm, 235.0 * fade);
+		ellipseRGBA(surface, (int)lamp_x, (int)ground, (int)(height * 0.8), (int)(height * 0.09),
+			255, 190, 100, weapon_alpha(40.0 * fade));
+	}
+}
+
+// A village of small houses: windows light up one by one, chimneys smoke, and a
+// church tower stands in the middle.
+static void hill_village(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int houses = 8;
+	for(int house = 0; house < houses; house++) {
+		double r = hill_random(event, house, 1), r2 = hill_random(event, house, 2);
+		double x = surface->w * (0.06 + 0.88 * (house + 0.5 + (r - 0.5) * 0.5) / houses);
+		double base = ground_y(surface, RIDGE_NEAR, x) + event->scale * 0.004;
+		double width = event->scale * (0.04 + 0.016 * r2);
+		double height = width * (0.75 + 0.5 * r);
+		bool tower = house == 3;
+		if(tower) { width *= 0.7; height *= 2.4; }
+		double arrive = smooth_step(0.0, 0.1, event->progress - house * 0.012);
+		if(arrive <= 0.0) continue;
+		Uint8 alpha = weapon_alpha(235.0 * event->fade * arrive);
+		int x0 = (int)(x - width / 2), x1 = (int)(x + width / 2);
+		int y1 = (int)base, y0 = (int)(base - height);
+		boxRGBA(surface, x0, y0, x1, y1, 16, 20, 30, alpha);
+		int roof = (int)(width * (tower ? 1.2 : 0.55));
+		filledTrigonRGBA(surface, x0 - 2, y0, x1 + 2, y0, (int)x, y0 - roof, 10, 12, 20, alpha);
+		int windows = tower ? 2 : 2 + (int)(r * 2.0);
+		for(int k = 0; k < windows; k++) {
+			double lit = smooth_step(0.15 + house * 0.045 + k * 0.03, 0.2 + house * 0.045 + k * 0.03,
+				event->progress) * (1.0 - smooth_step(0.9, 0.97, event->progress));
+			if(lit <= 0.0) continue;
+			double flicker = 0.88 + 0.12 * sin(event->t * 7.0 + house * 3.1 + k);
+			int wx = x0 + (int)(width * (k + 0.5) / windows) - 1;
+			int wy = y0 + (int)(height * (0.3 + 0.25 * (k % 2)));
+			filledCircleRGBA(surface, wx + 1, wy + 2, 6, 255, 190, 100,
+				weapon_alpha(32.0 * lit * event->fade));
+			boxRGBA(surface, wx, wy, wx + 2, wy + 3, 255, 214, 130,
+				weapon_alpha(240.0 * lit * flicker * event->fade));
+		}
+		if(!tower && house % 2 == 0) {
+			int chimney_x = x1 - 4, chimney_y = y0 - roof / 2 - 3;
+			boxRGBA(surface, chimney_x, chimney_y, chimney_x + 2, chimney_y + 5, 12, 15, 24, alpha);
+			for(int puff = 0; puff < 5; puff++) {
+				double age = fmod(event->t / 2.2 + puff * 0.2 + house * 0.13, 1.0);
+				filledCircleRGBA(surface, (int)(chimney_x + sin(age * 5.0 + house) * 3.0 + age * 8.0),
+					(int)(chimney_y - age * event->scale * 0.07), (int)(1.5 + age * 3.5),
+					150, 152, 162, weapon_alpha(85.0 * (1.0 - age) * event->fade));
+			}
+		}
+	}
+}
+
+// A line of travellers with lanterns walks along the ridge.
+static void hill_caravan(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int walkers = 7;
+	double spacing = event->scale * 0.05;
+	double margin = event->scale * 0.1;
+	double travel = surface->w + 2.0 * margin + walkers * spacing;
+	double lead = event->progress * travel - margin;
+	for(int walker = 0; walker < walkers; walker++) {
+		double progress_x = lead - walker * spacing;
+		double x = event->direction > 0 ? progress_x : surface->w - progress_x;
+		if(x < -20 || x > surface->w + 20) continue;
+		double ground = ground_y(surface, RIDGE_NEAR, x) + 1.0;
+		double height = event->scale * (walker == 3 ? 0.046 : 0.04);
+		if(walker == walkers - 1) height *= 0.7;
+		hill_walker(surface, x, ground, height, event->direction,
+			event->t * 6.0 + walker * 1.9, walker % 2 == 0, event->fade, event->t, walker);
+	}
+}
+
+// Wind turbines rise on the ridge and begin to turn, with red lights blinking on top.
+static void hill_turbines(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int turbines = 5;
+	Uint8 alpha = weapon_alpha(235.0 * event->fade);
+	for(int i = 0; i < turbines; i++) {
+		double x = event->surface->w * (0.07 + 0.86 * i / (turbines - 1.0));
+		double rise = smooth_step(0.02 + i * 0.03, 0.14 + i * 0.03, event->progress);
+		if(rise <= 0.0) continue;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double tower = event->scale * (0.1 + 0.016 * (i % 2)) * rise;
+		int top_x = (int)x, top_y = (int)(base - tower);
+		thickLineRGBA(surface, (int)x, (int)base, top_x, top_y, 3, 20, 26, 38, alpha);
+		thickLineRGBA(surface, (int)x + 1, (int)base, top_x + 1, top_y, 1, 52, 62, 82, (Uint8)(alpha * 0.8));
+		double blade = tower * 0.5;
+		double spin = event->t * (1.1 + 0.18 * i) * (0.4 + 0.6 * rise) + i;
+		for(int b = 0; b < 3; b++) {
+			double angle = spin + b * 2.0944;
+			int tip_x = top_x + (int)(cos(angle) * blade), tip_y = top_y + (int)(sin(angle) * blade);
+			thickLineRGBA(surface, top_x, top_y, tip_x, tip_y, 3, 28, 34, 48, alpha);
+			thickLineRGBA(surface, top_x, top_y, tip_x, tip_y, 1, 90, 104, 128, (Uint8)(alpha * 0.8));
+		}
+		filledCircleRGBA(surface, top_x, top_y, 3, 40, 46, 62, alpha);
+		if(fmod(event->t + i * 0.37, 1.6) < 0.35 && rise > 0.9) {
+			static const Uint8 red[3] = { 255, 60, 50 };
+			weapon_glow(surface, top_x, top_y - 4, 3.0, red, 235.0 * event->fade);
+		}
+	}
+}
+
+// Paper lanterns float up from the hills, swaying as they climb and fading near the top.
+static void hill_lanterns(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int lanterns = 28;
+	for(int i = 0; i < lanterns; i++) {
+		double rx = hill_random(event, i, 1), ph = hill_random(event, i, 2), rs = hill_random(event, i, 3);
+		double cycle = 13.0 + rs * 8.0;
+		double u = fmod(event->t / cycle + ph, 1.0);
+		double x0 = surface->w * (0.03 + 0.94 * rx);
+		double x = x0 + sin(event->t * 0.8 + i) * event->scale * 0.012 + u * event->scale * 0.06 * event->direction;
+		double y = ground_y(surface, RIDGE_NEAR, x0) - u * surface->h * 0.62;
+		double envelope = smooth_step(0.0, 0.1, u) * (1.0 - smooth_step(0.7, 1.0, u));
+		double size = event->scale * (0.013 + 0.006 * rs);
+		double flicker = 0.85 + 0.15 * sin(event->t * 8.0 + i * 2.0);
+		Uint8 a = weapon_alpha(255.0 * envelope * event->fade);
+		filledCircleRGBA(surface, (int)x, (int)y, (int)(size * 3.4), 255, 140, 60,
+			weapon_alpha(22.0 * envelope * event->fade * flicker));
+		filledCircleRGBA(surface, (int)x, (int)y, (int)(size * 2.2), 255, 160, 70,
+			weapon_alpha(40.0 * envelope * event->fade * flicker));
+		boxRGBA(surface, (int)(x - size * 0.5), (int)(y - size * 0.65), (int)(x + size * 0.5),
+			(int)(y + size * 0.65), 255, (Uint8)(150 + 40 * flicker), 70, a);
+		boxRGBA(surface, (int)(x - size * 0.3), (int)(y - size * 0.4), (int)(x + size * 0.3),
+			(int)(y + size * 0.4), 255, 224, 150, weapon_alpha(220.0 * envelope * event->fade * flicker));
+		lineRGBA(surface, (int)(x - size * 0.5), (int)(y - size * 0.65), (int)(x + size * 0.5),
+			(int)(y - size * 0.65), 90, 40, 20, a);
+		lineRGBA(surface, (int)(x - size * 0.5), (int)(y + size * 0.65), (int)(x + size * 0.5),
+			(int)(y + size * 0.65), 90, 40, 20, a);
+	}
+}
+
+// A tent and a campfire at the edge of the screen; two figures sit by the fire and
+// sparks and smoke rise from it.
+static void hill_campfire(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double x = event->direction > 0 ? surface->w * 0.075 : surface->w * 0.925;
+	double ground = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+	double s = event->scale * 1.4;
+	double build = smooth_step(0.0, 0.1, event->progress)
+		* (1.0 - smooth_step(0.9, 1.0, event->progress));
+	Uint8 alpha = weapon_alpha(235.0 * event->fade);
+	// The tent stands on the far side of the fire.
+	double tent_x = x - event->direction * s * 0.06;
+	double tent_width = s * 0.035;
+	filledTrigonRGBA(surface, (int)(tent_x - tent_width), (int)ground, (int)(tent_x + tent_width),
+		(int)ground, (int)tent_x, (int)(ground - s * 0.045), 22, 28, 40, alpha);
+	filledTrigonRGBA(surface, (int)tent_x, (int)ground, (int)(tent_x + event->direction * s * 0.012),
+		(int)ground, (int)tent_x, (int)(ground - s * 0.03), 8, 10, 16, alpha);
+	// The glow of the fire on the ground and the tent.
+	filledEllipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.09), (int)(s * 0.014),
+		255, 150, 60, weapon_alpha(34.0 * event->fade * build));
+	double flare = 0.85 + 0.15 * sin(event->t * 11.0) + 0.1 * sin(event->t * 17.0);
+	filledCircleRGBA(surface, (int)x, (int)(ground - s * 0.015), (int)(s * 0.05 * flare), 255, 140, 50,
+		weapon_alpha(26.0 * event->fade * build));
+	thickLineRGBA(surface, (int)(x - s * 0.012), (int)ground, (int)(x + s * 0.012), (int)(ground - s * 0.004),
+		3, 44, 30, 24, alpha);
+	thickLineRGBA(surface, (int)(x + s * 0.012), (int)ground, (int)(x - s * 0.012), (int)(ground - s * 0.004),
+		3, 54, 36, 26, alpha);
+	for(int tongue = 0; tongue < 5; tongue++) {
+		double sway = sin(event->t * (9.0 + tongue * 2.0) + tongue) * s * 0.003;
+		double h = s * (0.018 + 0.006 * (tongue % 3)) * build * (0.75 + 0.25 * sin(event->t * 13.0 + tongue * 2.3));
+		double w = s * 0.007;
+		double fx = x + (tongue - 2) * s * 0.004;
+		filledTrigonRGBA(surface, (int)(fx - w), (int)(ground - 2), (int)(fx + w), (int)(ground - 2),
+			(int)(fx + sway), (int)(ground - h), 250, 120, 40, weapon_alpha(215.0 * event->fade));
+		filledTrigonRGBA(surface, (int)(fx - w * 0.55), (int)(ground - 2), (int)(fx + w * 0.55), (int)(ground - 2),
+			(int)(fx + sway), (int)(ground - h * 0.75), 255, 205, 110, weapon_alpha(225.0 * event->fade));
+	}
+	for(int spark = 0; spark < 12; spark++) {
+		double u = fmod(event->t / 1.7 + spark * 0.083, 1.0);
+		double sx = x + sin(spark * 7.0 + event->t * 2.5) * s * 0.014 * u + event->direction * u * s * 0.01;
+		double sy = ground - s * 0.02 - u * s * 0.13;
+		filledCircleRGBA(surface, (int)sx, (int)sy, spark % 3 == 0 ? 2 : 1, 255, (Uint8)(210 - 90 * u), 100,
+			weapon_alpha(240.0 * (1.0 - u) * event->fade * build));
+	}
+	for(int puff = 0; puff < 6; puff++) {
+		double u = fmod(event->t / 4.5 + puff / 6.0, 1.0);
+		filledCircleRGBA(surface, (int)(x + sin(u * 4.0 + puff) * s * 0.01 + u * s * 0.03 * event->direction),
+			(int)(ground - s * 0.03 - u * s * 0.17), (int)(s * (0.006 + 0.014 * u)), 120, 120, 134,
+			weapon_alpha(70.0 * (1.0 - u) * event->fade * build));
+	}
+	// Two figures sit by the fire, facing it.
+	for(int person = 0; person < 2; person++) {
+		double px = x + (person == 0 ? -s * 0.028 : s * 0.034);
+		int facing = px < x ? 1 : -1;
+		filledEllipseRGBA(surface, (int)px, (int)(ground - s * 0.008), (int)(s * 0.01), (int)(s * 0.009),
+			14, 18, 26, alpha);
+		filledCircleRGBA(surface, (int)(px + facing * s * 0.002), (int)(ground - s * 0.024),
+			(int)(s * 0.005) + 1, 14, 18, 26, alpha);
+		filledCircleRGBA(surface, (int)(px + facing * s * 0.005), (int)(ground - s * 0.022), 1,
+			255, 170, 90, weapon_alpha(200.0 * event->fade * build));
+	}
+}
+
+// Glowing plants along the ridge: waves of light pass through them, with a few
+// that are much bigger than the rest.
+static void hill_bloom(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int plants = 34;
+	static const Uint8 colors[3][3] = { { 90, 235, 215 }, { 175, 125, 255 }, { 255, 125, 205 } };
+	for(int i = 0; i < plants; i++) {
+		double r = hill_random(event, i, 1);
+		double x = event->surface->w * (0.02 + 0.96 * (i + 0.5 + (r - 0.5) * 0.6) / plants);
+		double grow = smooth_step(0.0 + i * 0.004, 0.18 + i * 0.004, event->progress)
+			* (1.0 - smooth_step(0.93, 1.0, event->progress));
+		if(grow <= 0.0) continue;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double tall = event->scale * (0.018 + 0.03 * r * r) * grow;
+		double wave = 0.5 + 0.5 * sin(x * 0.018 * event->direction - event->t * 3.3);
+		double lean = sin(event->t * 0.9 + i) * tall * 0.12;
+		const Uint8 *c = colors[i % 3];
+		int top_x = (int)(x + lean), top_y = (int)(base - tall);
+		filledEllipseRGBA(surface, (int)x, (int)base, (int)(tall * 0.7) + 2, 2, c[0], c[1], c[2],
+			weapon_alpha(40.0 * wave * event->fade * grow));
+		thickLineRGBA(surface, (int)x, (int)base, top_x, top_y, 1, 30, 70, 64, weapon_alpha(220.0 * event->fade));
+		thickLineRGBA(surface, (int)x, (int)(base - tall * 0.4), (int)(x - tall * 0.25), (int)(base - tall * 0.55), 1,
+			30, 70, 64, weapon_alpha(200.0 * event->fade));
+		double bulb = (2.0 + tall * 0.12) * (0.8 + 0.4 * wave);
+		weapon_glow(surface, top_x, top_y, bulb, c, (110.0 + 140.0 * wave) * event->fade * grow);
+		if(r > 0.7) {
+			// The big ones unfold a ring of petals.
+			for(int petal = 0; petal < 6; petal++) {
+				double angle = petal * 1.0472 + event->t * 0.2;
+				lineRGBA(surface, top_x, top_y, (int)(top_x + cos(angle) * bulb * 3.2),
+					(int)(top_y + sin(angle) * bulb * 2.0), c[0], c[1], c[2],
+					weapon_alpha((90.0 + 120.0 * wave) * event->fade * grow));
+			}
+		}
+	}
+}
+
+// A herd of four-legged animals walks along the ridge, a calf at the back.
+static void hill_herd(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int animals = 6;
+	double spacing = event->scale * 0.115;
+	double margin = event->scale * 0.1;
+	double travel = surface->w + 2.0 * margin + animals * spacing;
+	double lead = event->progress * travel - margin;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	for(int animal = 0; animal < animals; animal++) {
+		double progress_x = lead - animal * spacing - hill_random(event, animal, 1) * spacing * 0.4;
+		double x = event->direction > 0 ? progress_x : surface->w - progress_x;
+		if(x < -40 || x > surface->w + 40) continue;
+		double size = event->scale * (animal == animals - 1 ? 0.03 : 0.052);
+		double ground = ground_y(surface, RIDGE_NEAR, x) + 1.0;
+		int d = event->direction;
+		double gait = event->t * 3.4 + animal * 0.9;
+		double bob = fabs(sin(gait)) * size * 0.04;
+		double body_y = ground - size * 0.7 - bob;
+		// Far legs are a shade lighter than the body, so the legs read as separate.
+		for(int leg = 0; leg < 4; leg++) {
+			double hip_x = x + (leg < 2 ? 0.38 : -0.38) * size;
+			double swing = sin(gait + leg * 1.6) * size * 0.2;
+			bool far_leg = leg % 2 == 1;
+			thickLineRGBA(surface, (int)hip_x, (int)body_y, (int)(hip_x + swing * d), (int)ground,
+				far_leg ? 2 : 3, far_leg ? 22 : 12, far_leg ? 26 : 15, far_leg ? 36 : 22, alpha);
+		}
+		filledEllipseRGBA(surface, (int)x, (int)body_y, (int)(size * 0.55), (int)(size * 0.26), 12, 15, 22, alpha);
+		double neck_x = x + d * size * 0.45, neck_y = body_y - size * 0.1;
+		double head_x = x + d * size * 0.78, head_y = body_y - size * 0.5 + sin(gait * 0.5) * size * 0.04;
+		thickLineRGBA(surface, (int)neck_x, (int)neck_y, (int)head_x, (int)head_y, (int)(size * 0.2) + 1,
+			12, 15, 22, alpha);
+		filledEllipseRGBA(surface, (int)(head_x + d * size * 0.08), (int)head_y, (int)(size * 0.13) + 1,
+			(int)(size * 0.08) + 1, 12, 15, 22, alpha);
+		thickLineRGBA(surface, (int)(x - d * size * 0.5), (int)(body_y - size * 0.08),
+			(int)(x - d * size * 0.62), (int)(body_y + size * 0.05), 2, 12, 15, 22, alpha);
+		if(animal % 2 == 0 && animal != animals - 1) {
+			// Antlers: a main beam with two tines.
+			int ax = (int)head_x, ay = (int)(head_y - size * 0.05);
+			int tx = (int)(head_x - d * size * 0.1), ty = (int)(head_y - size * 0.5);
+			thickLineRGBA(surface, ax, ay, tx, ty, 1, 30, 32, 40, alpha);
+			thickLineRGBA(surface, (int)((ax + tx) / 2), (int)((ay + ty) / 2), (int)(tx + d * size * 0.2),
+				(int)(ty + size * 0.1), 1, 30, 32, 40, alpha);
+			thickLineRGBA(surface, tx, ty, (int)(tx + d * size * 0.12), (int)(ty - size * 0.14), 1, 30, 32, 40, alpha);
+		}
+	}
+}
+
+// A volcano on the middle ridge at one edge of the screen. It grows, its crater begins
+// to glow, and it erupts: lava is thrown in arcs, lava runs down the cone and an ash
+// cloud rises and drifts.
+static void hill_volcano(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double x = event->direction > 0 ? surface->w * 0.075 : surface->w * 0.925;
+	double base = ground_y(surface, RIDGE_NEAR, x) + s * 0.012;
+	double rise = smooth_step(0.0, 0.12, event->progress);
+	double erupt = smooth_step(0.14, 0.3, event->progress)
+		* (1.0 - smooth_step(0.86, 0.98, event->progress))
+		* (0.7 + 0.3 * sin(event->t * 0.8));
+	double cone_width = s * 0.24, cone_height = s * 0.1 * rise;
+	double crater_y = base - cone_height;
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	int dir = event->direction;
+	int left = (int)(x - cone_width / 2), right = (int)(x + cone_width / 2);
+	int crater_left = (int)(x - cone_width * 0.07), crater_right = (int)(x + cone_width * 0.07);
+	// The ash cloud goes behind the cone.
+	for(int puff = 0; puff < 14; puff++) {
+		double u = fmod(event->t / 7.0 + puff / 14.0, 1.0);
+		double px = x + sin(u * 3.0 + puff) * s * 0.02 + dir * u * s * 0.14;
+		double py = crater_y - u * surface->h * 0.45;
+		double radius = s * (0.018 + 0.055 * u);
+		double heat = 1.0 - smooth_step(0.0, 0.35, u);
+		filledCircleRGBA(surface, (int)px, (int)py, (int)radius, (Uint8)(44 + 150 * heat), (Uint8)(38 + 50 * heat),
+			(Uint8)(48 + 10 * heat), weapon_alpha(110.0 * (1.0 - u) * erupt * event->fade));
+	}
+	filledTrigonRGBA(surface, left, (int)base + 4, right, (int)base + 4, crater_left, (int)crater_y, 26, 20, 28, alpha);
+	filledTrigonRGBA(surface, crater_left, (int)crater_y, crater_right, (int)crater_y, right, (int)base + 4, 26, 20, 28, alpha);
+	filledTrigonRGBA(surface, crater_left, (int)crater_y, crater_right, (int)crater_y, (int)x, (int)(crater_y + s * 0.012), 255, 120, 50,
+		weapon_alpha(255.0 * erupt * event->fade));
+	filledCircleRGBA(surface, (int)x, (int)crater_y, (int)(s * 0.06 * (0.5 + erupt)), 255, 110, 50,
+		weapon_alpha(34.0 * erupt * event->fade));
+	filledCircleRGBA(surface, (int)x, (int)crater_y, (int)(s * 0.032 * (0.5 + erupt)), 255, 140, 60,
+		weapon_alpha(80.0 * erupt * event->fade));
+	filledCircleRGBA(surface, (int)x, (int)crater_y, (int)(s * 0.013 * (0.5 + erupt)) + 1, 255, 224, 160,
+		weapon_alpha(210.0 * erupt * event->fade));
+	// Lava runs down the cone in glowing streams.
+	for(int stream = 0; stream < 3; stream++) {
+		double side = (stream - 1) * 0.75;
+		double length = (0.4 + 0.2 * stream) * erupt;
+		double sx = x + side * cone_width * 0.04, sy = crater_y;
+		for(int step = 1; step <= 8; step++) {
+			double f = step / 8.0 * length;
+			double nx = x + side * cone_width * (0.04 + 0.4 * f) + sin(step * 1.3 + stream) * s * 0.004;
+			double ny = crater_y + (base - crater_y) * f;
+			thickLineRGBA(surface, (int)sx, (int)sy, (int)nx, (int)ny, 2, 255, (Uint8)(130 + 40 * stream), 50,
+				weapon_alpha(210.0 * (1.0 - f) * event->fade));
+			sx = nx;
+			sy = ny;
+		}
+	}
+	// Lava thrown from the crater in arcs.
+	for(int blob = 0; blob < 24; blob++) {
+		double r = hill_random(event, blob, 1), r2 = hill_random(event, blob, 2);
+		double u = fmod(event->t * 0.55 + blob * 0.0417 + r2, 1.0);
+		double vx = (r - 0.5) * cone_width * 1.3 + dir * cone_width * 0.1;
+		double peak = s * (0.08 + 0.16 * r2);
+		double bx = x + vx * u, by = crater_y - peak * 4.0 * u * (1.0 - u);
+		int radius = 2 + blob % 3;
+		filledCircleRGBA(surface, (int)bx, (int)by, radius + 2, 255, 130, 50,
+			weapon_alpha(50.0 * (1.0 - 0.5 * u) * erupt * event->fade));
+		filledCircleRGBA(surface, (int)bx, (int)by, radius, 255, (Uint8)(215 - 110 * u), 80,
+			weapon_alpha(255.0 * (1.0 - 0.5 * u) * erupt * event->fade));
+	}
+	if(erupt > 0.05) {
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 255, 90, 40, weapon_alpha(9.0 * erupt * event->fade));
+	}
+}
+
+// A chain of signal towers on the ridge lights up one after another, each sending
+// a searchlight beam into the sky that sweeps slowly from side to side.
+static void hill_beacons(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int towers = 6;
+	double s = event->scale;
+	for(int i = 0; i < towers; i++) {
+		int order = event->direction > 0 ? i : towers - 1 - i;
+		double x = surface->w * (0.07 + 0.86 * i / (towers - 1.0));
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double height = s * 0.058;
+		int top_x = (int)x, top_y = (int)(base - height);
+		double lit = smooth_step(0.08 + order * 0.07, 0.12 + order * 0.07, event->progress)
+			* (1.0 - smooth_step(0.88, 0.97, event->progress));
+		Uint8 alpha = weapon_alpha(235.0 * event->fade);
+		if(lit > 0.0) {
+			double aim = -1.5708 + sin(event->t * 0.5 + i * 0.9) * 0.55;
+			double half = 0.045;
+			double reach = surface->h * 0.95;
+			double ax = top_x + cos(aim - half) * reach, ay = top_y + sin(aim - half) * reach;
+			double bx = top_x + cos(aim + half) * reach, by = top_y + sin(aim + half) * reach;
+			filledTrigonRGBA(surface, top_x, top_y, (int)ax, (int)ay, (int)bx, (int)by,
+				235, 228, 190, weapon_alpha(24.0 * lit * event->fade));
+			filledTrigonRGBA(surface, top_x, top_y, (int)(top_x + cos(aim - half * 0.4) * reach),
+				(int)(top_y + sin(aim - half * 0.4) * reach), (int)(top_x + cos(aim + half * 0.4) * reach),
+				(int)(top_y + sin(aim + half * 0.4) * reach), 255, 250, 220,
+				weapon_alpha(26.0 * lit * event->fade));
+		}
+		filledTrigonRGBA(surface, (int)(x - s * 0.008), (int)base, (int)(x + s * 0.008), (int)base,
+			top_x, top_y, 20, 24, 36, alpha);
+		boxRGBA(surface, top_x - 4, top_y - 3, top_x + 4, top_y, 16, 20, 30, alpha);
+		static const Uint8 flame[3] = { 255, 170, 80 };
+		weapon_glow(surface, top_x, top_y - 5, s * 0.009 * (0.9 + 0.1 * sin(event->t * 12.0 + i)),
+			flame, 235.0 * lit * event->fade);
+	}
+}
+
+static void (*const hill_event_kinds[HILL_EVENT_KINDS])(const HillEvent *) = {
+	hill_village, hill_caravan, hill_turbines, hill_lanterns, hill_campfire,
+	hill_bloom, hill_herd, hill_volcano, hill_beacons
+};
+
+static void render_hill_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_HILL_EVENT, ticks, &window)) return;
+	HillEvent event;
+	event.surface = surface;
+	event.ticks = ticks;
+	event.scale = scale;
+	event.seed = window.seed;
+	event.t = window.phase / 1000.0;
+	event.progress = window.progress;
+	event.fade = window.fade;
+	event.direction = (window.seed >> 6) & 1 ? 1 : -1;
+	int kind = effect_kind(&EFFECT_HILL_EVENT, (window.seed >> 10) % HILL_EVENT_KINDS);
+	hill_event_kinds[kind](&event);
+}
 
 /*
  * Rare sky events
@@ -2555,8 +3767,10 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 	render_fleet_battle(surface, ticks, scale);
 	render_background_battle(surface, ticks, scale);
 	render_battle_flyby(surface, ticks, scale);
+	render_dogfight_effect(surface, ticks, scale);
 	render_rare_sky_event(surface, ticks, scale);
 	render_long_scene(surface, ticks, scale);
+	render_hill_event(surface, ticks, scale);
 
 	int autumn = weather.season[2] * 16;
 	for(int i = 0; i < autumn; i++) {
