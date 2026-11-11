@@ -191,6 +191,15 @@ static double smooth_noise(double x, double y, Uint32 seed) {
 	return top * (1.0 - fy) + bottom * fy;
 }
 
+// Ridged noise: folds the field at its midpoint so the crests are sharp and
+// the flanks long. Smooth noise alone gives rounded humps, and a row of
+// rounded humps reads as a line of bubbles rather than a skyline. The fold is
+// left unsquared: squaring rounds the crest back off again.
+static double ridged_noise(double x, double y, Uint32 seed) {
+	double n = smooth_noise(x, y, seed);
+	return 1.0 - fabs(n * 2.0 - 1.0);
+}
+
 static Uint8 blend_channel(Uint8 from, Uint8 to, double amount) {
 	if(amount < 0.0) amount = 0.0;
 	if(amount > 1.0) amount = 1.0;
@@ -572,33 +581,33 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 	int kind = seed % 7;
 
 	if(kind == 0) {
-		// Ridges emerging from haze as the light comes up. Each rank is drawn
-		// as a filled silhouette with a soft top edge, so the hills dissolve
-		// into the air instead of ending in a hard line.
+		// Ridges emerging from haze as the light comes up. Each rank is ONE
+		// polygon: a chain of adjacent alpha-blended triangles double-blends
+		// every shared edge, which reads as a row of scallops.
+		enum { RIDGE_STEPS = 120 };
+		static Sint16 ridge_x[RIDGE_STEPS + 3];
+		static Sint16 ridge_y[RIDGE_STEPS + 3];
 		for(int rank = 0; rank < 4; rank++) {
 			int base_y = surface->h * (66 + rank * 7) / 100;
 			Uint8 shade = (Uint8)(30 + rank * 14);
 			Uint8 alpha = (Uint8)((150 - rank * 22) * fade);
-			int previous_x = 0;
-			int previous_y = base_y;
-			for(int segment = 1; segment <= 40; segment++) {
-				double t = (double)segment / 40;
-				int px = (int)(t * surface->w);
-				double nx = t;
-				// Two octaves of noise give a ridge that reads as terrain
-				// rather than a sine wave.
-				double ridge = smooth_noise(nx * 5.0 + rank * 3.1, rank * 1.7, 1123)
-					* 0.65 + smooth_noise(nx * 13.0, rank * 2.3, 1451) * 0.35;
-				int py = base_y - (int)((ridge - 0.35) * scale * 0.16);
-				filledTrigonRGBA(surface, previous_x, previous_y, px, py,
-					px, surface->h, shade, (Uint8)(shade + 7),
-					(Uint8)(shade + 15), alpha);
-				filledTrigonRGBA(surface, previous_x, previous_y,
-					px, surface->h, previous_x, surface->h,
-					shade, (Uint8)(shade + 7), (Uint8)(shade + 15), alpha);
-				previous_x = px;
-				previous_y = py;
+			for(int segment = 0; segment <= RIDGE_STEPS; segment++) {
+				double t = (double)segment / RIDGE_STEPS;
+				// Low frequencies only: high ones make the ridge scallop.
+				double ridge =
+					smooth_noise(t * 2.6 + rank * 3.1, rank * 1.7, 1123) * 0.62
+					+ smooth_noise(t * 5.4, rank * 2.3, 1451) * 0.26
+					+ smooth_noise(t * 11.0, rank * 1.1, 1601) * 0.12;
+				ridge_x[segment] = (Sint16)(t * surface->w);
+				ridge_y[segment] = (Sint16)(base_y
+					- (ridge - 0.35) * scale * 0.17);
 			}
+			ridge_x[RIDGE_STEPS + 1] = (Sint16)(surface->w - 1);
+			ridge_y[RIDGE_STEPS + 1] = (Sint16)(surface->h - 1);
+			ridge_x[RIDGE_STEPS + 2] = 0;
+			ridge_y[RIDGE_STEPS + 2] = (Sint16)(surface->h - 1);
+			filledPolygonRGBA(surface, ridge_x, ridge_y, RIDGE_STEPS + 3,
+				shade, (Uint8)(shade + 7), (Uint8)(shade + 15), alpha);
 			// Haze pooling at the foot of each rank.
 			soft_band(surface, base_y - scale / 30, base_y + scale / 12,
 				150, 164, 186, (int)((9 + rank * 3) * fade));
@@ -1214,16 +1223,30 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					(Uint8)(alpha * 0.30 * strength));
 			}
 		} else if(kind == 42) {
-			// A derelict station tumbling slowly, lit on one edge only.
-			int body = size * 3;
-			double tumble = progress * 1.2;
-			int ring_rx = (int)(body * (1.0 + 0.4 * fabs(cos(tumble))));
-			ellipseRGBA(surface, x, y, ring_rx, body / 3,
-				62, 70, 86, (Uint8)(alpha * 0.70));
-			filledCircleRGBA(surface, x, y, body / 5, 44, 50, 64,
-				(Uint8)(alpha * 0.80));
-			arcRGBA(surface, x, y, body / 5, 200, 340, 176, 186, 204,
-				(Uint8)(alpha * 0.75));
+			// A derelict station, far off and tumbling. No hull is drawn: only
+			// the lit edges catch the light, so it reads as a structure rather
+			// than a shape. A ring plus a disc read as a mouse pointer, so the
+			// silhouette is a long spine with a cross-member instead.
+			int body = size * 4;
+			double tumble = progress * 0.9;
+			int spine_len = (int)(body * (0.55 + 0.45 * fabs(cos(tumble))));
+			int spine_tilt = (int)(sin(tumble) * body * 0.30);
+			// Spine: a thin lit line, brighter at one end.
+			thickLineRGBA(surface, x - spine_len, y - spine_tilt,
+				x + spine_len, y + spine_tilt, 2,
+				96, 108, 128, (Uint8)(alpha * 0.55));
+			thickLineRGBA(surface, x - spine_len, y - spine_tilt,
+				x, y, 1, 150, 164, 186, (Uint8)(alpha * 0.70));
+			// Cross-member, foreshortened as it turns.
+			int cross = (int)(body * 0.42 * fabs(sin(tumble)));
+			thickLineRGBA(surface, x, y - cross, x, y + cross, 1,
+				120, 132, 154, (Uint8)(alpha * 0.50));
+			// A single warm window, and a faint halo where the hull catches
+			// the sky.
+			soft_glow(surface, x + spine_len / 3, y + spine_tilt / 3,
+				scale / 90, 214, 196, 158, (int)(alpha * 0.35));
+			soft_glow(surface, x, y, scale / 40, 88, 100, 124,
+				(int)(alpha * 0.16));
 		} else if(kind == 43) {
 			// Only the running lights of something moving out there. No hull,
 			// no shape, just points holding formation.
@@ -1323,10 +1346,9 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			soft_band(surface, sea_y + scale / 20 + drift,
 				surface->h * 92 / 100 + drift, 190, 198, 214, 44);
 		} else if(kind == 50) {
-			// A snow squall crossing the valley. Built from soft glows along a
-			// feathered leading edge plus a broad veil. Stepping the alpha one
-			// column at a time produced visible vertical striping, and hard
-			// top/bottom edges made it read as a grey rectangle.
+			// A snow squall crossing the valley. Only soft glows and falling
+			// flakes: a wide low-alpha column reads as a flat grey rectangle,
+			// so the body is built from overlapping puffs instead.
 			double reach = sin(progress * 3.14159265359);
 			int edge_x = direction > 0
 				? (int)(reach * surface->w * 1.15) - surface->w / 6
@@ -1336,10 +1358,17 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int bottom_y = surface->h * 88 / 100;
 			int span_y = bottom_y - top_y;
 			if(span_y < 1) span_y = 1;
-			// The body of the squall, trailing behind the leading edge.
-			int body_x = edge_x - direction * surface->w / 4;
-			soft_column(surface, body_x, bottom_y, span_y,
-				surface->w / 5, 206, 212, 224, (int)(alpha * 0.10));
+			// Body: a lattice of soft puffs trailing behind the leading edge.
+			for(int puff = 0; puff < 26; puff++) {
+				unsigned int s = (unsigned int)puff * 2246822519u + seed;
+				double t = (double)puff / 25;
+				int py = top_y + (int)(t * span_y);
+				int depth = (int)((s % 1000) / 1000.0 * surface->w / 3);
+				int px = edge_x - direction * depth;
+				soft_glow(surface, px, py,
+					(int)(scale * (0.07 + (s >> 10) % 60 / 1000.0)),
+					208, 214, 226, (int)(alpha * 0.13));
+			}
 			// The leading edge: overlapping glows, so the boundary dissolves
 			// into the air instead of ending in a wall.
 			for(int puff = 0; puff < 14; puff++) {
@@ -1564,8 +1593,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				}
 			}
 		} else {
-			// A single craft high up: a bright point with a soft halo and a
-			// short wake, the only moving thing in the frame.
+			// A single craft high up. No hull, no nose, no tail: a bright point
+			// with a soft halo and a wake that tapers away. The stepped wake
+			// used to read as a wine bottle, so the trail is now a smooth
+			// gradient of decreasing width.
 			int craft_x = direction > 0
 				? -scale / 20
 					+ (int)(progress * (surface->w + scale / 10.0))
@@ -1573,15 +1604,19 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 					- (int)(progress * (surface->w + scale / 10.0));
 			int craft_y = surface->h * (12 + (seed >> 8) % 22) / 100
 				+ (int)(sin(progress * 3.14159265359) * scale * 0.02);
-			for(int step = 1; step <= 14; step++) {
-				int wx = craft_x - direction * step * scale / 45;
-				int wy = craft_y + step * step / 4;
-				thickLineRGBA(surface, wx, wy, wx - direction, wy, 3,
-					210, 220, 240,
-					(Uint8)(alpha * 0.42 * (1.0 - step / 15.0)));
+			int wake = scale / 6;
+			for(int step = 1; step <= 10; step++) {
+				double t = (double)step / 10;
+				int wx = craft_x - direction * (int)(t * wake);
+				int wy = craft_y + (int)(t * t * scale * 0.012);
+				// Width and alpha both fall off smoothly.
+				int w = (int)(3.0 * (1.0 - t) + 1.0);
+				thickLineRGBA(surface, wx, wy, wx - direction, wy, w,
+					206, 218, 240, (Uint8)(alpha * 0.34 * (1.0 - t)));
 			}
-			soft_glow(surface, craft_x, craft_y, scale / 40, 222, 232, 250, 160);
-			filledCircleRGBA(surface, craft_x, craft_y, 2, 250, 252, 255, 245);
+			soft_glow(surface, craft_x, craft_y, scale / 34, 222, 232, 250,
+				(int)(alpha * 0.55));
+			filledCircleRGBA(surface, craft_x, craft_y, 1, 250, 252, 255, alpha);
 		}
 		return;
 	}
@@ -1787,33 +1822,58 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 						blue = blend_channel(blue, nebula_blue, light);
 					}
 
+					// Cloud. The band centre wanders with x and the envelope is
+					// a smooth falloff rather than a linear tent: a fixed centre
+					// with a linear envelope draws a bright horizontal stripe
+					// straight across the frame, which reads as a smear.
 					double cloud_mass = smooth_noise(nx * 4.2 + drift * 0.42, ny * 6.0 + drift * 0.08, 631) * 0.62
 						+ smooth_noise(nx * 13.0 + drift * 0.7, ny * 19.0 - drift * 0.16, 719) * 0.38;
-					double cloud_band = 0.48 + 0.035 * (smooth_noise(nx * 3.0 + drift * 0.14, 2.0, 811) - 0.5);
-					double cloud_envelope = 1.0 - fabs(ny - cloud_band) / 0.14;
-					double cloud_density = cloud_envelope > 0.0
-						? (cloud_mass - 0.50) * 3.2 * cloud_envelope : 0.0;
+					double cloud_band = 0.48
+						+ (smooth_noise(nx * 2.1 + drift * 0.10, 2.0, 811) - 0.5) * 0.20
+						+ (smooth_noise(nx * 5.7, 7.0, 857) - 0.5) * 0.07;
+					double cloud_span = 0.13
+						+ smooth_noise(nx * 3.3, 9.0, 883) * 0.09;
+					double cloud_offset = (ny - cloud_band) / cloud_span;
+					// Gaussian-ish: no corner where the envelope meets zero.
+					double cloud_envelope = exp(-cloud_offset * cloud_offset * 2.2);
+					double cloud_density = (cloud_mass - 0.52) * 2.6 * cloud_envelope;
 					if(cloud_density > 0.0) {
-						double amount = cloud_density * 0.42;
-						red = blend_channel(red, (Uint8)(123 + 32 * fine), amount);
-						green = blend_channel(green, (Uint8)(139 + 29 * fine), amount);
-						blue = blend_channel(blue, (Uint8)(174 + 34 * fine), amount);
+						// Dimmer than the sky's own highlights, so the cloud
+						// reads as a thinning of the dark rather than a light.
+						double amount = cloud_density * 0.30;
+						red = blend_channel(red, (Uint8)(74 + 26 * fine), amount);
+						green = blend_channel(green, (Uint8)(86 + 24 * fine), amount);
+						blue = blend_channel(blue, (Uint8)(116 + 30 * fine), amount);
 					}
 				}
 
-				// Ridge lines need enough horizontal frequency to undulate. At
-				// 3-4 cells across the frame they collapse into a straight
-				// horizontal seam, which is what made the horizon read as a
-				// banded slab.
-				double far_edge = 0.68
-					+ (smooth_noise(nx * 11.0, 1.0, 907) - 0.5) * 0.16
-					+ (smooth_noise(nx * 29.0, 4.0, 941) - 0.5) * 0.05;
-				double middle_edge = 0.79
-					+ (smooth_noise(nx * 14.0 + 8.0, 2.0, 1013) - 0.5) * 0.13
-					+ (smooth_noise(nx * 37.0, 5.0, 1051) - 0.5) * 0.04;
-				double near_edge = 0.88
-					+ (smooth_noise(nx * 18.0 - 3.0, 3.0, 1123) - 0.5) * 0.11
-					+ (smooth_noise(nx * 47.0, 6.0, 1153) - 0.5) * 0.035;
+				// Ridge lines. Smooth noise gives rounded humps, and a row of
+				// rounded humps reads as a line of bubbles. Ridged noise
+				// (1 - |2n-1|) folds the field at its midpoint, producing the
+				// sharp crests and long flanks a real skyline has.
+				//
+				// Two things stop it becoming a comb of identical cones: the
+				// frequencies stay low (a distant range has a handful of major
+				// peaks, not fifty), and a separate low-frequency field scales
+				// the amplitude so some peaks tower and others barely rise.
+				double far_amp = 0.35 + 0.65 * smooth_noise(nx * 2.4, 0.5, 881);
+				double middle_amp = 0.35 + 0.65 * smooth_noise(nx * 2.0 + 5.0, 1.5, 887);
+				double near_amp = 0.35 + 0.65 * smooth_noise(nx * 1.7 - 2.0, 2.5, 893);
+				double far_ridge = far_amp * (
+					ridged_noise(nx * 5.2, 1.0, 907) * 0.66
+					+ ridged_noise(nx * 12.5, 4.0, 941) * 0.24
+					+ ridged_noise(nx * 28.0, 8.0, 967) * 0.10);
+				double middle_ridge = middle_amp * (
+					ridged_noise(nx * 6.4 + 8.0, 2.0, 1013) * 0.64
+					+ ridged_noise(nx * 15.9, 5.0, 1051) * 0.25
+					+ ridged_noise(nx * 34.0, 9.0, 1069) * 0.11);
+				double near_ridge = near_amp * (
+					ridged_noise(nx * 7.6 - 3.0, 3.0, 1123) * 0.62
+					+ ridged_noise(nx * 19.4, 6.0, 1153) * 0.26
+					+ ridged_noise(nx * 41.0, 11.0, 1171) * 0.12);
+				double far_edge = 0.68 + (far_ridge - 0.34) * 0.30;
+				double middle_edge = 0.79 + (middle_ridge - 0.34) * 0.25;
+				double near_edge = 0.88 + (near_ridge - 0.34) * 0.19;
 				// Two octaves of ground texture. A single low-frequency field
 				// stretched over the lower third reads as a flat slab, so the
 				// fine octave carries the visible grain.
