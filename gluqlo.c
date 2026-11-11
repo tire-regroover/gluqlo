@@ -708,8 +708,8 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 		int radius = scale / 8;
 		int moon_x = surface->w * (25 + (seed >> 12) % 50) / 100;
 		int moon_y = surface->h * (18 + (seed >> 20) % 24) / 100;
-		filledCircleRGBA(surface, moon_x, moon_y, radius + scale / 18,
-			119, 158, 194, (Uint8)(24 * fade));
+		soft_glow(surface, moon_x, moon_y, radius + scale / 12,
+			119, 158, 194, (int)(60 * fade));
 		filledCircleRGBA(surface, moon_x, moon_y, radius,
 			171, 183, 190, (Uint8)(190 * fade));
 		filledCircleRGBA(surface, moon_x + radius / 3, moon_y, radius - radius / 7,
@@ -720,8 +720,8 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 		int radius = scale / 13;
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			177, 82, 45, (Uint8)(13 * fade));
-		filledCircleRGBA(surface, flare_x, flare_y, radius,
-			245, 137, 75, (Uint8)(45 * fade));
+		soft_glow(surface, flare_x, flare_y, radius * 2,
+			245, 137, 75, (int)(70 * fade));
 		filledCircleRGBA(surface, flare_x, flare_y, radius / 3,
 			255, 222, 169, (Uint8)(90 * fade));
 		for(int ray = 0; ray < 12; ray++) {
@@ -742,8 +742,8 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 		double cover = smooth_step(0.15, 0.55, progress)
 			* (1.0 - smooth_step(0.75, 0.95, progress));
 		int moon_offset = (int)((0.5 - cover) * sun_radius * 2.2);
-		filledCircleRGBA(surface, eclipse_x, eclipse_y, sun_radius + scale / 20,
-			255, 200, 90, (Uint8)(60 * fade));
+		soft_glow(surface, eclipse_x, eclipse_y, sun_radius + scale / 10,
+			255, 200, 90, (int)(90 * fade));
 		filledCircleRGBA(surface, eclipse_x, eclipse_y, sun_radius,
 			255, 220, 130, (Uint8)(120 * fade));
 		filledCircleRGBA(surface, eclipse_x + moon_offset, eclipse_y, moon_radius,
@@ -1221,12 +1221,13 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			// Distant storm: a low bank of cloud lit from within, far enough
 			// away that no bolt is ever resolved.
 			int bank_y = surface->h * 62 / 100;
-			for(int layer = 0; layer < 4; layer++) {
-				int layer_y = bank_y + layer * scale / 90;
-				Uint8 layer_alpha = (Uint8)(alpha * (0.42 - layer * 0.07));
-				boxRGBA(surface, 0, layer_y, surface->w - 1, layer_y + scale / 70,
-					58, 66, 88, layer_alpha);
-			}
+			// A stack of hard-edged boxRGBA strips reads as a set of stripes.
+			// soft_band gives the bank a top and bottom that dissolve into the
+			// sky instead of ending on a line.
+			soft_band(surface, bank_y - scale / 20, bank_y + scale / 8,
+				58, 66, 88, (int)(alpha * 0.55));
+			soft_band(surface, bank_y + scale / 40, bank_y + scale / 5,
+				48, 55, 74, (int)(alpha * 0.40));
 			Uint32 pulse_phase = ticks % 9000;
 			double pulse = 0.0;
 			if(pulse_phase < 260) pulse = 1.0 - pulse_phase / 260.0;
@@ -1234,10 +1235,10 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				pulse = 0.45 * (1.0 - (pulse_phase - 1400) / 220.0);
 			if(pulse > 0.0) {
 				int glow_x = surface->w * (24 + (seed >> 12) % 52) / 100;
-				filledCircleRGBA(surface, glow_x, bank_y + scale / 60,
-					scale / 9, 132, 148, 186, (Uint8)(alpha * 0.55 * pulse));
-				filledCircleRGBA(surface, glow_x, bank_y + scale / 60,
-					scale / 22, 196, 208, 232, (Uint8)(alpha * 0.75 * pulse));
+				soft_glow(surface, glow_x, bank_y + scale / 60, scale / 7,
+					132, 148, 186, (int)(alpha * 1.1 * pulse));
+				soft_glow(surface, glow_x, bank_y + scale / 60, scale / 18,
+					196, 208, 232, (int)(alpha * 1.5 * pulse));
 			}
 		} else if(kind == 25) {
 			// A single satellite: one steady point of light crossing the sky,
@@ -1292,11 +1293,8 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int moon_x = surface->w * (24 + (seed >> 12) % 52) / 100;
 			int moon_y = surface->h * (58 - (int)(progress * 16)) / 100;
 			int moon_radius = scale / 16;
-			for(int halo = 4; halo >= 1; halo--) {
-				filledCircleRGBA(surface, moon_x, moon_y,
-					moon_radius + halo * scale / 90,
-					186, 198, 216, (Uint8)(alpha * 0.05));
-			}
+			soft_glow(surface, moon_x, moon_y, moon_radius + scale / 14,
+				186, 198, 216, (int)(alpha * 0.55));
 			filledCircleRGBA(surface, moon_x, moon_y, moon_radius,
 				214, 220, 228, (Uint8)(alpha * 0.55));
 			filledCircleRGBA(surface, moon_x - moon_radius / 4,
@@ -1387,7 +1385,6 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 				44, 52, 74, (Uint8)(alpha * 0.28));
 			filledCircleRGBA(surface, planet_x, planet_y, radius,
 				58, 66, 90, (Uint8)(alpha * 0.50));
-			// Night side: a dark disc nudged off-centre leaves a lit crescent.
 			filledCircleRGBA(surface, planet_x + radius / 3,
 				planet_y + radius / 6, radius, 16, 20, 34, (Uint8)(alpha * 0.55));
 		} else if(kind == 34) {
@@ -1399,12 +1396,12 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int far_radius = scale / 52;
 			int near_x = base_x - separation;
 			int far_x = base_x + separation + scale / 20;
-			filledCircleRGBA(surface, far_x, moon_y - scale / 60,
-				far_radius + scale / 120, 190, 198, 212, (Uint8)(alpha * 0.08));
+			soft_glow(surface, far_x, moon_y - scale / 60, far_radius + scale / 30,
+				190, 198, 212, (int)(alpha * 0.30));
 			filledCircleRGBA(surface, far_x, moon_y - scale / 60, far_radius,
 				206, 212, 224, (Uint8)(alpha * 0.40));
-			filledCircleRGBA(surface, near_x, moon_y,
-				near_radius + scale / 90, 198, 206, 220, (Uint8)(alpha * 0.10));
+			soft_glow(surface, near_x, moon_y, near_radius + scale / 24,
+				198, 206, 220, (int)(alpha * 0.34));
 			filledCircleRGBA(surface, near_x, moon_y, near_radius,
 				220, 226, 234, (Uint8)(alpha * 0.58));
 		} else if(kind == 35) {
@@ -1441,28 +1438,25 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			// Sheet lightning beyond the range: the far side lights up, but no
 			// bolt ever resolves. The lit cloud bank is always present; the
 			// pulses only brighten it, so the sky is never empty.
+			// Everything here is soft. Stacked filledCircleRGBA discs at low
+			// alpha leave a visible rim where each disc ends, which reads as a
+			// bullseye rather than as light inside cloud.
 			int glow_x = surface->w * (20 + (seed >> 12) % 60) / 100;
 			int ridge_y = surface->h * 66 / 100;
-			for(int layer = 3; layer >= 1; layer--) {
-				filledCircleRGBA(surface, glow_x, ridge_y,
-					scale / (6 + layer * 2), 104, 118, 154,
-					(Uint8)(alpha * 0.16));
-			}
-			boxRGBA(surface, 0, ridge_y - scale / 50, surface->w - 1,
-				ridge_y + scale / 40, 88, 100, 132, (Uint8)(alpha * 0.14));
+			soft_glow(surface, glow_x, ridge_y, scale / 5,
+				104, 118, 154, (int)(alpha * 0.55));
+			soft_band(surface, ridge_y - scale / 14, ridge_y + scale / 12,
+				88, 100, 132, (int)(alpha * 0.42));
 			Uint32 pulse = phase % 2600;
 			double flash = 0.0;
 			if(pulse < 180) flash = 1.0 - pulse / 180.0;
 			else if(pulse > 700 && pulse < 860)
 				flash = 0.6 * (1.0 - (pulse - 700) / 160.0);
 			if(flash > 0.0) {
-				for(int layer = 3; layer >= 1; layer--) {
-					filledCircleRGBA(surface, glow_x, ridge_y,
-						scale / (7 + layer * 2), 128, 146, 186,
-						(Uint8)(alpha * 0.62 * flash));
-				}
-				boxRGBA(surface, 0, ridge_y - scale / 60, surface->w - 1,
-					ridge_y, 112, 128, 168, (Uint8)(alpha * 0.30 * flash));
+				soft_glow(surface, glow_x, ridge_y, scale / 4,
+					128, 146, 186, (int)(alpha * 1.6 * flash));
+				soft_band(surface, ridge_y - scale / 10, ridge_y + scale / 16,
+					112, 128, 168, (int)(alpha * 0.9 * flash));
 			}
 		} else if(kind == 37) {
 			// High cirrus: soft smears of thin cloud, no visible strokes.
@@ -1661,12 +1655,17 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int halo_x = surface->w * (26 + (seed >> 12) % 48) / 100;
 			int halo_y = surface->h * (16 + (seed >> 8) % 16) / 100;
 			int halo_r = scale / 8;
-			for(int ring = 0; ring < 4; ring++) {
-				circleRGBA(surface, halo_x, halo_y, halo_r + ring * 2,
-					202, 210, 226, (Uint8)(alpha * (0.22 - ring * 0.045)));
-			}
-			filledCircleRGBA(surface, halo_x, halo_y, scale / 46,
-				226, 230, 238, (Uint8)(alpha * 0.52));
+			// The ring is real, but a bare circleRGBA reads as a drawn circle.
+			// A soft wash behind it, and a second ring at a quarter of the
+			// alpha, make it read as light scattered through ice crystals.
+			soft_glow(surface, halo_x, halo_y, halo_r + scale / 40,
+				202, 210, 226, (int)(alpha * 0.30));
+			circleRGBA(surface, halo_x, halo_y, halo_r,
+				202, 210, 226, (Uint8)(alpha * 0.16));
+			circleRGBA(surface, halo_x, halo_y, halo_r + 2,
+				202, 210, 226, (Uint8)(alpha * 0.08));
+			soft_glow(surface, halo_x, halo_y, scale / 30,
+				226, 230, 238, (int)(alpha * 0.55));
 		} else if(kind == 49) {
 			// A sea of cloud filling the valley: soft, layered, catching light.
 			int sea_y = surface->h * 64 / 100;
@@ -1727,26 +1726,25 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int glow_x = surface->w * (20 + (seed >> 8) % 60) / 100;
 			int span = surface->w * (30 + (seed >> 12) % 40) / 100;
 			int ridge_y = surface->h * 76 / 100;
-			for(int layer = 5; layer >= 1; layer--) {
-				filledCircleRGBA(surface, glow_x, ridge_y,
-					span / (4 + layer), 92, 88, 96, (Uint8)(alpha * 0.10));
-			}
+			soft_glow(surface, glow_x, ridge_y, span / 3,
+				92, 88, 96, (int)(alpha * 0.55));
+			soft_band(surface, ridge_y - scale / 16, ridge_y + scale / 14,
+				92, 88, 96, (int)(alpha * 0.30));
 			Uint32 pulse = phase % 1700;
 			double flash = pulse < 240 ? 1.0 - pulse / 240.0 : 0.0;
 			if(flash > 0.0) {
-				for(int layer = 4; layer >= 1; layer--) {
-					filledCircleRGBA(surface, glow_x, ridge_y,
-						span / (4 + layer), 126, 138, 176,
-						(Uint8)(alpha * 0.42 * flash));
-				}
+				soft_glow(surface, glow_x, ridge_y, span / 3,
+					126, 138, 176, (int)(alpha * 2.2 * flash));
+				soft_band(surface, ridge_y - scale / 12, ridge_y + scale / 12,
+					126, 138, 176, (int)(alpha * 1.1 * flash));
 			}
 		} else if(kind == 52) {
 			// Diamond ring: totality ending, one point of photosphere left.
 			int sun_x = surface->w * (28 + (seed >> 12) % 44) / 100;
 			int sun_y = surface->h * (16 + (seed >> 8) % 16) / 100;
 			int sun_r = scale / 26;
-			filledCircleRGBA(surface, sun_x, sun_y, sun_r + scale / 30,
-				226, 220, 198, (Uint8)(alpha * 0.05));
+			soft_glow(surface, sun_x, sun_y, sun_r + scale / 16,
+				226, 220, 198, (int)(alpha * 0.30));
 			filledCircleRGBA(surface, sun_x, sun_y, sun_r, 14, 16, 26,
 				(Uint8)(alpha * 0.60));
 			double edge = smooth_step(0.15, 0.6, progress);
@@ -1768,8 +1766,8 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int sun_x = surface->w * (30 + (seed >> 12) % 40) / 100;
 			int sun_y = surface->h * (14 + (seed >> 8) % 14) / 100;
 			int sun_r = scale / 30;
-			filledCircleRGBA(surface, sun_x, sun_y, sun_r + scale / 22,
-				238, 228, 196, (Uint8)(alpha * 0.06));
+			soft_glow(surface, sun_x, sun_y, sun_r + scale / 12,
+				238, 228, 196, (int)(alpha * 0.34));
 			filledCircleRGBA(surface, sun_x, sun_y, sun_r, 246, 236, 206,
 				(Uint8)(alpha * 0.28));
 			double transit = smooth_step(0.2, 0.8, progress);
@@ -1879,14 +1877,14 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 			int moon_x = surface->w * (30 + (seed >> 12) % 40) / 100;
 			int moon_y = surface->h * (18 + (seed >> 8) % 14) / 100;
 			int radius = scale / 9;
-			filledCircleRGBA(surface, moon_x, moon_y, scale / 40,
-				226, 230, 238, (Uint8)(alpha * 0.46));
+			soft_glow(surface, moon_x, moon_y, scale / 26,
+				226, 230, 238, (int)(alpha * 0.50));
 			for(int side = -1; side <= 1; side += 2) {
 				int dog_x = moon_x + side * radius;
-				filledCircleRGBA(surface, dog_x, moon_y, scale / 90,
-					206, 214, 230, (Uint8)(alpha * 0.10));
-				filledCircleRGBA(surface, dog_x, moon_y, scale / 200 + 1,
-					226, 232, 242, (Uint8)(alpha * 0.20));
+				soft_glow(surface, dog_x, moon_y, scale / 40,
+					206, 214, 230, (int)(alpha * 0.22));
+				soft_glow(surface, dog_x, moon_y, scale / 90,
+					226, 232, 242, (int)(alpha * 0.30));
 			}
 		} else if(kind == 60) {
 			// A dust devil on the plain, seen from far off: a soft tapering
