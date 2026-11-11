@@ -1604,11 +1604,14 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 		default: {
 			// A wisp of high cloud drifting across, lit from one side. Soft
 			// edges only, so it never reads as a shape.
-			for(int puff = 0; puff < 4; puff++) {
-				int px = x - direction * puff * size * 4;
+			for(int puff = 0; puff < 5; puff++) {
+				int px = x - direction * puff * size * 3;
 				int py = y + (int)(sin(puff * 1.7 + ticks / 5200.0) * size);
-				soft_glow(surface, px, py, size * (3 + puff % 2),
-					176, 186, 206, (int)(alpha * 0.10));
+				soft_glow(surface, px, py, size * (4 + puff % 2),
+					186, 196, 216, (int)(alpha * 0.26));
+				soft_glow(surface, px + size, py - size / 2,
+					size * (2 + puff % 2), 202, 210, 228,
+					(int)(alpha * 0.18));
 			}
 			break;
 		}
