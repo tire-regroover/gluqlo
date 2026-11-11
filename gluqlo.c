@@ -73,6 +73,8 @@ SDL_Rect minBackground;
 SDL_Rect bgrect;
 SDL_Surface *bg;
 static SDL_Surface *backdrop_base;
+static SDL_Surface *digit_glyphs[10];
+static SDL_Surface *ampm_glyphs[2];
 
 // draw rounded box
 // see http://lists.libsdl.org/pipermail/sdl-libsdl.org/2006-December/058868.html
@@ -137,15 +139,35 @@ void fill_rounded_box_b(SDL_Surface* dst, SDL_Rect *coords, int r, SDL_Color col
 }
 
 void render_ampm(SDL_Surface *surface, SDL_Rect *rect, int pm) {
-	char mode[3];
 	SDL_Rect coords;
-	snprintf(mode, 3, "%cM", pm ? 'P' : 'A');
-	SDL_Surface *ampm = TTF_RenderText_Blended(font_mode, mode, FONT_COLOR);
+	SDL_Surface *ampm = ampm_glyphs[pm ? 1 : 0];
+	if(!ampm) return;
 	int offset = rect->h * 0.127;
 	coords.x = rect->x + rect->h * 0.07;
 	coords.y = rect->y + (pm ? rect->h - offset - ampm->h : offset);
 	SDL_BlitSurface(ampm, 0, surface, &coords);
-	SDL_FreeSurface(ampm);
+}
+
+// Pre-render the clock digits and AM/PM labels once, since the time glyphs
+// don't change between ambient frames. TTF_RenderGlyph_Blended is expensive
+// to call every frame.
+static void init_glyph_cache() {
+	for(int i = 0; i < 10; i++) {
+		digit_glyphs[i] = TTF_RenderGlyph_Blended(font_time, '0' + i, FONT_COLOR);
+	}
+	ampm_glyphs[0] = TTF_RenderText_Blended(font_mode, "AM", FONT_COLOR);
+	ampm_glyphs[1] = TTF_RenderText_Blended(font_mode, "PM", FONT_COLOR);
+}
+
+static void free_glyph_cache() {
+	for(int i = 0; i < 10; i++) {
+		if(digit_glyphs[i]) SDL_FreeSurface(digit_glyphs[i]);
+		digit_glyphs[i] = NULL;
+	}
+	for(int i = 0; i < 2; i++) {
+		if(ampm_glyphs[i]) SDL_FreeSurface(ampm_glyphs[i]);
+		ampm_glyphs[i] = NULL;
+	}
 }
 
 static double hash_noise(int x, int y, Uint32 seed) {
@@ -323,84 +345,84 @@ static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
 }
 
 static void render_world_jump(SDL_Surface *surface, Uint32 ticks, int scale) {
-		const Uint32 cycle = 360000;
-		const Uint32 duration = 7800;
-		Uint32 slot = ticks / cycle;
-		Uint32 phase = ticks % cycle;
-		Uint32 seed = slot * 2246822519u + 3266489917u;
-		if(seed % 5 != 0 || phase >= duration) return;
-		seed ^= seed >> 15;
-		seed *= 2654435761u;
-		seed ^= seed >> 13;
-		double progress = (double)phase / duration;
-		double fade = smooth_step(0.0, 350.0, phase)
-			* (1.0 - smooth_step(duration - 450.0, duration, phase));
-		int center_x = surface->w / 2 + (int)(sin(ticks / 115.0) * scale * 0.012);
-		int center_y = surface->h * 43 / 100;
-		double tunnel_open = sin(progress * 3.14159265359);
-		int portal_x_radius = scale * (0.045 + tunnel_open * 0.22);
-		int portal_y_radius = scale * (0.035 + tunnel_open * 0.15);
-		Uint8 tunnel_alpha = (Uint8)(118 * fade * (0.35 + tunnel_open * 0.65));
+	const Uint32 cycle = 360000;
+	const Uint32 duration = 7800;
+	Uint32 slot = ticks / cycle;
+	Uint32 phase = ticks % cycle;
+	Uint32 seed = slot * 2246822519u + 3266489917u;
+	if(seed % 5 != 0 || phase >= duration) return;
+	seed ^= seed >> 15;
+	seed *= 2654435761u;
+	seed ^= seed >> 13;
+	double progress = (double)phase / duration;
+	double fade = smooth_step(0.0, 350.0, phase)
+		* (1.0 - smooth_step(duration - 450.0, duration, phase));
+	int center_x = surface->w / 2 + (int)(sin(ticks / 115.0) * scale * 0.012);
+	int center_y = surface->h * 43 / 100;
+	double tunnel_open = sin(progress * 3.14159265359);
+	int portal_x_radius = scale * (0.045 + tunnel_open * 0.22);
+	int portal_y_radius = scale * (0.035 + tunnel_open * 0.15);
+	Uint8 tunnel_alpha = (Uint8)(118 * fade * (0.35 + tunnel_open * 0.65));
 
-		for(int ring = 0; ring < 9; ring++) {
-			double ring_scale = 0.34 + ring * 0.105;
-			int radius_x = (int)(portal_x_radius * ring_scale);
-			int radius_y = (int)(portal_y_radius * ring_scale);
-			Uint8 ring_alpha = (Uint8)(tunnel_alpha * (1.0 - ring * 0.065));
-			ellipseRGBA(surface, center_x, center_y, radius_x, radius_y,
-				(Uint8)(100 + ring * 14), (Uint8)(151 + ring * 9),
-				(Uint8)(218 + ring * 4), ring_alpha);
-		}
-		for(int streak = 0; streak < 48; streak++) {
-			unsigned int streak_seed = seed + streak * 2246822519u;
-			double angle = (streak_seed % 6283) / 1000.0 + ticks / 700.0;
-			double travel = fmod((streak_seed >> 8) / 4294967295.0 + progress * 1.8, 1.0);
-			double distance = portal_x_radius + travel * scale * 0.38;
-			int star_x = center_x + (int)(cos(angle) * distance);
-			int star_y = center_y + (int)(sin(angle) * distance * 0.68);
-			int tail_x = center_x + (int)(cos(angle) * (distance - scale * 0.035));
-			int tail_y = center_y + (int)(sin(angle) * (distance - scale * 0.035) * 0.68);
-			thickLineRGBA(surface, tail_x, tail_y, star_x, star_y, 1,
-				(Uint8)(155 + streak % 5 * 18), (Uint8)(182 + streak % 4 * 16),
-				235, (Uint8)(tunnel_alpha * 0.62));
-		}
-
-		double destination_mix = smooth_step(3900.0, 5150.0, phase)
-			* (1.0 - smooth_step(5850.0, 7200.0, phase));
-		static const Uint8 destination_palette[4][3] = {
-			{ 36, 90, 112 }, { 128, 66, 75 }, { 74, 103, 68 }, { 98, 79, 132 }
-		};
-		int destination = seed % 4;
-		Uint8 sky_alpha = (Uint8)(84 * destination_mix * fade);
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			destination_palette[destination][0], destination_palette[destination][1],
-			destination_palette[destination][2], sky_alpha);
-		for(int layer = 0; layer < 3; layer++) {
-			int base_y = surface->h * (66 + layer * 9) / 100;
-			Uint8 terrain_alpha = (Uint8)(148 * destination_mix * fade * (0.85 - layer * 0.16));
-			Uint8 terrain_red = (Uint8)(14 + destination * 13 + layer * 5);
-			Uint8 terrain_green = (Uint8)(31 + destination * 9 + layer * 4);
-			Uint8 terrain_blue = (Uint8)(43 + destination * 14 + layer * 3);
-			for(int segment = 0; segment < 18; segment++) {
-				int x1 = surface->w * segment / 18;
-				int x2 = surface->w * (segment + 1) / 18;
-				int y1 = base_y + (int)(sin(segment * 1.4 + destination) * scale * 0.035);
-				int y2 = base_y + (int)(sin((segment + 1) * 1.4 + destination) * scale * 0.035);
-				filledTrigonRGBA(surface, x1, y1, x2, y2, x2, surface->h,
-					terrain_red, terrain_green, terrain_blue, terrain_alpha);
-				filledTrigonRGBA(surface, x1, y1, x2, surface->h, x1, surface->h,
-					terrain_red, terrain_green, terrain_blue, terrain_alpha);
-			}
-		}
-		Uint32 return_phase = phase > 5900 ? phase - 5900 : 0;
-		if(return_phase < 900) {
-			double return_flash = (1.0 - return_phase / 900.0) * fade;
-			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-				225, 233, 241, (Uint8)(150 * return_flash));
-		}
+	for(int ring = 0; ring < 9; ring++) {
+		double ring_scale = 0.34 + ring * 0.105;
+		int radius_x = (int)(portal_x_radius * ring_scale);
+		int radius_y = (int)(portal_y_radius * ring_scale);
+		Uint8 ring_alpha = (Uint8)(tunnel_alpha * (1.0 - ring * 0.065));
+		ellipseRGBA(surface, center_x, center_y, radius_x, radius_y,
+			(Uint8)(100 + ring * 14), (Uint8)(151 + ring * 9),
+			(Uint8)(218 + ring * 4), ring_alpha);
+	}
+	for(int streak = 0; streak < 48; streak++) {
+		unsigned int streak_seed = seed + streak * 2246822519u;
+		double angle = (streak_seed % 6283) / 1000.0 + ticks / 700.0;
+		double travel = fmod((streak_seed >> 8) / 4294967295.0 + progress * 1.8, 1.0);
+		double distance = portal_x_radius + travel * scale * 0.38;
+		int star_x = center_x + (int)(cos(angle) * distance);
+		int star_y = center_y + (int)(sin(angle) * distance * 0.68);
+		int tail_x = center_x + (int)(cos(angle) * (distance - scale * 0.035));
+		int tail_y = center_y + (int)(sin(angle) * (distance - scale * 0.035) * 0.68);
+		thickLineRGBA(surface, tail_x, tail_y, star_x, star_y, 1,
+			(Uint8)(155 + streak % 5 * 18), (Uint8)(182 + streak % 4 * 16),
+			235, (Uint8)(tunnel_alpha * 0.62));
 	}
 
-	static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) {
+	double destination_mix = smooth_step(3900.0, 5150.0, phase)
+		* (1.0 - smooth_step(5850.0, 7200.0, phase));
+	static const Uint8 destination_palette[4][3] = {
+		{ 36, 90, 112 }, { 128, 66, 75 }, { 74, 103, 68 }, { 98, 79, 132 }
+	};
+	int destination = seed % 4;
+	Uint8 sky_alpha = (Uint8)(84 * destination_mix * fade);
+	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+		destination_palette[destination][0], destination_palette[destination][1],
+		destination_palette[destination][2], sky_alpha);
+	for(int layer = 0; layer < 3; layer++) {
+		int base_y = surface->h * (66 + layer * 9) / 100;
+		Uint8 terrain_alpha = (Uint8)(148 * destination_mix * fade * (0.85 - layer * 0.16));
+		Uint8 terrain_red = (Uint8)(14 + destination * 13 + layer * 5);
+		Uint8 terrain_green = (Uint8)(31 + destination * 9 + layer * 4);
+		Uint8 terrain_blue = (Uint8)(43 + destination * 14 + layer * 3);
+		for(int segment = 0; segment < 18; segment++) {
+			int x1 = surface->w * segment / 18;
+			int x2 = surface->w * (segment + 1) / 18;
+			int y1 = base_y + (int)(sin(segment * 1.4 + destination) * scale * 0.035);
+			int y2 = base_y + (int)(sin((segment + 1) * 1.4 + destination) * scale * 0.035);
+			filledTrigonRGBA(surface, x1, y1, x2, y2, x2, surface->h,
+				terrain_red, terrain_green, terrain_blue, terrain_alpha);
+			filledTrigonRGBA(surface, x1, y1, x2, surface->h, x1, surface->h,
+				terrain_red, terrain_green, terrain_blue, terrain_alpha);
+		}
+	}
+	Uint32 return_phase = phase > 5900 ? phase - 5900 : 0;
+	if(return_phase < 900) {
+		double return_flash = (1.0 - return_phase / 900.0) * fade;
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			225, 233, 241, (Uint8)(150 * return_flash));
+	}
+}
+
+static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) {
 	const Uint32 cycle = 300000;
 	Uint32 slot = ticks / cycle;
 	Uint32 phase = ticks % cycle;
@@ -798,7 +820,7 @@ static bool render_background_battle(SDL_Surface *surface, Uint32 ticks, int sca
 		double blast = 1.0 - (phase % 2500) / 240.0;
 		int impact_x = (winner == 0 ? right_x : left_x)
 				+ (int)(sin(ticks / 510.0) * scale * 0.015);
-			int impact_y = center_y + (int)(cos(ticks / 390.0) * scale * 0.012);
+		int impact_y = center_y + (int)(cos(ticks / 390.0) * scale * 0.012);
 		int radius = size / 2 + (int)(size * (1.0 - blast));
 		Uint8 impact_alpha = (Uint8)(125 * fade * blast);
 		filledCircleRGBA(surface, impact_x, impact_y, radius,
@@ -939,118 +961,118 @@ static bool render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 }
 
 static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
-		const Uint32 cycle = 210000;
-		Uint32 slot = ticks / cycle;
-		Uint32 slot_phase = ticks % cycle;
-		Uint32 seed = slot * 2246822519u + 3266489917u;
-		if(seed % 5 != 0) return;
-		seed ^= seed >> 15;
-		seed *= 2246822519u;
-		seed ^= seed >> 13;
-		Uint32 duration = 72000 + (seed >> 8) % 28000;
-		Uint32 start = (seed >> 16) % (cycle - duration);
-		if(slot_phase < start || slot_phase >= start + duration) return;
-		Uint32 phase = slot_phase - start;
-		double progress = (double)phase / duration;
-		double fade = smooth_step(0.0, 6000.0, phase)
-			* (1.0 - smooth_step(duration - 7000.0, duration, phase));
-		int kind = seed % 5;
+	const Uint32 cycle = 210000;
+	Uint32 slot = ticks / cycle;
+	Uint32 slot_phase = ticks % cycle;
+	Uint32 seed = slot * 2246822519u + 3266489917u;
+	if(seed % 5 != 0) return;
+	seed ^= seed >> 15;
+	seed *= 2246822519u;
+	seed ^= seed >> 13;
+	Uint32 duration = 72000 + (seed >> 8) % 28000;
+	Uint32 start = (seed >> 16) % (cycle - duration);
+	if(slot_phase < start || slot_phase >= start + duration) return;
+	Uint32 phase = slot_phase - start;
+	double progress = (double)phase / duration;
+	double fade = smooth_step(0.0, 6000.0, phase)
+		* (1.0 - smooth_step(duration - 7000.0, duration, phase));
+	int kind = seed % 5;
 
-		if(kind == 0) {
-			for(int tree = 0; tree < 7; tree++) {
-				int tree_x = surface->w * (8 + tree * 13) / 100;
-				double nx = (double)tree_x / surface->w;
-				double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-				int base_y = (int)(surface->h * ridge);
-				double growth = smooth_step(0.03 + tree * 0.025, 0.72 + tree * 0.025, progress);
-				int tree_height = (int)(scale * (0.035 + (tree % 3) * 0.012) * growth);
-				if(tree_height < 2) continue;
-				Uint8 alpha = (Uint8)(175 * fade);
-				thickLineRGBA(surface, tree_x, base_y, tree_x, base_y - tree_height,
-					2 + tree % 2, 61, 72, 61, alpha);
-				for(int branch = 1; branch <= 3; branch++) {
-					int branch_y = base_y - tree_height * branch / 4;
-					int branch_length = tree_height * (4 - branch) / 5;
-					thickLineRGBA(surface, tree_x, branch_y,
-						tree_x - branch_length, branch_y - branch_length / 2,
-						2, 67, 82, 66, alpha);
-					thickLineRGBA(surface, tree_x, branch_y,
-						tree_x + branch_length, branch_y - branch_length / 2,
-						2, 67, 82, 66, alpha);
-					if(growth > 0.72) {
-						filledCircleRGBA(surface, tree_x - branch_length,
-							branch_y - branch_length / 2, branch_length / 3 + 1,
-							74, 112, 78, alpha);
-						filledCircleRGBA(surface, tree_x + branch_length,
-							branch_y - branch_length / 2, branch_length / 3 + 1,
-							86, 124, 83, alpha);
-					}
+	if(kind == 0) {
+		for(int tree = 0; tree < 7; tree++) {
+			int tree_x = surface->w * (8 + tree * 13) / 100;
+			double nx = (double)tree_x / surface->w;
+			double ridge = 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+			int base_y = (int)(surface->h * ridge);
+			double growth = smooth_step(0.03 + tree * 0.025, 0.72 + tree * 0.025, progress);
+			int tree_height = (int)(scale * (0.035 + (tree % 3) * 0.012) * growth);
+			if(tree_height < 2) continue;
+			Uint8 alpha = (Uint8)(175 * fade);
+			thickLineRGBA(surface, tree_x, base_y, tree_x, base_y - tree_height,
+				2 + tree % 2, 61, 72, 61, alpha);
+			for(int branch = 1; branch <= 3; branch++) {
+				int branch_y = base_y - tree_height * branch / 4;
+				int branch_length = tree_height * (4 - branch) / 5;
+				thickLineRGBA(surface, tree_x, branch_y,
+					tree_x - branch_length, branch_y - branch_length / 2,
+					2, 67, 82, 66, alpha);
+				thickLineRGBA(surface, tree_x, branch_y,
+					tree_x + branch_length, branch_y - branch_length / 2,
+					2, 67, 82, 66, alpha);
+				if(growth > 0.72) {
+					filledCircleRGBA(surface, tree_x - branch_length,
+						branch_y - branch_length / 2, branch_length / 3 + 1,
+						74, 112, 78, alpha);
+					filledCircleRGBA(surface, tree_x + branch_length,
+						branch_y - branch_length / 2, branch_length / 3 + 1,
+						86, 124, 83, alpha);
 				}
 			}
-		} else if(kind == 1) {
-			int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
-			boxRGBA(surface, 0, flood_y, surface->w - 1, surface->h - 1,
-				28, 79, 116, (Uint8)(58 * fade));
-			for(int band = 0; band < 5; band++) {
-				int previous_x = 0;
-				int previous_y = flood_y + band * scale / 38;
-				for(int segment = 1; segment <= 20; segment++) {
-					int next_x = surface->w * segment / 20;
-					int next_y = flood_y + band * scale / 38
-						+ (int)(sin(segment * 0.8 + ticks / (500.0 + band * 80))
-							* scale * 0.012);
-					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
-						1 + band % 2, 115, 183, 208, (Uint8)(70 * fade));
-					previous_x = next_x;
-					previous_y = next_y;
-				}
-			}
-		} else if(kind == 2) {
-			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-				135, 57, 27, (Uint8)(17 * fade));
-			for(int fire = 0; fire < 12; fire++) {
-				int fire_x = surface->w * (8 + fire * 7) / 100;
-				double nx = (double)fire_x / surface->w;
-				double ridge = 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
-				int fire_y = (int)(surface->h * ridge);
-				int flicker = (int)(fabs(sin(ticks / (170.0 + fire * 11) + fire)) * scale * 0.025);
-				thickLineRGBA(surface, fire_x, fire_y, fire_x + 2, fire_y - flicker,
-					2, 238, 112, 55, (Uint8)(120 * fade));
-				filledCircleRGBA(surface, fire_x + 4, fire_y - flicker, 2,
-					255, 192, 106, (Uint8)(145 * fade));
-			}
-		} else if(kind == 3) {
-			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-				36, 57, 78, (Uint8)(24 * fade));
-			for(int band = 0; band < 6; band++) {
-				int previous_x = 0;
-				int previous_y = surface->h * (17 + band * 10) / 100;
-				for(int segment = 1; segment <= 18; segment++) {
-					int next_x = surface->w * segment / 18;
-					int next_y = surface->h * (17 + band * 10) / 100
-						+ (int)(sin(segment * 0.6 + ticks / 1400.0 + band) * scale * 0.05);
-					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y, 2,
-						78, 162, 163, (Uint8)(28 * fade));
-					previous_x = next_x;
-					previous_y = next_y;
-				}
-			}
-		} else {
-			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-				17, 20, 32, (Uint8)(34 * fade));
-			int figure_x = surface->w * (25 + seed % 50) / 100;
-			int figure_y = surface->h * 83 / 100;
-			int figure_height = scale / 10;
-			filledTrigonRGBA(surface, figure_x, figure_y - figure_height,
-				figure_x - figure_height / 3, figure_y,
-				figure_x + figure_height / 3, figure_y, 12, 16, 25,
-				(Uint8)(150 * fade));
-			filledCircleRGBA(surface, figure_x, figure_y - figure_height,
-				figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
 		}
+	} else if(kind == 1) {
+		int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
+		boxRGBA(surface, 0, flood_y, surface->w - 1, surface->h - 1,
+			28, 79, 116, (Uint8)(58 * fade));
+		for(int band = 0; band < 5; band++) {
+			int previous_x = 0;
+			int previous_y = flood_y + band * scale / 38;
+			for(int segment = 1; segment <= 20; segment++) {
+				int next_x = surface->w * segment / 20;
+				int next_y = flood_y + band * scale / 38
+					+ (int)(sin(segment * 0.8 + ticks / (500.0 + band * 80))
+						* scale * 0.012);
+				thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
+					1 + band % 2, 115, 183, 208, (Uint8)(70 * fade));
+				previous_x = next_x;
+				previous_y = next_y;
+			}
+		}
+	} else if(kind == 2) {
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			135, 57, 27, (Uint8)(17 * fade));
+		for(int fire = 0; fire < 12; fire++) {
+			int fire_x = surface->w * (8 + fire * 7) / 100;
+			double nx = (double)fire_x / surface->w;
+			double ridge = 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
+			int fire_y = (int)(surface->h * ridge);
+			int flicker = (int)(fabs(sin(ticks / (170.0 + fire * 11) + fire)) * scale * 0.025);
+			thickLineRGBA(surface, fire_x, fire_y, fire_x + 2, fire_y - flicker,
+				2, 238, 112, 55, (Uint8)(120 * fade));
+			filledCircleRGBA(surface, fire_x + 4, fire_y - flicker, 2,
+				255, 192, 106, (Uint8)(145 * fade));
+		}
+	} else if(kind == 3) {
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			36, 57, 78, (Uint8)(24 * fade));
+		for(int band = 0; band < 6; band++) {
+			int previous_x = 0;
+			int previous_y = surface->h * (17 + band * 10) / 100;
+			for(int segment = 1; segment <= 18; segment++) {
+				int next_x = surface->w * segment / 18;
+				int next_y = surface->h * (17 + band * 10) / 100
+					+ (int)(sin(segment * 0.6 + ticks / 1400.0 + band) * scale * 0.05);
+				thickLineRGBA(surface, previous_x, previous_y, next_x, next_y, 2,
+					78, 162, 163, (Uint8)(28 * fade));
+				previous_x = next_x;
+				previous_y = next_y;
+			}
+		}
+	} else {
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			17, 20, 32, (Uint8)(34 * fade));
+		int figure_x = surface->w * (25 + seed % 50) / 100;
+		int figure_y = surface->h * 83 / 100;
+		int figure_height = scale / 10;
+		filledTrigonRGBA(surface, figure_x, figure_y - figure_height,
+			figure_x - figure_height / 3, figure_y,
+			figure_x + figure_height / 3, figure_y, 12, 16, 25,
+			(Uint8)(150 * fade));
+		filledCircleRGBA(surface, figure_x, figure_y - figure_height,
+			figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
 	}
+}
 
-	static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale) {
 	const Uint32 event_cycle = 48000;
 	Uint32 slot = ticks / event_cycle;
 	Uint32 slot_phase = ticks % event_cycle;
@@ -1863,15 +1885,23 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 void blit_digits(SDL_Surface *surface, SDL_Rect *rect, int spc, char digits[], SDL_Color color) {
 	SDL_Surface *glyph;
 	SDL_Rect coords;
+	// The cached glyphs are rendered at full FONT_COLOR. The flip animation
+	// passes a dimmed color for the scaling half, so render those on the fly.
+	bool use_cache = color.r == FONT_COLOR.r && color.g == FONT_COLOR.g
+		&& color.b == FONT_COLOR.b;
 
 	if(digits[1]) {
 		int gap = spc + spc / 2;
-		SDL_Surface *first_glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
-		SDL_Surface *second_glyph = TTF_RenderGlyph_Blended(font_time, digits[1], color);
+		SDL_Surface *first_glyph = use_cache ? digit_glyphs[digits[0] - '0']
+			: TTF_RenderGlyph_Blended(font_time, digits[0], color);
+		SDL_Surface *second_glyph = use_cache ? digit_glyphs[digits[1] - '0']
+			: TTF_RenderGlyph_Blended(font_time, digits[1], color);
 		if(!first_glyph || !second_glyph) {
 			fprintf(stderr, "Unable to render clock digits: %s\n", TTF_GetError());
-			if(first_glyph) SDL_FreeSurface(first_glyph);
-			if(second_glyph) SDL_FreeSurface(second_glyph);
+			if(!use_cache) {
+				if(first_glyph) SDL_FreeSurface(first_glyph);
+				if(second_glyph) SDL_FreeSurface(second_glyph);
+			}
 			return;
 		}
 		int total_width = first_glyph->w + gap + second_glyph->w;
@@ -1879,17 +1909,24 @@ void blit_digits(SDL_Surface *surface, SDL_Rect *rect, int spc, char digits[], S
 		coords.y = rect->y + (rect->h - first_glyph->h) / 2;
 		SDL_BlitSurface(first_glyph, 0, surface, &coords);
 		coords.x += first_glyph->w + gap;
-		SDL_FreeSurface(first_glyph);
 		coords.y = rect->y + (rect->h - second_glyph->h) / 2;
 		SDL_BlitSurface(second_glyph, 0, surface, &coords);
-		SDL_FreeSurface(second_glyph);
+		if(!use_cache) {
+			SDL_FreeSurface(first_glyph);
+			SDL_FreeSurface(second_glyph);
+		}
 	} else {
 		// single digit
-		glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
+		glyph = use_cache ? digit_glyphs[digits[0] - '0']
+			: TTF_RenderGlyph_Blended(font_time, digits[0], color);
+		if(!glyph) {
+			fprintf(stderr, "Unable to render clock digits: %s\n", TTF_GetError());
+			return;
+		}
 		coords.x = rect->x + (rect->w - glyph->w) / 2;
 		coords.y = rect->y + (rect->h - glyph->h) / 2;
 		SDL_BlitSurface(glyph, 0, surface, &coords);
-		SDL_FreeSurface(glyph);
+		if(!use_cache) SDL_FreeSurface(glyph);
 	}
 }
 
@@ -2293,6 +2330,7 @@ int main(int argc, char** argv ) {
 		fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
 		return 1;
 	}
+	init_glyph_cache();
 
 	// Draw the layered forest before placing the clock over it.
 	render_backdrop(screen, SDL_GetTicks());
@@ -2377,6 +2415,7 @@ int main(int argc, char** argv ) {
 		SDL_FreeSurface(bg);
 		if(backdrop_base) SDL_FreeSurface(backdrop_base);
 		if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
+		free_glyph_cache();
 		TTF_CloseFont(font_time);
 		TTF_CloseFont(font_mode);
 		TTF_CloseFont(font_date);
@@ -2441,6 +2480,7 @@ int main(int argc, char** argv ) {
 	SDL_FreeSurface(bg);
 	if(backdrop_base) SDL_FreeSurface(backdrop_base);
 	if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
+	free_glyph_cache();
 
 	TTF_CloseFont(font_time);
 	TTF_CloseFont(font_mode);
