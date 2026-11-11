@@ -463,6 +463,20 @@ static double precipitation_level(const double *previous, const double *current,
 		+ to * smooth_step(0.58, 1.0, blend);
 }
 
+// Weather 0 in weather_levels[] is the orange sunset. It is a treat, so only one
+// pick in SUNSET_ONE_IN keeps it; the others become one of the later weathers.
+// Raise SUNSET_ONE_IN to see it less often.
+#define WEATHER_SUNSET 0
+#define SUNSET_ONE_IN 5
+
+static int pick_weather(Uint32 seed, int count) {
+	int pick = seed % count;
+	if(pick == WEATHER_SUNSET && (seed >> 12) % SUNSET_ONE_IN != 0) {
+		pick = 2 + (seed >> 5) % (count - 2);
+	}
+	return pick;
+}
+
 static SceneWeather get_scene_weather(Uint32 ticks) {
 	static const double weather_levels[][11] = {
 		{ 0.10, 0.00, 0.00, 0.95, 0.02, 0.08, 0.00, 0.00, 255, 173, 45 },
@@ -495,10 +509,13 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	Uint32 weather_slot = ticks / weather_duration;
 	Uint32 current_seed = weather_slot * 2654435761u + 0x9e3779b9u;
 	Uint32 previous_seed = (weather_slot - 1) * 2246822519u + 3266489917u;
-	int current = current_seed % weather_count;
-	int previous = previous_seed % weather_count;
+	int current = pick_weather(current_seed, weather_count);
+	int previous = pick_weather(previous_seed, weather_count);
 	if(previous == current) {
-		previous = (previous + 1 + (current_seed >> 8) % (weather_count - 1)) % weather_count;
+		// Any other weather, but never the sunset (that would bypass its rarity).
+		int other = 1 + (current_seed >> 8) % (weather_count - 1);
+		if(other == current) other = other % (weather_count - 1) + 1;
+		previous = other;
 	}
 	Uint32 weather_phase = ticks % weather_duration;
 	double weather_blend = smooth_step(0.0, weather_transition, weather_phase);
@@ -787,8 +804,23 @@ static Uint8 ship_shade(int value, int percent) {
 	return (Uint8)(shaded > 255 ? 255 : shaded);
 }
 
+// Highlights only lift a hull part part-way to a dull steel grey, never to white.
 static Uint8 ship_light(int value, int percent) {
-	return (Uint8)(value + (232 - value) * percent / 100);
+	return (Uint8)(value + (182 - value) * percent / 100);
+}
+
+// Engine glow colour of the ship being drawn, set by ship_set_palette().
+static Uint8 ship_glow[3];
+
+// Called first by each ship: the team colour becomes the engine glow, and the
+// hull itself is darkened so the ship reads as a dark silhouette.
+static void ship_set_palette(Uint8 *red, Uint8 *green, Uint8 *blue) {
+	ship_glow[0] = (Uint8)(*red * 3 / 2 > 255 ? 255 : *red * 3 / 2);
+	ship_glow[1] = (Uint8)(*green * 3 / 2 > 255 ? 255 : *green * 3 / 2);
+	ship_glow[2] = (Uint8)(*blue * 3 / 2 > 255 ? 255 : *blue * 3 / 2);
+	*red = ship_shade(*red, 26);
+	*green = ship_shade(*green, 26);
+	*blue = ship_shade(*blue, 26);
 }
 
 static void ship_shape(SDL_Surface *surface, int x, int y, int unit, int direction,
@@ -802,8 +834,10 @@ static void ship_shape(SDL_Surface *surface, int x, int y, int unit, int directi
 	}
 	filledPolygonRGBA(surface, vx, vy, count, red, green, blue, alpha);
 	if(edge_alpha > 0) {
-		aapolygonRGBA(surface, vx, vy, count, ship_light(red, 45),
-			ship_light(green, 45), ship_light(blue, 45), edge_alpha);
+		// A thin rim in the team colour, so the dark hull still has an outline.
+		aapolygonRGBA(surface, vx, vy, count, (Uint8)(ship_glow[0] * 7 / 10),
+			(Uint8)(ship_glow[1] * 7 / 10), (Uint8)(ship_glow[2] * 7 / 10),
+			(Uint8)(edge_alpha * 3 / 2 > 255 ? 255 : edge_alpha * 3 / 2));
 	}
 }
 
@@ -822,18 +856,21 @@ static void ship_engine(SDL_Surface *surface, int x, int y, int unit, int direct
 	int radius = radius_tenths * unit / 10;
 	if(radius < 1) radius = 1;
 	filledTrigonRGBA(surface, cx, cy - radius, cx, cy + radius,
-		cx - direction * radius * 3, cy, 96, 170, 226, (Uint8)(alpha * 0.22));
-	filledCircleRGBA(surface, cx, cy, radius + 1 + radius / 2, 96, 170, 226,
-		(Uint8)(alpha * 0.14));
-	filledCircleRGBA(surface, cx, cy, radius, 205, 238, 255, (Uint8)(alpha * 0.85));
+		cx - direction * radius * 3, cy, ship_glow[0], ship_glow[1], ship_glow[2],
+		(Uint8)(alpha * 0.22));
+	filledCircleRGBA(surface, cx, cy, radius + 1 + radius / 2,
+		ship_glow[0], ship_glow[1], ship_glow[2], (Uint8)(alpha * 0.14));
+	filledCircleRGBA(surface, cx, cy, radius, (Uint8)((ship_glow[0] + 255) / 2),
+		(Uint8)((ship_glow[1] + 255) / 2), (Uint8)((ship_glow[2] + 255) / 2),
+		(Uint8)(alpha * 0.8));
 }
 
 static void ship_window(SDL_Surface *surface, int x, int y, int unit, int direction,
 	int wx, int wy, Uint8 alpha) {
 	int px = ship_coord(x, unit, direction, wx);
 	int py = ship_coord(y, unit, 1, wy);
-	pixelRGBA(surface, px, py, 238, 214, 150, (Uint8)(alpha * 0.9));
-	if(unit >= 14) pixelRGBA(surface, px + direction, py, 238, 214, 150, (Uint8)(alpha * 0.6));
+	pixelRGBA(surface, px, py, 214, 78, 52, (Uint8)(alpha * 0.9));
+	if(unit >= 14) pixelRGBA(surface, px + direction, py, 214, 78, 52, (Uint8)(alpha * 0.6));
 }
 
 static void ship_box(SDL_Surface *surface, int x, int y, int unit, int direction,
@@ -850,6 +887,7 @@ static void ship_box(SDL_Surface *surface, int x, int y, int unit, int direction
 // a wide stance instead of a single arrow.
 static void draw_battle_ship(SDL_Surface *surface, int x, int y, int size,
 	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
+	ship_set_palette(&red, &green, &blue);
 	static const ShipPoint far_pod[] = {
 		{14, -12}, {11, -13}, {-12, -13}, {-14, -11}, {-14, -8}, {11, -8}, {14, -10} };
 	static const ShipPoint near_pod[] = {
@@ -878,7 +916,7 @@ static void draw_battle_ship(SDL_Surface *surface, int x, int y, int size,
 		ship_light(red, 75), ship_light(green, 75), ship_light(blue, 75),
 		(Uint8)(alpha * 0.7));
 	filledEllipseRGBA(surface, ship_coord(x, size, direction, 10), y,
-		4 * size / 10 + 2, 2 * size / 10 + 1, 156, 214, 240, (Uint8)(alpha * 0.95));
+		4 * size / 10 + 2, 2 * size / 10 + 1, 196, 56, 42, (Uint8)(alpha * 0.95));
 	ship_engine(surface, x, y, size, direction, -14, -10, 3, alpha);
 	ship_engine(surface, x, y, size, direction, -14, 10, 3, alpha);
 	ship_engine(surface, x, y, size, direction, -12, 0, 2, alpha);
@@ -889,6 +927,7 @@ static void draw_battle_ship(SDL_Surface *surface, int x, int y, int size,
 // it reads as a ladder-like frame rather than a single hull.
 static void draw_frigate(SDL_Surface *surface, int x, int y, int size,
 	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
+	ship_set_palette(&red, &green, &blue);
 	static const ShipPoint far_hull[] = {
 		{16, -13}, {13, -14}, {-28, -14}, {-30, -12}, {-30, -7}, {-28, -5},
 		{8, -5}, {12, -8} };
@@ -918,9 +957,9 @@ static void draw_frigate(SDL_Surface *surface, int x, int y, int size,
 	ship_line(surface, x, y, size, direction, 12, 10, -25, 10, lr, lg, lb,
 		(Uint8)(alpha * 0.65));
 	ship_line(surface, x, y, size, direction, 34, 0, 24, 0,
-		200, 230, 245, (Uint8)(alpha * 0.9));
+		196, 56, 42, (Uint8)(alpha * 0.9));
 	filledEllipseRGBA(surface, ship_coord(x, size, direction, 3), y,
-		6 * size / 10 + 1, 3 * size / 10 + 1, 156, 214, 240, (Uint8)(alpha * 0.9));
+		6 * size / 10 + 1, 3 * size / 10 + 1, 170, 46, 36, (Uint8)(alpha * 0.9));
 
 	// Gun turrets on the hulls, and lit portholes along the core.
 	int turret_x[] = { 6, -16 };
@@ -948,6 +987,7 @@ static void draw_frigate(SDL_Surface *surface, int x, int y, int size,
 // The varied blocks give it a broken, built-up silhouette.
 static void draw_cruiser(SDL_Surface *surface, int x, int y, int size,
 	int direction, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
+	ship_set_palette(&red, &green, &blue);
 	static const ShipPoint nose[] = {
 		{23, 1}, {20, -3}, {15, -3}, {15, 3}, {21, 3} };
 	static const ShipPoint deck[] = {
@@ -981,7 +1021,7 @@ static void draw_cruiser(SDL_Surface *surface, int x, int y, int size,
 	ship_shape(surface, x, y, size, direction, nose, 5,
 		ship_light(red, 14), ship_light(green, 14), ship_light(blue, 14), alpha, alpha / 2);
 	ship_line(surface, x, y, size, direction, 20, -1, 16, -1,
-		200, 230, 245, (Uint8)(alpha * 0.95));
+		196, 56, 42, (Uint8)(alpha * 0.95));
 	ship_line(surface, x, y, size, direction, 13, -4, 3, -4, lr, lg, lb,
 		(Uint8)(alpha * 0.6));
 	ship_line(surface, x, y, size, direction, -1, -9, -6, -9, lr, lg, lb,
@@ -992,7 +1032,7 @@ static void draw_cruiser(SDL_Surface *surface, int x, int y, int size,
 	ship_shape(surface, x, y, size, direction, bridge, 4,
 		ship_light(red, 16), ship_light(green, 16), ship_light(blue, 16), alpha, alpha / 2);
 	ship_line(surface, x, y, size, direction, 8, -6, 5, -6,
-		200, 230, 245, (Uint8)(alpha * 0.95));
+		196, 56, 42, (Uint8)(alpha * 0.95));
 	filledEllipseRGBA(surface, ship_coord(x, size, direction, 12), ship_coord(y, size, 1, -4),
 		size / 5 + 2, size / 10 + 1,
 		ship_light(red, 18), ship_light(green, 18), ship_light(blue, 18), alpha);
@@ -1004,7 +1044,7 @@ static void draw_cruiser(SDL_Surface *surface, int x, int y, int size,
 		}
 	}
 	ship_line(surface, x, y, size, direction, 13, 1, 5, 1,
-		238, 214, 150, (Uint8)(alpha * 0.8));
+		170, 52, 38, (Uint8)(alpha * 0.8));
 	ship_engine(surface, x, y, size, direction, -22, -5, 1, alpha);
 	ship_engine(surface, x, y, size, direction, -22, 0, 1, alpha);
 	ship_engine(surface, x, y, size, direction, -22, 5, 1, alpha);
@@ -1085,7 +1125,7 @@ static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
 	int maneuver = (int)(sin(progress * 12.56637061436) * scale * 0.014);
 	int left_y = center_y + arc + maneuver;
 	int right_y = center_y - arc - maneuver;
-	Uint8 alpha = (Uint8)(100 * fade);
+	Uint8 alpha = (Uint8)(150 * fade);
 
 	draw_battle_ship(surface, left_x, left_y, size, 1, 105, 163, 183, alpha);
 	draw_battle_ship(surface, right_x, right_y, size, -1, 177, 130, 102, alpha);
@@ -1138,7 +1178,7 @@ static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int sca
 	int left_count = 2 + (seed >> 5) % 3;
 	int right_count = 2 + (seed >> 9) % 3;
 	int arc = (int)(sin(ticks / 1750.0) * scale * 0.010);
-	Uint8 alpha = (Uint8)(100 * fade);
+	Uint8 alpha = (Uint8)(150 * fade);
 
 	for(int side = 0; side < 2; side++) {
 		int direction = side == 0 ? 1 : -1;
@@ -1225,8 +1265,8 @@ static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 	int arc = (int)(sin(ticks / 1900.0 + progress * 8.0) * scale * 0.010);
 	int left_count = 3 + (seed >> 4) % 4;
 	int right_count = 3 + (seed >> 12) % 4;
-	Uint8 left_alpha = (Uint8)(96 * fade * (winner == 0 ? 1.0 : 1.0 - defeat * 0.75));
-	Uint8 right_alpha = (Uint8)(96 * fade * (winner == 1 ? 1.0 : 1.0 - defeat * 0.75));
+	Uint8 left_alpha = (Uint8)(150 * fade * (winner == 0 ? 1.0 : 1.0 - defeat * 0.75));
+	Uint8 right_alpha = (Uint8)(150 * fade * (winner == 1 ? 1.0 : 1.0 - defeat * 0.75));
 
 	for(int side = 0; side < 2; side++) {
 		int direction = side == 0 ? 1 : -1;
@@ -1277,7 +1317,7 @@ static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 				int y = center_y + (side == 0 ? arc : -arc)
 					+ (ship - reserves / 2) * scale / 25;
 				draw_battle_ship(surface, x, y, fighter_size, direction,
-					red, green, blue, (Uint8)(85 * fade * reinforcement));
+					red, green, blue, (Uint8)(130 * fade * reinforcement));
 			}
 		}
 	}
