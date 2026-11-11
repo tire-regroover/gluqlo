@@ -726,10 +726,10 @@ static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) 
 		int start_x = particle_seed % surface->w;
 		int start_y = (particle_seed >> 9) % surface->h;
 		int speed = 3 + (particle_seed >> 20) % 7;
-		// Each particle moves along its own streak: kind 0 falls slanting to the
-		// right, kind 1 rises to the left, the others fall almost straight down.
-		double direction_x = kind == 0 ? 0.55 : (kind == 1 ? -0.7 : 0.4);
-		double direction_y = kind == 1 ? -1.0 : 1.0;
+		// Every kind falls the way the normal rain does (down, leaning right), so
+		// the two never cross at different angles. Each particle moves along its streak.
+		double direction_x = 0.25;
+		double direction_y = 1.0;
 		double streak = scale * (kind == 0 ? 0.023 : 0.017);
 		double travel = ticks * 2.0 / (35 + speed * 7);
 		double path = sqrt(direction_x * direction_x + direction_y * direction_y);
