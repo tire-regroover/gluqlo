@@ -1239,18 +1239,28 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 		// A slow curtain of rain crossing the valley, lit from behind so it
 		// reads as a sheet of water rather than individual drops.
 		int curtain_x = surface->w * (10 + (int)(progress * 80)) / 100;
-		int curtain_w = scale / 5;
-		soft_column(surface, curtain_x, surface->h * 92 / 100,
-			surface->h * 62 / 100, curtain_w / 2,
-			168, 186, 206, (int)(30 * fade));
-		for(int streak = 0; streak < 90; streak++) {
+		int curtain_w = scale / 2;
+		int top_y = surface->h * 18 / 100;
+		int bottom_y = surface->h * 92 / 100;
+		// The veil: a wide, faint column so the rain has body before any
+		// individual streak is drawn.
+		soft_column(surface, curtain_x, bottom_y, bottom_y - top_y,
+			curtain_w / 2, 168, 186, 206, (int)(26 * fade));
+		soft_band(surface, top_y, bottom_y, 172, 190, 210, (int)(14 * fade));
+		int streak_len = scale / 22;
+		for(int streak = 0; streak < 260; streak++) {
 			unsigned int s = (unsigned int)streak * 1664525u + seed;
-			int sx = curtain_x - curtain_w / 2 + (int)((s % 1000) / 1000.0 * curtain_w);
-			int sy = (int)((s >> 10) % (Uint32)(surface->h * 70 / 100))
-				+ (int)(ticks / 12.0) % (surface->h * 70 / 100);
-			sy = sy % (surface->h * 70 / 100);
-			thickLineRGBA(surface, sx, sy, sx - 2, sy + scale / 90, 1,
-				186, 202, 220, (Uint8)(38 * fade));
+			int sx = curtain_x - curtain_w / 2
+				+ (int)((s % 1000) / 1000.0 * curtain_w);
+			int span = bottom_y - top_y;
+			int sy = top_y + (int)((s >> 10) % (Uint32)span);
+			// Fall, wrapping within the curtain.
+			sy = top_y + ((sy - top_y + (int)(ticks / 9.0)) % span + span) % span;
+			// Fade the streaks at the curtain edges so it has no hard sides.
+			double edge = 1.0 - fabs((double)(sx - curtain_x) / (curtain_w / 2.0));
+			if(edge < 0.0) edge = 0.0;
+			thickLineRGBA(surface, sx, sy, sx - 2, sy + streak_len, 1,
+				186, 202, 220, (Uint8)(44 * fade * edge));
 		}
 	} else {
 		// A distant treeline at dusk, each rank paler than the one in front so
@@ -1258,25 +1268,34 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			17, 20, 32, (Uint8)(34 * fade));
 		for(int rank = 0; rank < 4; rank++) {
-			int rank_y = surface->h * (74 + rank * 5) / 100;
-			Uint8 shade = (Uint8)(26 + rank * 16);
-			Uint8 alpha = (Uint8)((150 - rank * 26) * fade);
-			int trees = 16 + rank * 5;
+			int rank_y = surface->h * (70 + rank * 5) / 100;
+			Uint8 shade = (Uint8)(44 + rank * 20);
+			Uint8 alpha = (Uint8)((190 - rank * 30) * fade);
+			// A solid base under the rank so the trees merge into one mass
+			// instead of standing as separate triangles.
+			boxRGBA(surface, 0, rank_y, surface->w - 1, surface->h - 1,
+				shade, (Uint8)(shade + 8), (Uint8)(shade + 18), alpha);
+			int trees = 26 + rank * 9;
 			for(int tree = 0; tree < trees; tree++) {
 				unsigned int s = (unsigned int)tree * 2654435761u
 					+ (unsigned int)rank * 40503u + seed;
-				int tx = surface->w * tree / trees
-					+ (int)((s % 100) / 100.0 * surface->w / trees);
-				int th = (int)(scale * (0.020 + (s >> 8) % 22 / 1000.0)
-					* (1.0 - rank * 0.12));
-				if(th < 2) continue;
+				// Irregular spacing: hash-jittered slots, so no visible rhythm.
+				int slot_w = surface->w / trees;
+				int tx = tree * slot_w + (int)((s % 1000) / 1000.0 * slot_w * 1.6)
+					- slot_w / 3;
+				int th = (int)(scale * (0.045 + (s >> 8) % 55 / 1000.0)
+					* (1.0 - rank * 0.10));
+				if(th < 3) continue;
+				// Width varies independently of height, so the crowns differ.
+				int half_w = th / 4 + (int)((s >> 20) % 3) * th / 12;
 				filledTrigonRGBA(surface, tx, rank_y - th,
-					tx - th / 3, rank_y, tx + th / 3, rank_y,
-					shade, (Uint8)(shade + 6), (Uint8)(shade + 14), alpha);
+					tx - half_w, rank_y, tx + half_w, rank_y,
+					shade, (Uint8)(shade + 8), (Uint8)(shade + 18), alpha);
 			}
-			// Haze between ranks, so each layer sits behind the next.
-			soft_band(surface, rank_y - scale / 40, rank_y + scale / 30,
-				150, 164, 186, (int)((10 + rank * 4) * fade));
+			// Haze between ranks, so each layer sits behind the next. Kept wide
+			// and faint so it reads as air rather than a horizontal stripe.
+			soft_band(surface, rank_y - scale / 22, rank_y + scale / 14,
+				150, 164, 186, (int)((7 + rank * 3) * fade));
 		}
 	}
 }
