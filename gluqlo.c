@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 69
+#define RARE_SKY_KINDS 74
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 37         // things that happen on the hills (see render_hill_event)
 
@@ -5469,6 +5469,84 @@ static void sky_event_68(const SkyEvent *event) {
 	}
 }
 
+// A flock of folded paper cranes flaps slowly across the sky.
+static void sky_event_69(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int crane = 0; crane < 6; crane++) {
+		int cx = x - direction * (crane * size * 2 + (crane % 2) * size);
+		int cy = y + (int)(sin(phase / 800.0 + crane * 1.6) * size) + (crane % 3) * size;
+		double flap = sin(phase / 260.0 + crane * 0.9);
+		int wing = (int)(size * (0.8 + 0.4 * flap));
+		Uint8 tint = (Uint8)(215 + crane * 6);
+		filledTrigonRGBA(surface, cx, cy, cx - direction * size, cy - wing, cx - direction * size / 3, cy, tint, 228, 232, alpha);
+		filledTrigonRGBA(surface, cx, cy, cx - direction * size, cy + wing / 2, cx - direction * size / 3, cy, 175, 185, 205, alpha);
+		thickLineRGBA(surface, cx, cy, cx + direction * size, cy - size / 3, 1, 235, 120, 120, alpha);
+		thickLineRGBA(surface, cx, cy, cx - direction * size * 3 / 2, cy + size / 4, 1, 215, 222, 232, alpha);
+	}
+}
+
+// A string of glowing sky lanterns rises and drifts, each pulsing softly.
+static void sky_event_70(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 warm[3] = { 255, 170, 80 };
+	for(int lantern = 0; lantern < 9; lantern++) {
+		double rise = progress * size * 3.0 + lantern * size * 0.6;
+		double lx = x - direction * lantern * size * 2 + sin(phase / 900.0 + lantern) * size * 0.8;
+		double ly = y + (lantern % 3) * size * 1.5 - rise * 0.4;
+		double pulse = 0.7 + 0.3 * sin(phase / 250.0 + lantern * 1.7);
+		weapon_glow(surface, lx, ly, size * 0.7, warm, 200.0 * fade * pulse);
+		boxRGBA(surface, (int)lx - 2, (int)ly - 3, (int)lx + 2, (int)ly + 3, 255, 200, 120, (Uint8)(alpha * pulse));
+	}
+}
+
+// A big owl glides silently across the moonless sky, wings spread wide.
+static void sky_event_71(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	int by = y + (int)(sin(phase / 1100.0) * size * 0.6);
+	double beat = sin(phase / 420.0);
+	int span = size * 3, lift = (int)(beat * size * 0.8);
+	for(int side = -1; side <= 1; side += 2) {
+		int tip_x = x + side * span / 2 * 1, tip_y = by - lift;
+		filledTrigonRGBA(surface, x, by - size / 4, tip_x, tip_y, x + side * size / 3, by + size / 3, 28, 24, 30, alpha);
+		filledTrigonRGBA(surface, x, by - size / 4, tip_x, tip_y, x + side * span / 4, by - lift / 2 - size / 2, 40, 34, 40, alpha);
+	}
+	filledEllipseRGBA(surface, x, by, size / 2 + 1, size * 7 / 10, 36, 30, 34, alpha);
+	filledCircleRGBA(surface, x, by - size * 3 / 4, size / 2, 44, 38, 42, alpha);
+	filledTrigonRGBA(surface, x - size / 3, by - size, x - size / 6, by - size * 5 / 4, x - size / 10, by - size * 6 / 5, 44, 38, 42, alpha);
+	filledTrigonRGBA(surface, x + size / 3, by - size, x + size / 6, by - size * 5 / 4, x + size / 10, by - size * 6 / 5, 44, 38, 42, alpha);
+	filledCircleRGBA(surface, x - size / 5, by - size * 3 / 4, 2, 255, 210, 90, alpha);
+	filledCircleRGBA(surface, x + size / 5, by - size * 3 / 4, 2, 255, 210, 90, alpha);
+}
+
+// A gust lifts a swirl of leaves that spiral across the sky and settle.
+static void sky_event_72(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int leaf = 0; leaf < 16; leaf++) {
+		double u = leaf / 16.0;
+		double spin = phase / 400.0 + leaf * 0.9;
+		double lx = x - direction * (leaf * size * 0.9) + cos(spin) * size * (1.0 + u * 2.0);
+		double ly = y + sin(spin) * size * (0.6 + u) + u * size * 3.0;
+		double turn = spin * 1.7;
+		Uint8 r = (Uint8)(150 + (leaf * 17) % 80), g = (Uint8)(70 + (leaf * 29) % 70);
+		filledEllipseRGBA(surface, (int)lx, (int)ly, (int)(2 + fabs(cos(turn)) * size * 0.4), (int)(1 + fabs(sin(turn)) * size * 0.3), r, g, 40, alpha);
+	}
+}
+
+// A murmuration: a dense cloud of small birds twists and swells as it moves.
+static void sky_event_73(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int bird = 0; bird < 70; bird++) {
+		unsigned int h = fx_hash(seed, bird);
+		double a = (h % 6283) / 1000.0, r = ((h >> 12) % 100) / 100.0;
+		double shape = 1.0 + 0.5 * sin(phase / 700.0 + a * 2.0);
+		double bx = x + cos(a + phase / 1500.0) * size * 4.0 * r * shape;
+		double by = y + sin(a + phase / 1500.0) * size * 1.6 * r * (2.0 - shape) + sin(phase / 300.0 + bird) * 2.0;
+		double flap = sin(phase / 90.0 + bird);
+		thickLineRGBA(surface, (int)bx - 2, (int)(by + flap * 1.5), (int)bx, (int)by, 1, 14, 18, 28, alpha);
+		thickLineRGBA(surface, (int)bx, (int)by, (int)bx + 2, (int)(by + flap * 1.5), 1, 14, 18, 28, alpha);
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -5533,6 +5611,11 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_66,
 	sky_event_67,
 	sky_event_68,
+	sky_event_69,
+	sky_event_70,
+	sky_event_71,
+	sky_event_72,
+	sky_event_73,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
