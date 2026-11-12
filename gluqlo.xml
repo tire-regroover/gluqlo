@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<screensaver name="gluqlo" _label="Gluqlo">
+<screensaver name="gluqlo" _label="Gluqlo L-Space">
   <command arg="-root"/>
   <select id="Mode">
     <option id="24h" _label="24h mode"/>
@@ -7,8 +7,10 @@
   </select>
   <number id="scale" type="slider" arg="-s %" _label="Scale" _low-label="50%" _high-label="150%" low="0.5" high="1.5" default="1.0"/>
   <_description>
-Gluqlo is a Linux remake of well-known Fliqlo screensaver.
-This version is based on Now Open Flipqlo 2.0 (https://github.com/bhm/noflipqlo) by Jacek Kuzniarski aka bhm.
-Written by Alexander Kovalenko; 2014.
+Gluqlo L-Space is a Fliqlo-style flip clock set in a living night landscape
+with seasons, weather and well over a hundred scenery events.
+It is a fork of Gluqlo by Alexander Kovalenko (2014), which is based on
+Now Open Flipqlo 2.0 (https://github.com/bhm/noflipqlo) by Jacek Kuzniarski aka bhm.
+L-Space scenery by tire-regroover; 2026.
   </_description>
 </screensaver>

@@ -1,0 +1,306 @@
+// Style B: cel-shaded "painted metal". The same ten hull outlines as designs.cpp,
+// drawn with banded lighting from above, thick dark outlines, panel lines and
+// glowing engines, instead of the dark flat silhouettes with a rim light.
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <vector>
+#include <utility>
+#include <algorithm>
+#include "SDL.h"
+#include "SDL_gfxPrimitives.h"
+
+struct P { int x, y; };
+typedef std::vector<P> Poly;
+
+struct Team {
+	Uint8 tone[4][3];   // dark, mid, light, highlight
+	Uint8 glow[3];      // engine glow and rim light
+	Uint8 accent[3];    // glowing slits and eyes
+};
+static const Team TEAM_BLUE = {
+	{ {26, 40, 62}, {50, 80, 116}, {94, 136, 180}, {182, 218, 246} },
+	{90, 190, 255}, {150, 235, 255} };
+static const Team TEAM_ORANGE = {
+	{ {62, 36, 26}, {116, 68, 46}, {176, 114, 80}, {248, 206, 162} },
+	{255, 150, 70}, {255, 208, 120} };
+
+struct Ship {
+	const char *name;
+	std::vector<Poly> back;     // parts drawn behind the hull (spikes)
+	Poly hull;
+	std::vector<Poly> over;     // plates drawn on top of the hull, each lighter
+	std::vector<P> engines;
+	int engine_r;               // tenths of a unit
+	bool has_accent;
+	int ax1, ay1, ax2, ay2;
+	bool eye;
+};
+
+// Upper half of an outline from nose to tail, mirrored into a full polygon.
+static Poly mirror(const int (*h)[2], int n) {
+	Poly p;
+	for(int i = 0; i < n; i++) { P v = { h[i][0], h[i][1] }; p.push_back(v); }
+	for(int i = n - 2; i >= 1; i--) { P v = { h[i][0], -h[i][1] }; p.push_back(v); }
+	return p;
+}
+
+#define N(a) ((int)(sizeof(a) / sizeof(a[0])))
+
+static Ship make_ship(const char *name, const int (*hull)[2], int hn,
+	const int (*spine)[2], int sn, int ax1, int ay1, int ax2, int ay2,
+	int ex, int ey, int er) {
+	Ship s;
+	s.name = name;
+	s.hull = mirror(hull, hn);
+	if(sn > 0) s.over.push_back(mirror(spine, sn));
+	s.has_accent = ax1 != ax2 || ay1 != ay2;
+	s.ax1 = ax1; s.ay1 = ay1; s.ax2 = ax2; s.ay2 = ay2;
+	s.eye = false;
+	s.engine_r = er;
+	if(ey == 0) { P e = { ex, 0 }; s.engines.push_back(e); }
+	else {
+		P a = { ex, -ey }, b = { ex, ey };
+		s.engines.push_back(a);
+		s.engines.push_back(b);
+	}
+	return s;
+}
+
+static const int H1[][2] = {{45,0},{30,-3},{12,-5},{-4,-14},{-20,-22},{-14,-8},{-26,-5},{-28,0}};
+static const int S1[][2] = {{40,0},{18,-2},{-20,-2},{-28,0}};
+static const int H2[][2] = {{32,0},{20,-6},{4,-16},{-12,-30},{-20,-27},{-14,-15},{-26,-8},{-32,-4},{-32,0}};
+static const int S2[][2] = {{34,0},{10,-4},{-30,-3},{-32,0}};
+static const int H3[][2] = {{38,0},{37,-18},{29,-19},{26,-6},{-8,-7},{-22,-12},{-30,-9},{-30,0}};
+static const int S3[][2] = {{26,0},{24,-3},{-8,-4},{-30,-3},{-30,0}};
+static const int H4[][2] = {{8,0},{22,-4},{38,-12},{22,-18},{2,-15},{-14,-12},{-26,-8},{-32,-3},{-32,0}};
+static const int S4[][2] = {{2,0},{0,-5},{-30,-4},{-32,0}};
+static const int H5[][2] = {{46,0},{24,-3},{16,-5},{30,-16},{12,-12},{-4,-9},{-24,-12},{-30,-6},{-30,0}};
+static const int S5[][2] = {{44,0},{10,-2},{-28,-2},{-30,0}};
+static const int H6[][2] = {{30,0},{22,-6},{8,-16},{-8,-26},{-28,-36},{-20,-20},{-14,-10},{-28,-6},{-30,0}};
+static const int S6[][2] = {{32,0},{6,-4},{-28,-3},{-30,0}};
+static const int H7[][2] = {{26,0},{14,-8},{-4,-20},{-10,-31},{-16,-22},{-18,-31},{-24,-19},{-28,-25},{-30,-8},{-32,0}};
+static const int S7[][2] = {{28,0},{8,-4},{-30,-3},{-32,0}};
+static const int H8[][2] = {{52,0},{38,-4},{12,-7},{-30,-8},{-46,-5},{-50,0}};
+static const int S8[][2] = {{48,0},{12,-3},{-46,-2},{-50,0}};
+static const int H9[][2] = {{42,0},{-4,-16},{-30,-22},{-36,-14},{-36,0}};
+static const int M9[][2] = {{30,0},{-6,-10},{-30,-14},{-34,-8},{-34,0}};
+static const int T9[][2] = {{16,0},{-8,-5},{-30,-7},{-34,-4},{-34,0}};
+static const int H10[][2] = {{36,0},{12,-4},{28,-22},{6,-20},{-6,-8},{-20,-10},{-26,-4},{-26,0}};
+static const int S10[][2] = {{34,0},{10,-2},{-24,-2},{-26,0}};
+
+static std::vector<Ship> build_ships() {
+	std::vector<Ship> v;
+	v.push_back(make_ship("1  Dagger", H1, N(H1), S1, N(S1), 34, 0, 22, 0, -28, 3, 2));
+	v.push_back(make_ship("2  Manta", H2, N(H2), S2, N(S2), 26, 0, 12, 0, -32, 3, 2));
+	v.push_back(make_ship("3  Hammerhead", H3, N(H3), S3, N(S3), 36, -15, 36, 15, -30, 4, 2));
+	Ship mandible = make_ship("4  Mandible", H4, N(H4), S4, N(S4), 0, 0, 0, 0, -32, 3, 2);
+	mandible.eye = true;
+	v.push_back(mandible);
+	v.push_back(make_ship("5  Trident", H5, N(H5), S5, N(S5), 38, 0, 26, 0, -30, 3, 2));
+	v.push_back(make_ship("6  Scythe", H6, N(H6), S6, N(S6), 24, 0, 10, 0, -30, 3, 2));
+	v.push_back(make_ship("7  Bat", H7, N(H7), S7, N(S7), 20, 0, 8, 0, -32, 3, 2));
+	Ship leviathan = make_ship("8  Leviathan", H8, N(H8), S8, N(S8), 44, 0, 30, 0, -50, 2, 2);
+	static const int spike_x[4] = { 20, 4, -12, -28 };
+	static const int spike_h[4] = { 14, 18, 18, 14 };
+	for(int i = 0; i < 4; i++) {
+		for(int side = -1; side <= 1; side += 2) {
+			Poly sp;
+			P a = { spike_x[i], side * 7 }, b = { spike_x[i] - 5, side * spike_h[i] },
+				c = { spike_x[i] - 10, side * 7 };
+			sp.push_back(a); sp.push_back(b); sp.push_back(c);
+			leviathan.back.push_back(sp);
+		}
+	}
+	v.push_back(leviathan);
+	Ship wedge = make_ship("9  Wedge", H9, N(H9), M9, N(M9), 26, 0, 8, 0, -36, 0, 2);
+	wedge.over.push_back(mirror(T9, N(T9)));
+	wedge.engines.clear();
+	P e1 = { -36, -10 }, e2 = { -36, 0 }, e3 = { -36, 10 };
+	wedge.engines.push_back(e1); wedge.engines.push_back(e2); wedge.engines.push_back(e3);
+	v.push_back(wedge);
+	v.push_back(make_ship("10  Forward-swept", H10, N(H10), S10, N(S10), 28, 0, 16, 0, -26, 3, 2));
+	return v;
+}
+
+static Uint8 mix(int a, int b, double t) { return (Uint8)(a + (b - a) * t + 0.5); }
+
+// Colour of one lighting band (3 highlight .. 0 shadow), pushed lighter (bias > 0)
+// or darker (bias < 0).
+static void tone_color(const Team &t, int band, double bias, Uint8 *rgb) {
+	const Uint8 *base = t.tone[band];
+	const Uint8 *target = bias >= 0 ? t.tone[3] : t.tone[0];
+	double amount = bias >= 0 ? bias : -bias;
+	for(int i = 0; i < 3; i++) rgb[i] = mix(base[i], target[i], amount);
+}
+
+// The vertical stretches of polygon p that lie on pixel column `col`.
+static void column_spans(const Poly &p, int col, std::vector<std::pair<int, int> > &out) {
+	double x = col + 0.5;
+	std::vector<double> ys;
+	size_t n = p.size();
+	for(size_t i = 0; i < n; i++) {
+		const P &a = p[i];
+		const P &b = p[(i + 1) % n];
+		if((a.x <= x && x < b.x) || (b.x <= x && x < a.x)) {
+			ys.push_back(a.y + (x - a.x) * (double)(b.y - a.y) / (b.x - a.x));
+		}
+	}
+	std::sort(ys.begin(), ys.end());
+	out.clear();
+	for(size_t i = 0; i + 1 < ys.size(); i += 2) {
+		int y0 = (int)ceil(ys[i]);
+		int y1 = (int)floor(ys[i + 1]);
+		if(y1 >= y0) out.push_back(std::make_pair(y0, y1));
+	}
+}
+
+static void draw_part(SDL_Surface *s, const Poly &p, const Team &t, double bias,
+	int outline_w, bool panels, int unit) {
+	int minx = p[0].x, maxx = p[0].x;
+	for(size_t i = 0; i < p.size(); i++) {
+		minx = std::min(minx, p[i].x);
+		maxx = std::max(maxx, p[i].x);
+	}
+	std::vector<std::pair<int, int> > spans;
+	for(int col = minx; col <= maxx; col++) {
+		column_spans(p, col, spans);
+		for(size_t k = 0; k < spans.size(); k++) {
+			int y0 = spans[k].first, y1 = spans[k].second;
+			int h = y1 - y0 + 1;
+			int heights[3] = { std::max(1, (int)(h * 0.14 + 0.5)),
+				(int)(h * 0.28 + 0.5), (int)(h * 0.30 + 0.5) };
+			static const int bands[3] = { 3, 2, 1 };
+			int y = y0;
+			Uint8 rgb[3];
+			for(int b = 0; b < 3 && y <= y1; b++) {
+				if(heights[b] <= 0) continue;
+				int yb = std::min(y1, y + heights[b] - 1);
+				tone_color(t, bands[b], bias, rgb);
+				vlineRGBA(s, col, y, yb, rgb[0], rgb[1], rgb[2], 255);
+				y = yb + 1;
+			}
+			if(y <= y1) {
+				tone_color(t, 0, bias, rgb);
+				bool rim = h >= 7;
+				vlineRGBA(s, col, y, rim ? y1 - 1 : y1, rgb[0], rgb[1], rgb[2], 255);
+				if(rim) {
+					// A little bounced light along the lower edge.
+					vlineRGBA(s, col, y1, y1, mix(rgb[0], t.glow[0], 0.35),
+						mix(rgb[1], t.glow[1], 0.35), mix(rgb[2], t.glow[2], 0.35), 255);
+				}
+			}
+		}
+	}
+	if(panels) {
+		int step = unit * 9 / 10;
+		for(int col = minx + step; col < maxx - 2; col += step) {
+			column_spans(p, col, spans);
+			for(size_t k = 0; k < spans.size(); k++) {
+				if(spans[k].second - spans[k].first >= 10) {
+					vlineRGBA(s, col, spans[k].first + 3, spans[k].second - 3, 8, 10, 18, 120);
+				}
+			}
+		}
+	}
+	size_t n = p.size();
+	for(size_t i = 0; i < n; i++) {
+		const P &a = p[i];
+		const P &b = p[(i + 1) % n];
+		thickLineRGBA(s, a.x, a.y, b.x, b.y, outline_w, 8, 10, 18, 255);
+	}
+}
+
+static Poly to_px(const Poly &p, int cx, int cy, int unit, int dir) {
+	Poly out;
+	for(size_t i = 0; i < p.size(); i++) {
+		P v = { cx + dir * (int)floor(p[i].x * unit / 10.0 + 0.5),
+			cy + (int)floor(p[i].y * unit / 10.0 + 0.5) };
+		out.push_back(v);
+	}
+	return out;
+}
+
+static void draw_ship(SDL_Surface *s, const Ship &sh, const Team &t, int cx, int cy,
+	int unit, int dir, bool detail) {
+	int ow = unit >= 16 ? 2 : 1;
+	if(detail) {
+		for(int i = 0; i < 8; i++) {
+			filledEllipseRGBA(s, cx, cy, unit * 5 - i * unit / 2, unit * 3 - i * unit / 3,
+				t.glow[0], t.glow[1], t.glow[2], 5);
+		}
+	}
+	int er = std::max(1, sh.engine_r * unit / 10);
+	std::vector<P> nozzles;
+	for(size_t i = 0; i < sh.engines.size(); i++) {
+		P n = { cx + dir * (int)floor(sh.engines[i].x * unit / 10.0 + 0.5),
+			cy + (int)floor(sh.engines[i].y * unit / 10.0 + 0.5) };
+		nozzles.push_back(n);
+		for(int k = 0; k < 4; k++) {
+			int len = (int)(er * (8.0 - k * 1.8));
+			int w = std::max(1, (int)(er * (1.3 - k * 0.25)));
+			filledTrigonRGBA(s, n.x, n.y - w, n.x, n.y + w, n.x - dir * len, n.y,
+				t.glow[0], t.glow[1], t.glow[2], 36 + k * 30);
+		}
+		filledCircleRGBA(s, n.x, n.y, er * 2, t.glow[0], t.glow[1], t.glow[2], 46);
+	}
+	for(size_t i = 0; i < sh.back.size(); i++) {
+		draw_part(s, to_px(sh.back[i], cx, cy, unit, dir), t, -0.30, ow, false, unit);
+	}
+	draw_part(s, to_px(sh.hull, cx, cy, unit, dir), t, 0.0, ow, detail, unit);
+	for(size_t i = 0; i < sh.over.size(); i++) {
+		draw_part(s, to_px(sh.over[i], cx, cy, unit, dir), t, 0.16 * (i + 1), 1, false, unit);
+	}
+	if(sh.has_accent) {
+		int x1 = cx + dir * (int)floor(sh.ax1 * unit / 10.0 + 0.5);
+		int y1 = cy + (int)floor(sh.ay1 * unit / 10.0 + 0.5);
+		int x2 = cx + dir * (int)floor(sh.ax2 * unit / 10.0 + 0.5);
+		int y2 = cy + (int)floor(sh.ay2 * unit / 10.0 + 0.5);
+		thickLineRGBA(s, x1, y1, x2, y2, detail ? 4 : 3, t.accent[0], t.accent[1], t.accent[2], 70);
+		thickLineRGBA(s, x1, y1, x2, y2, detail ? 2 : 1, t.accent[0], t.accent[1], t.accent[2], 255);
+	}
+	if(sh.eye) {
+		filledCircleRGBA(s, cx, cy, unit * 6 / 10 + 2, t.accent[0], t.accent[1], t.accent[2], 60);
+		filledEllipseRGBA(s, cx, cy, 3 * unit / 10 + 2, unit / 10 + 1,
+			t.accent[0], t.accent[1], t.accent[2], 255);
+		filledCircleRGBA(s, cx, cy, std::max(1, unit / 10), 255, 255, 255, 255);
+	}
+	for(size_t i = 0; i < nozzles.size(); i++) {
+		filledCircleRGBA(s, nozzles[i].x, nozzles[i].y, er + 1, mix(t.glow[0], 255, 0.5),
+			mix(t.glow[1], 255, 0.5), mix(t.glow[2], 255, 0.5), 255);
+		filledCircleRGBA(s, nozzles[i].x, nozzles[i].y, std::max(1, er / 2), 255, 255, 255, 255);
+	}
+}
+
+int main() {
+	std::vector<Ship> ships = build_ships();
+	const int cols = 5, cell_w = 400, cell_h = 330;
+	int W = cols * cell_w, H = 2 * cell_h;
+	SDL_Surface *s = SDL_CreateRGBSurface(SDL_SWSURFACE, W, H, 32,
+		0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
+	for(int yy = 0; yy < H; yy++) {
+		int row_y = yy % cell_h;
+		SDL_Rect r = { 0, (Sint16)yy, (Uint16)W, 1 };
+		SDL_FillRect(s, &r, SDL_MapRGB(s->format, 36 + row_y / 10, 34 + row_y / 11, 66 + row_y / 8));
+	}
+	unsigned int seed = 777;
+	for(int i = 0; i < 220; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		int sx = seed % W;
+		seed = seed * 1664525u + 1013904223u;
+		pixelRGBA(s, sx, seed % H, 225, 230, 250, 110);
+	}
+	for(size_t i = 0; i < ships.size(); i++) {
+		int cx = (int)(i % cols) * cell_w, cy = (int)(i / cols) * cell_h;
+		vlineRGBA(s, cx, cy, cy + cell_h - 1, 120, 130, 170, 200);
+		hlineRGBA(s, cx, cx + cell_w - 1, cy, 120, 130, 170, 200);
+		stringRGBA(s, cx + 12, cy + 10, ships[i].name, 245, 245, 255, 255);
+		draw_ship(s, ships[i], TEAM_BLUE, cx + cell_w / 2, cy + 125, 24, 1, true);
+		stringRGBA(s, cx + 12, cy + 245, "in game size:", 190, 198, 225, 255);
+		draw_ship(s, ships[i], TEAM_BLUE, cx + 110, cy + 295, 10, 1, false);
+		draw_ship(s, ships[i], TEAM_ORANGE, cx + 290, cy + 295, 10, -1, false);
+	}
+	stringRGBA(s, W - 210, H - 14, "Style B - painted metal", 190, 198, 225, 255);
+	SDL_SaveBMP(s, "designs_b.bmp");
+	return 0;
+}

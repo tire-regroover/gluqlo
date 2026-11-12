@@ -1,9 +1,23 @@
 /*
-* Gluqlo: Fliqlo for Linux
-* https://github.com/alexanderk23/gluqlo
+* Gluqlo L-Space: a flip clock that lives inside a night landscape
+* https://github.com/tire-regroover/gluqlo (branch l-space)
+*
+* L-Space is a fork of Gluqlo (Fliqlo for Linux) by Alexander Kovalenko,
+* https://github.com/alexanderk23/gluqlo, which is itself based on noflipqlo by
+* Jacek Kuźniarski. The flip cards, the flip animation and the licence come from
+* those projects. What is new in L-Space is everything behind and around the cards:
+* a procedural backdrop with seasons and weather, and well over a hundred scheduled
+* scenery events (things that cross the sky, happen on the hills, or take over the
+* whole screen) including ship battles with nine weapon types. See README.md and
+* NOTES.md for the details and for how to add an event.
 *
 * Copyright (c) 2010-2012 Kuźniarski Jacek
 * Copyright (c) 2014 Alexander Kovalenko
+* Copyright (c) 2026 tire-regroover (L-Space scenery, weather and events)
+*
+* L-Space was written with the help of AI coding assistants: GitHub Copilot
+* (Anthropic Claude), DeepSeek and Qwen. Their output was directed and reviewed
+* by tire-regroover.
 *
 * Permission to use, copy, modify, and distribute this software for any
 * purpose with or without fee is hereby granted, provided that the above
@@ -18,6 +32,8 @@
 * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
+#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <X11/Xlib.h>
@@ -34,7 +50,7 @@
 #define FONT "/usr/share/gluqlo/gluqlo.ttf"
 #endif
 
-const char* TITLE = "Gluqlo 1.1";
+const char* TITLE = "Gluqlo L-Space";
 const int DEFAULT_WIDTH = 1024;
 const int DEFAULT_HEIGHT = 768;
 
@@ -60,10 +76,10 @@ TTF_Font *font_time = NULL;
 TTF_Font *font_mode = NULL;
 TTF_Font *font_date = NULL;
 
-const SDL_Color FONT_COLOR = { 0xda, 0xda, 0xe2 };
-const SDL_Color DATE_COLOR = { 0xc6, 0xc2, 0xcf };
-const SDL_Color BACKGROUND_COLOR = { 0x12, 0x14, 0x1d };
-const SDL_Color CARD_BORDER_COLOR = { 0x37, 0x3d, 0x4e };
+const SDL_Color FONT_COLOR = { 0xda, 0xda, 0xe2, 0 };
+const SDL_Color DATE_COLOR = { 0xc6, 0xc2, 0xcf, 0 };
+const SDL_Color BACKGROUND_COLOR = { 0x12, 0x14, 0x1d, 0 };
+const SDL_Color CARD_BORDER_COLOR = { 0x37, 0x3d, 0x4e, 0 };
 
 SDL_Surface *screen;
 
@@ -73,8 +89,6 @@ SDL_Rect minBackground;
 SDL_Rect bgrect;
 SDL_Surface *bg;
 static SDL_Surface *backdrop_base;
-static SDL_Surface *digit_glyphs[10];
-static SDL_Surface *ampm_glyphs[2];
 
 // draw rounded box
 // see http://lists.libsdl.org/pipermail/sdl-libsdl.org/2006-December/058868.html
@@ -139,35 +153,15 @@ void fill_rounded_box_b(SDL_Surface* dst, SDL_Rect *coords, int r, SDL_Color col
 }
 
 void render_ampm(SDL_Surface *surface, SDL_Rect *rect, int pm) {
+	char mode[3];
 	SDL_Rect coords;
-	SDL_Surface *ampm = ampm_glyphs[pm ? 1 : 0];
-	if(!ampm) return;
+	snprintf(mode, 3, "%cM", pm ? 'P' : 'A');
+	SDL_Surface *ampm = TTF_RenderText_Blended(font_mode, mode, FONT_COLOR);
 	int offset = rect->h * 0.127;
 	coords.x = rect->x + rect->h * 0.07;
 	coords.y = rect->y + (pm ? rect->h - offset - ampm->h : offset);
 	SDL_BlitSurface(ampm, 0, surface, &coords);
-}
-
-// Pre-render the clock digits and AM/PM labels once, since the time glyphs
-// don't change between ambient frames. TTF_RenderGlyph_Blended is expensive
-// to call every frame.
-static void init_glyph_cache() {
-	for(int i = 0; i < 10; i++) {
-		digit_glyphs[i] = TTF_RenderGlyph_Blended(font_time, '0' + i, FONT_COLOR);
-	}
-	ampm_glyphs[0] = TTF_RenderText_Blended(font_mode, "AM", FONT_COLOR);
-	ampm_glyphs[1] = TTF_RenderText_Blended(font_mode, "PM", FONT_COLOR);
-}
-
-static void free_glyph_cache() {
-	for(int i = 0; i < 10; i++) {
-		if(digit_glyphs[i]) SDL_FreeSurface(digit_glyphs[i]);
-		digit_glyphs[i] = NULL;
-	}
-	for(int i = 0; i < 2; i++) {
-		if(ampm_glyphs[i]) SDL_FreeSurface(ampm_glyphs[i]);
-		ampm_glyphs[i] = NULL;
-	}
+	SDL_FreeSurface(ampm);
 }
 
 static double hash_noise(int x, int y, Uint32 seed) {
@@ -191,15 +185,6 @@ static double smooth_noise(double x, double y, Uint32 seed) {
 	return top * (1.0 - fy) + bottom * fy;
 }
 
-// Ridged noise: folds the field at its midpoint so the crests are sharp and
-// the flanks long. Smooth noise alone gives rounded humps, and a row of
-// rounded humps reads as a line of bubbles rather than a skyline. The fold is
-// left unsquared: squaring rounds the crest back off again.
-static double ridged_noise(double x, double y, Uint32 seed) {
-	double n = smooth_noise(x, y, seed);
-	return 1.0 - fabs(n * 2.0 - 1.0);
-}
-
 static Uint8 blend_channel(Uint8 from, Uint8 to, double amount) {
 	if(amount < 0.0) amount = 0.0;
 	if(amount > 1.0) amount = 1.0;
@@ -211,6 +196,264 @@ static double smooth_step(double edge0, double edge1, double value) {
 	if(t < 0.0) t = 0.0;
 	if(t > 1.0) t = 1.0;
 	return t * t * (3.0 - 2.0 * t);
+}
+
+// Height of the three ground ridges as a fraction of the screen height at
+// horizontal position nx (0..1). Effects use it to sit things on the ground.
+enum { RIDGE_FAR, RIDGE_MIDDLE, RIDGE_NEAR };
+
+static double ridge_height(int layer, double nx) {
+	switch(layer) {
+		case RIDGE_FAR:
+			return 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
+		case RIDGE_MIDDLE:
+			return 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
+		default:
+			return 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+	}
+}
+
+/*
+ * Scheduled effects
+ *
+ * Time is split into slots of `cycle` ms. Each slot gets a seed and may be
+ * gated off (it only runs when seed % gate == 0). When a slot is active the
+ * effect runs for `duration` ms (plus seeded jitter), either from the start
+ * of the slot or at a seeded offset inside it, fading in and out.
+ *
+ * Effects that share a non-zero `group` never overlap: when their runs
+ * collide, the one with the lowest `priority` number plays and the others
+ * skip that slot entirely (so nothing pops in half way through). `accept`
+ * lets an effect declare that a slot has nothing to show, which keeps empty
+ * slots from blocking other effects.
+ *
+ * Effects call effect_window() and draw only if it returns true. With
+ * `-effect NAME[:KIND]` only that effect runs, back to back, ignoring gates.
+ *
+ * To add an effect: write render_xxx() starting with effect_window(), add an
+ * EffectSpec below, add it to effect_table[], and call it from
+ * render_backdrop() (or render_clock() for overlays drawn over the cards).
+ */
+enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
+
+#define RARE_SKY_KINDS 69
+#define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
+#define HILL_EVENT_KINDS 37         // things that happen on the hills (see render_hill_event)
+
+typedef struct {
+	const char *name;
+	Uint32 cycle;          // slot length (ms)
+	int seed_style;        // 0: slot * 2246822519u + 3266489917u, 1: slot * 2654435761u + 0x9e3779b9u
+	Uint32 gate;           // run only in slots where seed % gate == 0 (0: every slot)
+	bool gate_after_mix;   // test the gate on the mixed seed instead of the raw one
+	Uint32 mix_mul;        // if non-zero, scramble the seed using this multiplier
+	Uint32 duration;       // base run time (ms)
+	Uint32 jitter;         // extra run time: (seed >> jitter_shift) % jitter
+	int jitter_shift;
+	bool random_start;     // start at a seeded offset in the slot instead of at its beginning
+	double fade_in;        // ms
+	double fade_out;       // ms
+	int kind_count;        // number of forceable kinds for -effect NAME:KIND (0: none)
+	int group;             // GROUP_*: effects in the same group never overlap
+	int priority;          // within a group the lowest number wins (keep unique per group)
+	bool (*accept)(Uint32 slot, Uint32 seed); // optional: false means this slot shows nothing
+} EffectSpec;
+
+typedef struct {
+	Uint32 slot;
+	Uint32 seed;
+	Uint32 phase;          // ms since the effect started
+	Uint32 duration;
+	double progress;       // phase / duration
+	double fade;           // 0..1 fade in/out factor
+} EffectWindow;
+
+typedef struct {
+	Uint32 seed;
+	Uint32 duration;
+	Uint64 start;          // absolute start time (ms)
+} EffectRun;
+
+// Rare sky kinds from RARE_SKY_CLASSIC_KINDS up are the rarer ones: only 1 slot in 7 shows them.
+static bool rare_sky_accept(Uint32 slot, Uint32 seed) {
+	int kind = (seed >> 24) % RARE_SKY_KINDS;
+	if(kind < RARE_SKY_CLASSIC_KINDS) return true;
+	return (slot * 2654435761u + 0x9e3779b9u) % 7 == 0;
+}
+
+// Fullscreen kinds 4 and 5 are deliberate quiet slots (they keep the effect rare).
+static bool fullscreen_accept(Uint32 slot, Uint32 seed) {
+	(void)slot;
+	return (seed >> 5) % 6 < 4;
+}
+
+static const EffectSpec EFFECT_ALIEN_WEATHER = {
+	"alien_weather", 300000, 0, 4, false, 2246822519u,
+	52000, 18000, 8, false, 5000, 7000, 5, GROUP_TAKEOVER, 1, NULL };
+static const EffectSpec EFFECT_WORLD_JUMP = {
+	"world_jump", 360000, 0, 5, false, 2654435761u,
+	7800, 0, 0, false, 350, 450, 4, GROUP_TAKEOVER, 0, NULL };
+static const EffectSpec EFFECT_LONG_SCENE = {
+	"long_scene", 210000, 0, 5, false, 2246822519u,
+	72000, 28000, 8, true, 6000, 7000, 5, GROUP_TAKEOVER, 2, NULL };
+static const EffectSpec EFFECT_FULLSCREEN = {
+	"fullscreen", 90000, 1, 0, false, 0,
+	6500, 4000, 9, true, 1300, 1200, 4, GROUP_TAKEOVER, 3, fullscreen_accept };
+static const EffectSpec EFFECT_FLEET_BATTLE = {
+	"fleet_battle", 240000, 1, 6, false, 0,
+	60000, 0, 0, false, 1400, 2200, 0, GROUP_SKY, 0, NULL };
+static const EffectSpec EFFECT_BACKGROUND_BATTLE = {
+	"background_battle", 90000, 1, 9, false, 0,
+	32000, 0, 0, false, 900, 1700, 0, GROUP_SKY, 1, NULL };
+static const EffectSpec EFFECT_RARE_SKY = {
+	"rare_sky", 48000, 0, 3, true, 2246822519u,
+	4200, 3200, 8, true, 350, 400, RARE_SKY_KINDS, GROUP_SKY, 2, rare_sky_accept };
+static const EffectSpec EFFECT_BATTLE_FLYBY = {
+	"battle_flyby", 60000, 1, 6, false, 0,
+	14000, 0, 0, false, 900, 1100, 0, GROUP_SKY, 4, NULL };
+static const EffectSpec EFFECT_DOGFIGHT = {
+	"dogfight", 75000, 1, 4, false, 0,
+	18000, 0, 0, true, 900, 1100, 0, GROUP_SKY, 3, NULL };
+static const EffectSpec EFFECT_HILL_EVENT = {
+	"hill_event", 120000, 0, 2, false, 2654435761u,
+	36000, 22000, 8, true, 4000, 5000, HILL_EVENT_KINDS, GROUP_TAKEOVER, 4, NULL };
+static const EffectSpec EFFECT_FOREGROUND = {
+	"foreground", 180000, 1, 2, false, 2246822519u,
+	6500, 0, 0, false, 650, 900, 4, GROUP_NONE, 0, NULL };
+static const EffectSpec EFFECT_SCREEN_FADE = {
+	"screen_fade", 300000, 1, 4, false, 0,
+	12000, 0, 0, true, 1800, 1800, 0, GROUP_NONE, 0, NULL };
+
+static const EffectSpec *const effect_table[] = {
+	&EFFECT_ALIEN_WEATHER, &EFFECT_WORLD_JUMP, &EFFECT_LONG_SCENE,
+	&EFFECT_RARE_SKY, &EFFECT_FULLSCREEN, &EFFECT_FOREGROUND,
+	&EFFECT_SCREEN_FADE, &EFFECT_BATTLE_FLYBY, &EFFECT_BACKGROUND_BATTLE,
+	&EFFECT_FLEET_BATTLE, &EFFECT_DOGFIGHT, &EFFECT_HILL_EVENT
+};
+static const size_t effect_count = sizeof(effect_table) / sizeof(effect_table[0]);
+
+static const EffectSpec *forced_effect = NULL;
+static int forced_kind = -1;
+
+/*
+ * Scene time is the clock every effect, season and weather runs on. It is the
+ * SDL tick count plus a per-launch offset, so each launch starts at a
+ * different point of the season/weather/effect schedule. -seed N makes the
+ * offset reproducible; -effect NAME starts it at 0.
+ */
+static Uint32 scene_offset = 0;
+static const Uint32 SCENE_OFFSET_RANGE = 3600000;
+
+static Uint32 scene_time(void) {
+	return SDL_GetTicks() + scene_offset;
+}
+
+static Uint32 scene_offset_from_seed(Uint32 seed) {
+	seed ^= seed >> 16;
+	seed *= 2246822519u;
+	seed ^= seed >> 13;
+	return seed % SCENE_OFFSET_RANGE;
+}
+
+static Uint32 random_scene_offset(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
+	return scene_offset_from_seed((Uint32)now.tv_nsec ^ ((Uint32)now.tv_sec * 2654435761u));
+}
+
+static const EffectSpec *find_effect(const char *name) {
+	for(size_t i = 0; i < effect_count; i++) {
+		if(strcmp(effect_table[i]->name, name) == 0) return effect_table[i];
+	}
+	return NULL;
+}
+
+// Returns `kind`, or the kind requested with -effect NAME:KIND for this effect.
+static int effect_kind(const EffectSpec *spec, int kind) {
+	return (forced_effect == spec && forced_kind >= 0) ? forced_kind : kind;
+}
+
+// Slot length used by -effect NAME: back to back with a short pause.
+static Uint32 effect_cycle(const EffectSpec *spec, bool forced) {
+	return forced ? spec->duration + spec->jitter + 3000 : spec->cycle;
+}
+
+// Works out whether `slot` of `spec` runs, and when. Forced runs ignore gating.
+static bool effect_run(const EffectSpec *spec, Uint32 slot, bool forced, EffectRun *run) {
+	Uint32 cycle = effect_cycle(spec, forced);
+	Uint32 seed = spec->seed_style
+		? slot * 2654435761u + 0x9e3779b9u
+		: slot * 2246822519u + 3266489917u;
+	if(!forced && spec->gate && !spec->gate_after_mix && seed % spec->gate != 0) return false;
+	if(spec->mix_mul) {
+		seed ^= seed >> 15;
+		seed *= spec->mix_mul;
+		seed ^= seed >> 13;
+	}
+	if(!forced && spec->gate && spec->gate_after_mix && seed % spec->gate != 0) return false;
+	if(!forced && spec->accept && !spec->accept(slot, seed)) return false;
+
+	Uint32 duration = spec->duration;
+	if(spec->jitter) duration += (seed >> spec->jitter_shift) % spec->jitter;
+	Uint32 start = 0;
+	if(!forced && spec->random_start && cycle > duration) {
+		start = (seed >> 16) % (cycle - duration);
+	}
+	run->seed = seed;
+	run->duration = duration;
+	run->start = (Uint64)slot * cycle + start;
+	return true;
+}
+
+// True if a higher priority effect of the same group runs at any point during `run`.
+static bool effect_blocked(const EffectSpec *spec, const EffectRun *run) {
+	if(spec->group == GROUP_NONE) return false;
+	Uint64 end = run->start + run->duration;
+	for(size_t i = 0; i < effect_count; i++) {
+		const EffectSpec *other = effect_table[i];
+		if(other == spec || other->group != spec->group || other->priority >= spec->priority) continue;
+		// A run never leaves its own slot, so only the slots the window touches matter.
+		Uint64 first_slot = run->start / other->cycle;
+		Uint64 last_slot = (end - 1) / other->cycle;
+		for(Uint64 slot = first_slot; slot <= last_slot; slot++) {
+			EffectRun other_run;
+			if(effect_run(other, (Uint32)slot, false, &other_run)
+				&& other_run.start < end
+				&& other_run.start + other_run.duration > run->start
+				&& !effect_blocked(other, &other_run)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+static bool effect_window(const EffectSpec *spec, Uint32 ticks, EffectWindow *window) {
+	bool forced = forced_effect == spec;
+	if(forced_effect && !forced) return false;
+
+	Uint32 cycle = effect_cycle(spec, forced);
+	Uint32 slot = ticks / cycle;
+	EffectRun run;
+	if(!effect_run(spec, slot, forced, &run)) return false;
+	if(ticks < run.start || ticks >= run.start + run.duration) return false;
+	if(!forced && effect_blocked(spec, &run)) return false;
+
+	Uint32 phase = (Uint32)(ticks - run.start);
+	window->slot = slot;
+	window->seed = run.seed;
+	window->phase = phase;
+	window->duration = run.duration;
+	window->progress = (double)phase / run.duration;
+	window->fade = smooth_step(0.0, spec->fade_in, phase)
+		* (1.0 - smooth_step(run.duration - spec->fade_out, run.duration, phase));
+	return true;
+}
+
+// True while `spec` is drawing something at `ticks`.
+static bool effect_is_active(const EffectSpec *spec, Uint32 ticks) {
+	EffectWindow window;
+	return effect_window(spec, ticks, &window);
 }
 
 typedef struct {
@@ -225,6 +468,35 @@ typedef struct {
 	double aurora;
 	double palette[3];
 } SceneWeather;
+
+// Rain and snow must never fall together. When a change swaps one for the
+// other, the old one fades out over the first part of the change, the air is
+// dry for a moment, and only then does the new one fade in. Changes that keep
+// the same kind of precipitation (light rain to heavy rain) just blend.
+static double precipitation_level(const double *previous, const double *current,
+	int channel, int other_channel, double blend) {
+	double from = previous[channel];
+	double to = current[channel];
+	if(previous[other_channel] <= 0.02 && current[other_channel] <= 0.02) {
+		return from + (to - from) * blend;
+	}
+	return from * (1.0 - smooth_step(0.0, 0.42, blend))
+		+ to * smooth_step(0.58, 1.0, blend);
+}
+
+// Weather 0 in weather_levels[] is the orange sunset. It is a treat, so only one
+// pick in SUNSET_ONE_IN keeps it; the others become one of the later weathers.
+// Raise SUNSET_ONE_IN to see it less often.
+#define WEATHER_SUNSET 0
+#define SUNSET_ONE_IN 5
+
+static int pick_weather(Uint32 seed, int count) {
+	int pick = seed % count;
+	if(pick == WEATHER_SUNSET && (seed >> 12) % SUNSET_ONE_IN != 0) {
+		pick = 2 + (seed >> 5) % (count - 2);
+	}
+	return pick;
+}
 
 static SceneWeather get_scene_weather(Uint32 ticks) {
 	static const double weather_levels[][11] = {
@@ -243,6 +515,7 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	const Uint32 season_transition = 20000;
 	const Uint32 weather_duration = 65000;
 	const Uint32 weather_transition = 12000;
+	const int weather_count = sizeof(weather_levels) / sizeof(weather_levels[0]);
 	SceneWeather scene = { { 0.0, 0.0, 0.0, 0.0 },
 		0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, { 0.0, 0.0, 0.0 } };
 
@@ -254,38 +527,25 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	scene.season[season] = 1.0 - season_blend;
 	scene.season[(season + 1) % 4] = season_blend;
 
-	// Each season draws from its own pool of presets so that rain, snow and
-	// clear skies stay tied to the season instead of appearing at random.
-	static const int season_weather_pool[4][4] = {
-		{ 0, 2, 3, 9 },  // spring: clear, cloudy, light rain, fog
-		{ 0, 1, 4, 5 },  // summer: clear, sunset, heavy rain, thunderstorm
-		{ 2, 3, 4, 9 },  // autumn: cloudy, drizzle, rain, fog
-		{ 6, 7, 2, 8 }   // winter: light snow, blizzard, overcast, aurora
-	};
-	const int pool_size = 4;
-	int dominant = 0;
-	for(int i = 1; i < 4; i++) {
-		if(scene.season[i] > scene.season[dominant]) dominant = i;
-	}
-	const int *pool = season_weather_pool[dominant];
-
 	Uint32 weather_slot = ticks / weather_duration;
 	Uint32 current_seed = weather_slot * 2654435761u + 0x9e3779b9u;
 	Uint32 previous_seed = (weather_slot - 1) * 2246822519u + 3266489917u;
-	int current = pool[current_seed % pool_size];
-	int previous = pool[previous_seed % pool_size];
+	int current = pick_weather(current_seed, weather_count);
+	int previous = pick_weather(previous_seed, weather_count);
 	if(previous == current) {
-		previous = pool[(previous_seed % pool_size + 1
-			+ (current_seed >> 8) % (pool_size - 1)) % pool_size];
+		// Any other weather, but never the sunset (that would bypass its rarity).
+		int other = 1 + (current_seed >> 8) % (weather_count - 1);
+		if(other == current) other = other % (weather_count - 1) + 1;
+		previous = other;
 	}
 	Uint32 weather_phase = ticks % weather_duration;
 	double weather_blend = smooth_step(0.0, weather_transition, weather_phase);
 	scene.cloud = weather_levels[previous][0]
 		+ (weather_levels[current][0] - weather_levels[previous][0]) * weather_blend;
-	scene.rain = weather_levels[previous][1]
-		+ (weather_levels[current][1] - weather_levels[previous][1]) * weather_blend;
-	scene.snow = weather_levels[previous][2]
-		+ (weather_levels[current][2] - weather_levels[previous][2]) * weather_blend;
+	scene.rain = precipitation_level(weather_levels[previous], weather_levels[current],
+		1, 2, weather_blend);
+	scene.snow = precipitation_level(weather_levels[previous], weather_levels[current],
+		2, 1, weather_blend);
 	scene.sunshine = weather_levels[previous][3]
 		+ (weather_levels[current][3] - weather_levels[previous][3]) * weather_blend;
 	scene.fog = weather_levels[previous][4]
@@ -304,27 +564,32 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 	return scene;
 }
 
-static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
-	const SceneWeather *weather, int scale) {
-	if(weather->aurora > 0.01) {
-		for(int band = 0; band < 3; band++) {
-			int previous_x = 0;
-			int previous_y = surface->h * (19 + band * 12) / 100;
-			for(int segment = 1; segment <= 24; segment++) {
-				int x = surface->w * segment / 24;
-				double nx = (double)x / surface->w;
-				int y = surface->h * (19 + band * 12) / 100
-					+ (int)(sin(nx * 6.28318530718 + ticks / (1100.0 + band * 270)
-						+ band * 1.9) * scale * (0.03 + band * 0.008));
-				Uint8 alpha = (Uint8)(weather->aurora * (28 - band * 5));
-				thickLineRGBA(surface, previous_x, previous_y, x, y, 2,
-					(Uint8)(70 + band * 24), (Uint8)(164 + band * 18),
-					(Uint8)(137 + band * 30), alpha);
-				previous_x = x;
-				previous_y = y;
-			}
+// Three drifting aurora ribbons; `strength` is 0..1. Used by the aurora weather
+// and by the fullscreen aurora event.
+static void draw_aurora(SDL_Surface *surface, Uint32 ticks, int scale, double strength) {
+	if(strength <= 0.01) return;
+	for(int band = 0; band < 3; band++) {
+		int previous_x = 0;
+		int previous_y = surface->h * (19 + band * 12) / 100;
+		for(int segment = 1; segment <= 24; segment++) {
+			int x = surface->w * segment / 24;
+			double nx = (double)x / surface->w;
+			int y = surface->h * (19 + band * 12) / 100
+				+ (int)(sin(nx * 6.28318530718 + ticks / (1100.0 + band * 270)
+					+ band * 1.9) * scale * (0.03 + band * 0.008));
+			Uint8 alpha = (Uint8)(strength * (28 - band * 5));
+			thickLineRGBA(surface, previous_x, previous_y, x, y, 2,
+				(Uint8)(70 + band * 24), (Uint8)(164 + band * 18),
+				(Uint8)(137 + band * 30), alpha);
+			previous_x = x;
+			previous_y = y;
 		}
 	}
+}
+
+static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
+	const SceneWeather *weather, int scale) {
+	draw_aurora(surface, ticks, scale, weather->aurora);
 
 	if(weather->fog > 0.01) {
 		for(int band = 0; band < 3; band++) {
@@ -366,333 +631,1054 @@ static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
 			}
 		}
 	}
+}
 
-	// Rainbow: appears when rain and sunshine overlap (sunshower).
-	if(weather->rain > 0.15 && weather->sunshine > 0.25) {
-		double rainbow_strength = weather->rain * weather->sunshine;
-		int rainbow_x = surface->w / 2;
-		int rainbow_y = surface->h * 68 / 100;
-		int base_radius = scale / 3;
-		static const Uint8 rainbow_colors[6][3] = {
-			{ 226, 66, 60 }, { 240, 150, 54 }, { 244, 218, 74 },
-			{ 96, 190, 96 }, { 74, 148, 226 }, { 150, 96, 210 }
+static void render_world_jump(SDL_Surface *surface, Uint32 ticks, int scale) {
+		EffectWindow window;
+		if(!effect_window(&EFFECT_WORLD_JUMP, ticks, &window)) return;
+		Uint32 seed = window.seed;
+		Uint32 phase = window.phase;
+		double progress = window.progress;
+		double fade = window.fade;
+		int center_x = surface->w / 2 + (int)(sin(ticks / 115.0) * scale * 0.012);
+		int center_y = surface->h * 43 / 100;
+		double tunnel_open = sin(progress * 3.14159265359);
+		int portal_x_radius = scale * (0.045 + tunnel_open * 0.22);
+		int portal_y_radius = scale * (0.035 + tunnel_open * 0.15);
+		Uint8 tunnel_alpha = (Uint8)(118 * fade * (0.35 + tunnel_open * 0.65));
+
+		for(int ring = 0; ring < 9; ring++) {
+			double ring_scale = 0.34 + ring * 0.105;
+			int radius_x = (int)(portal_x_radius * ring_scale);
+			int radius_y = (int)(portal_y_radius * ring_scale);
+			Uint8 ring_alpha = (Uint8)(tunnel_alpha * (1.0 - ring * 0.065));
+			ellipseRGBA(surface, center_x, center_y, radius_x, radius_y,
+				(Uint8)(100 + ring * 14), (Uint8)(151 + ring * 9),
+				(Uint8)(218 + ring * 4), ring_alpha);
+		}
+		for(int streak = 0; streak < 48; streak++) {
+			unsigned int streak_seed = seed + streak * 2246822519u;
+			double angle = (streak_seed % 6283) / 1000.0 + ticks / 700.0;
+			double travel = fmod((streak_seed >> 8) / 4294967295.0 + progress * 1.8, 1.0);
+			double distance = portal_x_radius + travel * scale * 0.38;
+			int star_x = center_x + (int)(cos(angle) * distance);
+			int star_y = center_y + (int)(sin(angle) * distance * 0.68);
+			int tail_x = center_x + (int)(cos(angle) * (distance - scale * 0.035));
+			int tail_y = center_y + (int)(sin(angle) * (distance - scale * 0.035) * 0.68);
+			thickLineRGBA(surface, tail_x, tail_y, star_x, star_y, 1,
+				(Uint8)(155 + streak % 5 * 18), (Uint8)(182 + streak % 4 * 16),
+				235, (Uint8)(tunnel_alpha * 0.62));
+		}
+
+		double destination_mix = smooth_step(3900.0, 5150.0, phase)
+			* (1.0 - smooth_step(5850.0, 7200.0, phase));
+		static const Uint8 destination_palette[4][3] = {
+			{ 36, 90, 112 }, { 128, 66, 75 }, { 74, 103, 68 }, { 98, 79, 132 }
 		};
-		for(int band = 0; band < 6; band++) {
-			int radius = base_radius + band * scale / 60;
-			Uint8 alpha = (Uint8)(rainbow_strength * (26 - band * 2));
-			arcRGBA(surface, rainbow_x, rainbow_y, radius, 180, 360,
-				rainbow_colors[band][0], rainbow_colors[band][1],
-				rainbow_colors[band][2], alpha);
+		int destination = effect_kind(&EFFECT_WORLD_JUMP, seed % 4);
+		Uint8 sky_alpha = (Uint8)(84 * destination_mix * fade);
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+			destination_palette[destination][0], destination_palette[destination][1],
+			destination_palette[destination][2], sky_alpha);
+		for(int layer = 0; layer < 3; layer++) {
+			int base_y = surface->h * (66 + layer * 9) / 100;
+			Uint8 terrain_alpha = (Uint8)(148 * destination_mix * fade * (0.85 - layer * 0.16));
+			Uint8 terrain_red = (Uint8)(14 + destination * 13 + layer * 5);
+			Uint8 terrain_green = (Uint8)(31 + destination * 9 + layer * 4);
+			Uint8 terrain_blue = (Uint8)(43 + destination * 14 + layer * 3);
+			for(int segment = 0; segment < 18; segment++) {
+				int x1 = surface->w * segment / 18;
+				int x2 = surface->w * (segment + 1) / 18;
+				int y1 = base_y + (int)(sin(segment * 1.4 + destination) * scale * 0.035);
+				int y2 = base_y + (int)(sin((segment + 1) * 1.4 + destination) * scale * 0.035);
+				filledTrigonRGBA(surface, x1, y1, x2, y2, x2, surface->h,
+					terrain_red, terrain_green, terrain_blue, terrain_alpha);
+				filledTrigonRGBA(surface, x1, y1, x2, surface->h, x1, surface->h,
+					terrain_red, terrain_green, terrain_blue, terrain_alpha);
+			}
+		}
+		Uint32 return_phase = phase > 5900 ? phase - 5900 : 0;
+		if(return_phase < 900) {
+			double return_flash = (1.0 - return_phase / 900.0) * fade;
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				225, 233, 241, (Uint8)(150 * return_flash));
 		}
 	}
 
-	// Hail: heavy rain produces fast-falling white pellets.
-	if(weather->rain > 0.55) {
-		int hail_count = (int)(surface->w * surface->h / 9000.0 * weather->rain);
-		if(hail_count > 220) hail_count = 220;
-		unsigned int hail_seed = ticks / 900 * 2654435761u + 0x9e3779b9u;
-		for(int i = 0; i < hail_count; i++) {
-			hail_seed = hail_seed * 1664525u + 1013904223u;
-			int start_x = hail_seed % surface->w;
-			hail_seed = hail_seed * 1664525u + 1013904223u;
-			int start_y = hail_seed % surface->h;
-			int speed = 14 + i % 6;
-			double travel = ticks * speed / 90.0;
-			int y = (start_y + (int)travel) % (surface->h + 8);
-			int x = (start_x + (int)(travel * 0.10)) % surface->w;
-			Uint8 alpha = (Uint8)(90 + (hail_seed >> 16) % 60);
-			filledCircleRGBA(surface, x, y, 1 + i % 2,
-				226, 232, 240, alpha);
+static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_ALIEN_WEATHER, ticks, &window)) return;
+	Uint32 seed = window.seed;
+	Uint32 phase = window.phase;
+	double fade = window.fade;
+	int kind = effect_kind(&EFFECT_ALIEN_WEATHER, seed % 5);
+	static const Uint8 sky_colors[5][3] = {
+		{ 66, 142, 106 }, { 99, 81, 157 }, { 62, 113, 156 },
+		{ 158, 83, 91 }, { 157, 125, 62 }
+	};
+	Uint8 red = sky_colors[kind][0];
+	Uint8 green = sky_colors[kind][1];
+	Uint8 blue = sky_colors[kind][2];
+	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+		red, green, blue, (Uint8)(18 * fade));
+
+	if(kind == 2) {
+		int planet_x = surface->w * (25 + (seed >> 12) % 50) / 100;
+		int planet_y = surface->h * 28 / 100;
+		int radius = scale / 11;
+		filledCircleRGBA(surface, planet_x, planet_y, radius,
+			32, 38, 51, (Uint8)(150 * fade));
+		circleRGBA(surface, planet_x, planet_y, radius + scale / 30,
+			134, 194, 210, (Uint8)(100 * fade));
+	}
+
+	int count = surface->w * surface->h / 12000;
+	if(count < 24) count = 24;
+	if(count > 180) count = 180;
+	for(int particle = 0; particle < count; particle++) {
+		Uint32 particle_seed = (Uint32)particle * 1664525u + seed;
+		int start_x = particle_seed % surface->w;
+		int start_y = (particle_seed >> 9) % surface->h;
+		int speed = 3 + (particle_seed >> 20) % 7;
+		// Every kind falls the way the normal rain does (down, leaning right), so
+		// the two never cross at different angles. Each particle moves along its streak.
+		double direction_x = 0.25;
+		double direction_y = 1.0;
+		double streak = scale * (kind == 0 ? 0.023 : 0.017);
+		double travel = ticks * 2.0 / (35 + speed * 7);
+		double path = sqrt(direction_x * direction_x + direction_y * direction_y);
+		double wrapped_x = fmod(start_x + travel * direction_x, (double)surface->w);
+		double wrapped_y = fmod(start_y + travel * direction_y, (double)surface->h);
+		if(wrapped_x < 0.0) wrapped_x += surface->w;
+		if(wrapped_y < 0.0) wrapped_y += surface->h;
+		int x = (int)wrapped_x, y = (int)wrapped_y;
+		int end_x = x - (int)(direction_x / path * streak);
+		int end_y = y - (int)(direction_y / path * streak);
+		Uint8 alpha = (Uint8)((18 + (particle_seed >> 24) % 30) * fade);
+		thickLineRGBA(surface, x, y, end_x, end_y, 1, red, green, blue, alpha);
+		if(particle % 9 == 0) filledCircleRGBA(surface, x, y, 1,
+			(Uint8)(red + 25), (Uint8)(green + 25), (Uint8)(blue + 25), alpha);
+	}
+
+	if(kind == 3) {
+		Uint32 flash_phase = phase % 8400;
+		if(flash_phase < 140) {
+			Uint8 flash = (Uint8)(45 * fade * (1.0 - flash_phase / 140.0));
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				211, 183, 226, flash);
 		}
 	}
 }
 
-// A distant bird, drawn as a shallow gull silhouette: two thin wing strokes
-// meeting at the body, with the tips settling slightly below the mid-wing
-// joint. At this scale any extra detail (head, beak, tail) collapses into a
-// blob, so the shape is deliberately minimal and anti-aliased.
 static void draw_bird(SDL_Surface *surface, int x, int y, int size, int wing_lift) {
-	const Uint8 shade = 26, shade_g = 33, shade_b = 47;
-	if(size < 2) size = 2;
-	if(wing_lift < 0) wing_lift = 0;
+	const Uint8 shade = 23, alpha = 185;
+	int body_length = size;
+	int wing_span = size;
+	if(wing_lift < 1) wing_lift = 1;
 
-	int span = size + size / 2;
-	int lift = wing_lift + size / 3;
-	int joint_x = span * 45 / 100;
-	int joint_y = y - lift * 3 / 4;
-	int tip_y = y - lift / 2;
+	thickLineRGBA(surface, x - body_length / 2, y, x + body_length / 2, y,
+		2, shade, 30, 43, alpha);
+	filledCircleRGBA(surface, x + body_length / 2, y - 1, 1, shade, 30, 43, alpha);
+	thickLineRGBA(surface, x + body_length / 2 + 1, y - 1,
+		x + body_length / 2 + 3, y, 1, shade, 30, 43, alpha);
+	thickLineRGBA(surface, x - body_length / 2, y,
+		x - body_length / 2 - size / 2, y - size / 3, 1, shade, 30, 43, alpha);
+	thickLineRGBA(surface, x - body_length / 2, y,
+		x - body_length / 2 - size / 2, y + size / 3, 1, shade, 30, 43, alpha);
 
-	aalineRGBA(surface, x, y, x - joint_x, joint_y, shade, shade_g, shade_b, 165);
-	aalineRGBA(surface, x - joint_x, joint_y, x - span, tip_y, shade, shade_g, shade_b, 145);
-	aalineRGBA(surface, x, y, x + joint_x, joint_y, shade, shade_g, shade_b, 165);
-	aalineRGBA(surface, x + joint_x, joint_y, x + span, tip_y, shade, shade_g, shade_b, 145);
+	int shoulder_x = x - size / 5;
+	int far_tip_x = x - wing_span;
+	int near_tip_x = x - wing_span * 3 / 4;
+	int far_tip_y = y - wing_lift;
+	int near_tip_y = y + wing_lift * 3 / 4;
+	thickLineRGBA(surface, shoulder_x, y, x - size / 2, y - wing_lift / 2,
+		2, shade, 30, 43, alpha);
+	thickLineRGBA(surface, x - size / 2, y - wing_lift / 2,
+		far_tip_x, far_tip_y, 2, shade, 30, 43, alpha);
+	thickLineRGBA(surface, shoulder_x, y, x - size / 2, y + wing_lift / 3,
+		2, shade, 30, 43, alpha);
+	thickLineRGBA(surface, x - size / 2, y + wing_lift / 3,
+		near_tip_x, near_tip_y, 2, shade, 30, 43, alpha);
 }
 
-// A ship, drawn as a silhouette rather than as a set of primitives. At this
-// size only three things read: the outline, one lit edge, and the engine
-// glow. A ring plus a disc reads as a mouse pointer; a point with a stepped
-// trail reads as a wine bottle. A long tapered hull with a rim light and a
-// hot stern reads as a ship.
-//
-// dir is +1 for nose-right, -1 for nose-left. tilt shears the hull vertically
-// so a banking ship reads as banking rather than as a flat cut-out.
-static void soft_glow(SDL_Surface *surface, int cx, int cy, int radius,
-	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+/*
+ * Ship drawing
+ *
+ * Ships are seen from the side, nose towards +x, +y down. A design is the upper
+ * half of a hull outline in tenths of a unit, mirrored to make the whole hull.
+ * The hull is painted in four bands of light from above with a dark outline and
+ * glowing engines. Each ship is drawn fully opaque and then blended onto the
+ * scene at the requested opacity, so its overlapping parts do not stack up.
+ *
+ * Ships come in three roles. Small ones are the fighters used everywhere,
+ * mid-size and big ones only appear in the fleet battle.
+ */
+typedef signed char ShipPoint[2];
 
-// Three alien races, each with its own hull language. At this scale only the
-// silhouette reads, so each race is defined by outline rather than detail.
-//   0 — the Blade: a needle prow and swept fins. Hostile red lamps.
-//   1 — the Hive: a segmented teardrop carapace, no fins. Amber biolume.
-//   2 — the Anvil: a blunt industrial wedge, cut square at the stern. Cold
-//       blue lamps and twin hull bars.
-//
-// dir is +1 for nose-right, -1 for nose-left. tilt shears the hull vertically
-// so a banking ship reads as banking rather than as a flat cut-out.
-static void soft_glow(SDL_Surface *surface, int cx, int cy, int radius,
-	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+typedef struct {
+	const ShipPoint *points;
+	int count;
+} ShipOutline;
 
-static void draw_ship(SDL_Surface *surface, int x, int y, int length,
-	int dir, int tilt, Uint8 alpha, int engine_heat, int race) {
-	if(length < 10) length = 10;
-	if(race < 0 || race > 2) race = 0;
+#define SHIP_OUTLINE(points) { points, (int)(sizeof(points) / sizeof(points[0])) }
+#define SHIP_NO_OUTLINE { NULL, 0 }
+#define SHIP_ENGINE_SIZE 2     // engine glow radius, tenths of a unit
+#define SHIP_OPACITY 235       // opacity of a fully faded in ship
 
-	// Engine colour is the fastest way to tell the races apart at a glance.
-	Uint8 er = 236, eg = 118, eb = 62;                // Blade: hostile orange
-	if(race == 1) { er = 150; eg = 232; eb = 118; }   // Hive: bio green
-	if(race == 2) { er = 140; eg = 196; eb = 255; }   // Anvil: cold blue
+typedef struct {
+	ShipOutline hull;          // upper half, nose first, tail last (both at y = 0)
+	ShipOutline plates[2];     // lighter plates drawn over the hull, if any
+	const ShipPoint *spikes;   // (x, height) of each spike on the back, if any
+	int spike_count;
+	ShipPoint engines[3];
+	int engine_count;
+	ShipPoint accent[2];       // glowing slit between these two points
+	bool accent_on;
+	bool eye;                  // a glowing eye in the middle instead of a slit
+	int nose, tail;            // extent of the hull along x
+	int weapon;                // main weapon, fired from the nose (WEAPON_*)
+	ShipPoint turrets[4];      // gun turret mounts on the hull, if any
+	int turret_count;
+	int turret_weapon;         // what the turrets fire
+} ShipDesign;
 
-	// Hull tones. A near-black hull on a near-black sky is invisible, so the
-	// lit face sits a few steps above the sky and the shadow a few below.
-	// Without that split the hull reads as a hole in the sky.
-	Uint8 hr = 46, hg = 54, hb = 76;
-	Uint8 sr = 20, sg = 25, sb = 38;
-	Uint8 rr = 168, rg = 190, rb = 226;
-	if(race == 1) {
-		hr = 44; hg = 58; hb = 46;
-		sr = 18; sg = 26; sb = 22;
-		rr = 150; rg = 200; rb = 140;
-	} else if(race == 2) {
-		hr = 52; hg = 58; hb = 74;
-		sr = 22; sg = 26; sb = 36;
-		rr = 186; rg = 206; rb = 240;
+typedef struct {
+	Uint8 tone[4][3];          // shadow, mid, light, highlight
+	Uint8 glow[3];             // engine glow and bounced light
+	Uint8 accent[3];           // glowing slits and eyes
+} ShipTeam;
+
+static const ShipTeam ship_teams[2] = {
+	{ { {8, 12, 19}, {16, 25, 38}, {29, 43, 60}, {55, 74, 95} },
+		{90, 190, 255}, {150, 235, 255} },
+	{ { {19, 11, 8}, {36, 21, 15}, {55, 34, 24}, {88, 64, 48} },
+		{255, 150, 70}, {255, 208, 120} }
+};
+
+/*
+ * Weapons
+ *
+ * The weapon families are modelled on X4: Foundations. Each one has its own
+ * look and its own timing: pulse lasers and mass drivers throw many fast bolts,
+ * beam emitters hold a continuous beam, plasma is a slow heavy orb, flak bursts
+ * into shrapnel short of the target, missiles and swarms curve in leaving smoke,
+ * torpedoes are huge and slow, and the railgun charges before it fires.
+ * Small ships carry one gun; mid-size and big ships also have turrets.
+ */
+enum { WEAPON_PULSE, WEAPON_BEAM, WEAPON_PLASMA, WEAPON_MASS_DRIVER, WEAPON_FLAK,
+	WEAPON_MISSILE, WEAPON_SWARM, WEAPON_TORPEDO, WEAPON_RAIL, WEAPON_COUNT };
+
+typedef struct {
+	double impact_ms;          // time from firing until a shot reaches the target
+	double life_ms;            // time until nothing of a shot is left on screen
+	int shots;                 // shots in one volley
+	double gap_ms;             // time between the shots of a volley
+	double blast;              // size of the impact, in shot-size units
+} WeaponSpec;
+
+static const WeaponSpec weapon_specs[WEAPON_COUNT] = {
+	{ 260.0, 820.0, 3, 90.0, 0.16 },     // pulse laser
+	{ 420.0, 1100.0, 1, 0.0, 0.20 },     // beam emitter (the beam itself lasts 900 ms)
+	{ 720.0, 1320.0, 1, 0.0, 0.50 },     // plasma cannon
+	{ 200.0, 650.0, 6, 42.0, 0.10 },     // mass driver
+	{ 480.0, 1030.0, 1, 0.0, 0.40 },     // flak
+	{ 950.0, 1500.0, 1, 0.0, 0.45 },     // missile
+	{ 880.0, 1430.0, 5, 75.0, 0.25 },    // swarm missiles
+	{ 1500.0, 2100.0, 1, 0.0, 0.90 },    // torpedo
+	{ 300.0, 850.0, 1, 0.0, 0.30 }       // railgun (charges for 300 ms, then fires)
+};
+
+static const ShipPoint hull_dagger[] = {{45,0},{30,-3},{12,-5},{-4,-14},{-20,-22},{-14,-8},{-26,-5},{-28,0}};
+static const ShipPoint spine_dagger[] = {{40,0},{18,-2},{-20,-2},{-28,0}};
+static const ShipPoint hull_manta[] = {{32,0},{20,-6},{4,-16},{-12,-30},{-20,-27},{-14,-15},{-26,-8},{-32,-4},{-32,0}};
+static const ShipPoint spine_manta[] = {{34,0},{10,-4},{-30,-3},{-32,0}};
+static const ShipPoint hull_hammerhead[] = {{38,0},{37,-18},{29,-19},{26,-6},{-8,-7},{-22,-12},{-30,-9},{-30,0}};
+static const ShipPoint spine_hammerhead[] = {{26,0},{24,-3},{-8,-4},{-30,-3},{-30,0}};
+static const ShipPoint hull_mandible[] = {{8,0},{22,-4},{38,-12},{22,-18},{2,-15},{-14,-12},{-26,-8},{-32,-3},{-32,0}};
+static const ShipPoint spine_mandible[] = {{2,0},{0,-5},{-30,-4},{-32,0}};
+static const ShipPoint hull_trident[] = {{46,0},{24,-3},{16,-5},{30,-16},{12,-12},{-4,-9},{-24,-12},{-30,-6},{-30,0}};
+static const ShipPoint spine_trident[] = {{44,0},{10,-2},{-28,-2},{-30,0}};
+static const ShipPoint hull_scythe[] = {{30,0},{22,-6},{8,-16},{-8,-26},{-28,-36},{-20,-20},{-14,-10},{-28,-6},{-30,0}};
+static const ShipPoint spine_scythe[] = {{32,0},{6,-4},{-28,-3},{-30,0}};
+static const ShipPoint hull_bat[] = {{26,0},{14,-8},{-4,-20},{-10,-31},{-16,-22},{-18,-31},{-24,-19},{-28,-25},{-30,-8},{-32,0}};
+static const ShipPoint spine_bat[] = {{28,0},{8,-4},{-30,-3},{-32,0}};
+static const ShipPoint hull_leviathan[] = {{52,0},{38,-4},{12,-7},{-30,-8},{-46,-5},{-50,0}};
+static const ShipPoint spine_leviathan[] = {{48,0},{12,-3},{-46,-2},{-50,0}};
+static const ShipPoint spikes_leviathan[] = {{20,14},{4,18},{-12,18},{-28,14}};
+static const ShipPoint hull_wedge[] = {{42,0},{-4,-16},{-30,-22},{-36,-14},{-36,0}};
+static const ShipPoint plate_wedge[] = {{30,0},{-6,-10},{-30,-14},{-34,-8},{-34,0}};
+static const ShipPoint top_wedge[] = {{16,0},{-8,-5},{-30,-7},{-34,-4},{-34,0}};
+static const ShipPoint hull_swept[] = {{36,0},{12,-4},{28,-22},{6,-20},{-6,-8},{-20,-10},{-26,-4},{-26,0}};
+static const ShipPoint spine_swept[] = {{34,0},{10,-2},{-24,-2},{-26,0}};
+
+// Indexes into ship_designs[], grouped by role.
+enum { SHIP_SMALL, SHIP_MID, SHIP_BIG };
+static const int ship_small_designs[] = { 0, 1, 5, 6, 9 };   // dagger, manta, scythe, bat, swept
+static const int ship_mid_designs[] = { 2, 3, 4 };           // hammerhead, mandible, trident
+static const int ship_big_designs[] = { 7, 8 };              // leviathan, wedge
+
+static const ShipDesign ship_designs[] = {
+	// 0 dagger
+	{ SHIP_OUTLINE(hull_dagger), { SHIP_OUTLINE(spine_dagger), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-28,-3}, {-28,3}, {0,0} }, 2, { {34,0}, {22,0} }, true, false, 45, -28,
+		WEAPON_RAIL, { {0,0} }, 0, WEAPON_PULSE },
+	// 1 manta
+	{ SHIP_OUTLINE(hull_manta), { SHIP_OUTLINE(spine_manta), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {26,0}, {12,0} }, true, false, 32, -32,
+		WEAPON_SWARM, { {0,0} }, 0, WEAPON_PULSE },
+	// 2 hammerhead
+	{ SHIP_OUTLINE(hull_hammerhead), { SHIP_OUTLINE(spine_hammerhead), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-30,-4}, {-30,4}, {0,0} }, 2, { {36,-15}, {36,15} }, true, false, 38, -30,
+		WEAPON_FLAK, { {30,-12}, {30,12}, {-12,0} }, 3, WEAPON_MASS_DRIVER },
+	// 3 mandible
+	{ SHIP_OUTLINE(hull_mandible), { SHIP_OUTLINE(spine_mandible), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {0,0}, {0,0} }, false, true, 38, -32,
+		WEAPON_PLASMA, { {-6,-8}, {-6,8}, {-22,0} }, 3, WEAPON_PULSE },
+	// 4 trident
+	{ SHIP_OUTLINE(hull_trident), { SHIP_OUTLINE(spine_trident), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {38,0}, {26,0} }, true, false, 46, -30,
+		WEAPON_MISSILE, { {16,-9}, {16,9}, {-12,0} }, 3, WEAPON_FLAK },
+	// 5 scythe
+	{ SHIP_OUTLINE(hull_scythe), { SHIP_OUTLINE(spine_scythe), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-30,-3}, {-30,3}, {0,0} }, 2, { {24,0}, {10,0} }, true, false, 30, -30,
+		WEAPON_BEAM, { {0,0} }, 0, WEAPON_PULSE },
+	// 6 bat
+	{ SHIP_OUTLINE(hull_bat), { SHIP_OUTLINE(spine_bat), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-32,-3}, {-32,3}, {0,0} }, 2, { {20,0}, {8,0} }, true, false, 26, -32,
+		WEAPON_PULSE, { {0,0} }, 0, WEAPON_PULSE },
+	// 7 leviathan
+	{ SHIP_OUTLINE(hull_leviathan), { SHIP_OUTLINE(spine_leviathan), SHIP_NO_OUTLINE },
+		spikes_leviathan, 4,
+		{ {-50,-2}, {-50,2}, {0,0} }, 2, { {44,0}, {30,0} }, true, false, 52, -50,
+		WEAPON_TORPEDO, { {30,0}, {8,0}, {-14,0}, {-34,0} }, 4, WEAPON_MASS_DRIVER },
+	// 8 wedge
+	{ SHIP_OUTLINE(hull_wedge), { SHIP_OUTLINE(plate_wedge), SHIP_OUTLINE(top_wedge) }, NULL, 0,
+		{ {-36,-10}, {-36,0}, {-36,10} }, 3, { {26,0}, {8,0} }, true, false, 42, -36,
+		WEAPON_PULSE, { {10,0}, {-10,-6}, {-10,6}, {-26,0} }, 4, WEAPON_BEAM },
+	// 9 forward-swept
+	{ SHIP_OUTLINE(hull_swept), { SHIP_OUTLINE(spine_swept), SHIP_NO_OUTLINE }, NULL, 0,
+		{ {-26,-3}, {-26,3}, {0,0} }, 2, { {28,0}, {16,0} }, true, false, 36, -26,
+		WEAPON_MASS_DRIVER, { {0,0} }, 0, WEAPON_PULSE }
+};
+
+// Maps design coordinates (tenths of a unit, origin at the design's own
+// origin) to screen pixels. The ship is centred on x along its length.
+typedef struct {
+	int x, y, direction;
+	double scale;              // pixels per tenth
+	double middle;             // design x that lands on `x`
+	double cos_pitch, sin_pitch; // tilt of the nose above the horizontal
+} ShipTransform;
+
+static void ship_to_pixels(const ShipTransform *xf, int tx, int ty, int *px, int *py) {
+	double along = (tx - xf->middle) * xf->scale;
+	double down = ty * xf->scale;
+	*px = xf->x + (int)floor(xf->direction * (along * xf->cos_pitch + down * xf->sin_pitch) + 0.5);
+	*py = xf->y + (int)floor(-along * xf->sin_pitch + down * xf->cos_pitch + 0.5);
+}
+
+// Fills px/py with the mirrored outline of a half outline; returns the point count.
+static int ship_build_polygon(const ShipTransform *xf, const ShipOutline *outline,
+	int *px, int *py) {
+	int count = 0;
+	for(int i = 0; i < outline->count; i++) {
+		ship_to_pixels(xf, outline->points[i][0], outline->points[i][1], &px[count], &py[count]);
+		count++;
 	}
+	for(int i = outline->count - 2; i >= 1; i--) {
+		ship_to_pixels(xf, outline->points[i][0], -outline->points[i][1], &px[count], &py[count]);
+		count++;
+	}
+	return count;
+}
 
-	if(race == 0) {
-		// --- The Blade: needle prow, swept fins, red lamps ---------------
-		int half = length / 7;
-		if(half < 3) half = 3;
-		// Fins first, so the hull sits on top of them. Deliberately unequal:
-		// two matching fins plus a pointed prow is an arrow, and an arrow is
-		// a mouse cursor. One fin is long and raked, the other is a stub.
-		for(int side = -1; side <= 1; side += 2) {
-			int reach = side < 0 ? 240 : 130;
-			int root = side < 0 ? -30 : -58;
-			Sint16 fx[3], fy[3];
-			fx[0] = (Sint16)(x + dir * root * length / 100);
-			fy[0] = (Sint16)(y + side * half * 80 / 100);
-			fx[1] = (Sint16)(x + dir * (-78) * length / 100);
-			fy[1] = (Sint16)(y + side * half * 80 / 100);
-			fx[2] = (Sint16)(x + dir * (-100) * length / 100);
-			fy[2] = (Sint16)(y + side * half * reach / 100);
-			filledPolygonRGBA(surface, fx, fy, 3, hr, hg, hb, alpha);
-			aalineRGBA(surface, fx[0], fy[0], fx[2], fy[2], rr, rg, rb, alpha);
-		}
-		static const int px[9] = { 100, 55, 10, -45, -100, -100, -45, 10, 55 };
-		static const int py[9] = { 0, -50, -95, -100, -75, 75, 100, 95, 50 };
-		Sint16 hx[9], hy[9];
-		for(int i = 0; i < 9; i++) {
-			hx[i] = (Sint16)(x + dir * px[i] * length / 100);
-			hy[i] = (Sint16)(y + py[i] * half / 100 + tilt * px[i] / 100);
-		}
-		filledPolygonRGBA(surface, hx, hy, 9, hr, hg, hb, alpha);
-		// Shadow along the lower half, so the hull has a lit face and a dark
-		// one instead of reading as a flat cut-out.
-		static const int sx[8] = { 55, 10, -45, -100, -100, -45, 10, 55 };
-		static const int sy[8] = { 50, 95, 100, 75, 15, 30, 25, 15 };
-		Sint16 shx[8], shy[8];
-		for(int i = 0; i < 8; i++) {
-			shx[i] = (Sint16)(x + dir * sx[i] * length / 100);
-			shy[i] = (Sint16)(y + sy[i] * half / 100 + tilt * sx[i] / 100);
-		}
-		filledPolygonRGBA(surface, shx, shy, 8, sr, sg, sb, alpha);
-		// Rim light along the upper edge only, fading aft.
-		aalineRGBA(surface, hx[0], hy[0], hx[1], hy[1], rr, rg, rb, alpha);
-		aalineRGBA(surface, hx[1], hy[1], hx[2], hy[2],
-			(Uint8)(rr * 3 / 4), (Uint8)(rg * 3 / 4), (Uint8)(rb * 3 / 4), alpha);
-		aalineRGBA(surface, hx[2], hy[2], hx[3], hy[3],
-			(Uint8)(rr / 2), (Uint8)(rg / 2), (Uint8)(rb / 2), alpha);
-		aalineRGBA(surface, hx[3], hy[3], hx[4], hy[4],
-			(Uint8)(rr / 3), (Uint8)(rg / 3), (Uint8)(rb / 3), alpha);
-		// Running lights: hostile red.
-		for(int lamp = 0; lamp < 3; lamp++) {
-			int lx = x + dir * (length / 3 - lamp * length / 8);
-			int ly = y - half / 3 + tilt * (length / 3 - lamp * length / 8) / length;
-			pixelRGBA(surface, lx, ly, 240, 64, 48, alpha);
-		}
-	} else if(race == 1) {
-		// --- The Hive: segmented teardrop carapace, amber biolume --------
-		// No fins and no spine. The mass itself is the threat: it swells to
-		// its widest a third back, then tapers to a point.
-		int half = length / 5;
-		if(half < 3) half = 3;
-		enum { HIVE_PTS = 16 };
-		Sint16 hx[HIVE_PTS * 2], hy[HIVE_PTS * 2];
-		for(int i = 0; i < HIVE_PTS; i++) {
-			double t = (double)i / (HIVE_PTS - 1);
-			double along = 100.0 - t * 200.0;
-			double w = sin(pow(t, 0.62) * 3.14159265359);
-			int px = x + dir * (int)(along * length / 100);
-			int py = y + tilt * (int)(along / 100);
-			hx[i] = (Sint16)px;
-			hy[i] = (Sint16)(py - w * half);
-			hx[HIVE_PTS * 2 - 1 - i] = (Sint16)px;
-			hy[HIVE_PTS * 2 - 1 - i] = (Sint16)(py + w * half);
-		}
-		filledPolygonRGBA(surface, hx, hy, HIVE_PTS * 2, hr, hg, hb, alpha);
-		// Shadow: the lower half of the carapace. Walk the bottom edge from
-		// stern to prow, then close straight back to the stern. Both ends sit
-		// on the centreline, so that closing edge IS the centreline and the
-		// result is exactly the lower half. Tracing only the bottom edge and
-		// closing it fills a thin lens instead.
-		Sint16 shx[HIVE_PTS + 1], shy[HIVE_PTS + 1];
-		for(int i = 0; i < HIVE_PTS; i++) {
-			int idx = HIVE_PTS * 2 - 1 - i;
-			shx[i] = hx[idx];
-			shy[i] = hy[idx];
-		}
-		shx[HIVE_PTS] = (Sint16)(x - dir * length);
-		shy[HIVE_PTS] = (Sint16)(y - tilt);
-		filledPolygonRGBA(surface, shx, shy, HIVE_PTS + 1, sr, sg, sb, alpha);
-		// Segment ridges across the carapace. These are what make it read as
-		// a living thing rather than a smooth pod.
-		for(int seg = 1; seg < 7; seg++) {
-			double t = (double)seg / 7;
-			double along = 100.0 - t * 200.0;
-			double w = sin(pow(t, 0.62) * 3.14159265359);
-			int sx = x + dir * (int)(along * length / 100);
-			int sy = y + tilt * (int)(along / 100);
-			int sw = (int)(w * half);
-			if(sw < 1) continue;
-			aalineRGBA(surface, sx, sy - sw, sx, sy + sw,
-				(Uint8)(hr + 26), (Uint8)(hg + 30), (Uint8)(hb + 22), alpha);
-		}
-		// A lit ridge along the upper edge, in the same amber as the lamps.
-		for(int i = 0; i < HIVE_PTS - 1; i++) {
-			aalineRGBA(surface, hx[i], hy[i], hx[i + 1], hy[i + 1],
-				rr, rg, rb, alpha);
-		}
-		// Bioluminescent nodes along the spine.
-		for(int lamp = 0; lamp < 4; lamp++) {
-			double t = 0.18 + lamp * 0.18;
-			double along = 100.0 - t * 200.0;
-			double w = sin(pow(t, 0.62) * 3.14159265359);
-			int lx = x + dir * (int)(along * length / 100);
-			int ly = y + tilt * (int)(along / 100) - (int)(w * half * 0.45);
-			pixelRGBA(surface, lx, ly, 196, 244, 152, alpha);
-		}
-	} else {
-		// --- The Anvil: blunt industrial wedge, cold blue lamps ----------
-		// Asymmetric on purpose. A pointed nose widening to a flat rectangle
-		// is an arrow, and an arrow is a mouse cursor. Here the prow sits off
-		// the centreline, the stern is cut at an angle, and the belly bulges
-		// further than the back, so the outline never mirrors itself.
-		int half = length / 6;
-		if(half < 3) half = 3;
-		static const int px[9] = { 100, 78, 40, -30, -100, -100, -20, 46, 86 };
-		static const int py[9] = { -10, -62, -100, -100, -78, 62, 100, 88, 30 };
-		Sint16 hx[9], hy[9];
-		for(int i = 0; i < 9; i++) {
-			hx[i] = (Sint16)(x + dir * px[i] * length / 100);
-			hy[i] = (Sint16)(y + py[i] * half / 100 + tilt * px[i] / 100);
-		}
-		filledPolygonRGBA(surface, hx, hy, 9, hr, hg, hb, alpha);
-		// Shadow along the belly only, following the same asymmetric edge.
-		static const int sx[5] = { 46, -20, -100, -100, 86 };
-		static const int sy[5] = { 88, 100, 62, 20, 30 };
-		Sint16 shx[5], shy[5];
-		for(int i = 0; i < 5; i++) {
-			shx[i] = (Sint16)(x + dir * sx[i] * length / 100);
-			shy[i] = (Sint16)(y + sy[i] * half / 100 + tilt * sx[i] / 100);
-		}
-		filledPolygonRGBA(surface, shx, shy, 5, sr, sg, sb, alpha);
-		// Twin hull bars: two dark channels running the length of the wedge.
-		for(int side = -1; side <= 1; side += 2) {
-			int by = y + side * half * 34 / 100;
-			thickLineRGBA(surface,
-				x + dir * length * 40 / 100, by,
-				x - dir * length * 92 / 100, by, 2, 8, 10, 16, alpha);
-		}
-		// Rim light along the upper edge, and a hard highlight on the prow.
-		aalineRGBA(surface, hx[0], hy[0], hx[1], hy[1], rr, rg, rb, alpha);
-		aalineRGBA(surface, hx[1], hy[1], hx[2], hy[2],
-			(Uint8)(rr * 3 / 4), (Uint8)(rg * 3 / 4), (Uint8)(rb * 3 / 4), alpha);
-		aalineRGBA(surface, hx[2], hy[2], hx[3], hy[3],
-			(Uint8)(rr / 2), (Uint8)(rg / 2), (Uint8)(rb / 2), alpha);
-		// Cold blue lamps in a row along the prow face.
-		for(int lamp = 0; lamp < 3; lamp++) {
-			int lx = x + dir * length * (34 - lamp * 12) / 100;
-			int ly = y - half * 40 / 100 + tilt * (34 - lamp * 12) / 100;
-			pixelRGBA(surface, lx, ly, 176, 218, 255, alpha);
+static Uint8 ship_mix(int from, int to, double amount) {
+	return (Uint8)(from + (to - from) * amount + 0.5);
+}
+
+// Colour of a lighting band (3 highlight .. 0 shadow), pushed lighter (bias > 0)
+// or darker (bias < 0).
+static void ship_tone(const ShipTeam *team, int band, double bias, Uint8 *rgb) {
+	const Uint8 *target = team->tone[bias >= 0 ? 3 : 0];
+	double amount = bias >= 0 ? bias : -bias;
+	for(int i = 0; i < 3; i++) rgb[i] = ship_mix(team->tone[band][i], target[i], amount);
+}
+
+// The vertical stretches of a polygon on pixel column `col`, top to bottom.
+static int ship_column_spans(const int *px, const int *py, int count, int col, int spans[][2]) {
+	double x = col + 0.5;
+	double crossings[24];
+	int found = 0;
+	for(int i = 0; i < count && found < 24; i++) {
+		int j = (i + 1) % count;
+		if((px[i] <= x && x < px[j]) || (px[j] <= x && x < px[i])) {
+			crossings[found++] = py[i] + (x - px[i]) * (double)(py[j] - py[i]) / (px[j] - px[i]);
 		}
 	}
-
-	// Engine: a hot core at the stern with a short exhaust plume. The plume
-	// is what sells motion.
-	int ex = x - dir * length * 96 / 100;
-	int ey = y - tilt * 96 / 100;
-	int half_e = length / 6;
-	if(half_e < 3) half_e = 3;
-	if(engine_heat > 0) {
-		int plume = length / 4;
-		for(int step = 1; step <= 6; step++) {
-			double t = (double)step / 6;
-			int wx = ex - dir * (int)(t * plume);
-			int w = (int)(half_e / 3.0 * (1.0 - t) + 1.0);
-			thickLineRGBA(surface, wx, ey, wx - dir, ey, w,
-				er, eg, eb, (Uint8)(engine_heat / 3 * (1.0 - t)));
+	for(int i = 1; i < found; i++) {
+		double value = crossings[i];
+		int j = i - 1;
+		while(j >= 0 && crossings[j] > value) {
+			crossings[j + 1] = crossings[j];
+			j--;
 		}
-		soft_glow(surface, ex, ey, half_e / 2 + 1, er, eg, eb,
-			engine_heat / 3);
-		soft_glow(surface, ex, ey, half_e / 4 + 1, 255, 240, 220,
-			engine_heat / 2);
+		crossings[j + 1] = value;
+	}
+	int span_count = 0;
+	for(int i = 0; i + 1 < found; i += 2) {
+		int top = (int)ceil(crossings[i]);
+		int bottom = (int)floor(crossings[i + 1]);
+		if(bottom >= top && span_count < 12) {
+			spans[span_count][0] = top;
+			spans[span_count][1] = bottom;
+			span_count++;
+		}
+	}
+	return span_count;
+}
+
+// Paints one polygon in four bands of light with a dark outline.
+static void ship_paint(SDL_Surface *surface, const ShipTeam *team, const int *px,
+	const int *py, int count, double bias, int outline_width) {
+	int min_x = px[0], max_x = px[0];
+	for(int i = 1; i < count; i++) {
+		if(px[i] < min_x) min_x = px[i];
+		if(px[i] > max_x) max_x = px[i];
+	}
+	static const int bands[3] = { 3, 2, 1 };
+	for(int col = min_x; col <= max_x; col++) {
+		int spans[12][2];
+		int span_count = ship_column_spans(px, py, count, col, spans);
+		for(int span = 0; span < span_count; span++) {
+			int top = spans[span][0], bottom = spans[span][1];
+			int height = bottom - top + 1;
+			int band_height[3];
+			band_height[0] = (int)(height * 0.14 + 0.5);
+			if(band_height[0] < 1) band_height[0] = 1;
+			band_height[1] = (int)(height * 0.28 + 0.5);
+			band_height[2] = (int)(height * 0.30 + 0.5);
+			int y = top;
+			Uint8 rgb[3];
+			for(int band = 0; band < 3 && y <= bottom; band++) {
+				if(band_height[band] <= 0) continue;
+				int band_bottom = y + band_height[band] - 1;
+				if(band_bottom > bottom) band_bottom = bottom;
+				ship_tone(team, bands[band], bias, rgb);
+				vlineRGBA(surface, col, y, band_bottom, rgb[0], rgb[1], rgb[2], 255);
+				y = band_bottom + 1;
+			}
+			if(y <= bottom) {
+				ship_tone(team, 0, bias, rgb);
+				bool bounce = height >= 7;
+				vlineRGBA(surface, col, y, bounce ? bottom - 1 : bottom, rgb[0], rgb[1], rgb[2], 255);
+				if(bounce) {
+					// A little bounced light along the lower edge.
+					vlineRGBA(surface, col, bottom, bottom,
+						ship_mix(rgb[0], team->glow[0], 0.35),
+						ship_mix(rgb[1], team->glow[1], 0.35),
+						ship_mix(rgb[2], team->glow[2], 0.35), 255);
+				}
+			}
+		}
+	}
+	for(int i = 0; i < count; i++) {
+		int j = (i + 1) % count;
+		thickLineRGBA(surface, px[i], py[i], px[j], py[j], outline_width, 8, 10, 18, 255);
 	}
 }
 
-static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 90000;
-	Uint32 slot = ticks / cycle;
-	Uint32 slot_phase = ticks % cycle;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	Uint32 duration = 6500 + (seed >> 9) % 4000;
-	Uint32 start = (seed >> 16) % (cycle - duration);
+// Scratch copy of the screen area under the ship being drawn.
+static SDL_Surface *ship_backup;
+
+// Draws one ship centred on (x, y), `length` pixels long, nose towards `direction`
+// (1: right, -1: left) and tilted up by `pitch` radians, blended onto the
+// surface at `opacity` (0..255).
+static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_index,
+	int length, int direction, int team_index, Uint8 opacity, double pitch = 0.0) {
+	if(opacity == 0) return;
+	const ShipDesign *design = &ship_designs[design_index];
+	const ShipTeam *team = &ship_teams[team_index];
+	ShipTransform xf;
+	xf.x = x;
+	xf.y = y;
+	xf.direction = direction;
+	xf.scale = length / (double)(design->nose - design->tail);
+	xf.middle = (design->nose + design->tail) / 2.0;
+	xf.cos_pitch = cos(pitch);
+	xf.sin_pitch = sin(pitch);
+
+	// Everything the ship draws stays inside this area, which is saved first.
+	// (A tilted ship still fits: nothing is further than 0.8 lengths from its centre.)
+	int reach = length + length / 4 + 12;
+	int left = x - reach < 0 ? 0 : x - reach;
+	int top = y - reach < 0 ? 0 : y - reach;
+	int right = x + reach + 1 > surface->w ? surface->w : x + reach + 1;
+	int bottom = y + reach + 1 > surface->h ? surface->h : y + reach + 1;
+	if(right <= left || bottom <= top) return;
+	SDL_Rect area;
+	area.x = (Sint16)left;
+	area.y = (Sint16)top;
+	area.w = (Uint16)(right - left);
+	area.h = (Uint16)(bottom - top);
+	if(opacity < 255) {
+		if(!ship_backup || ship_backup->w < area.w || ship_backup->h < area.h) {
+			int backup_w = ship_backup && ship_backup->w > area.w ? ship_backup->w : area.w;
+			int backup_h = ship_backup && ship_backup->h > area.h ? ship_backup->h : area.h;
+			if(ship_backup) SDL_FreeSurface(ship_backup);
+			ship_backup = SDL_CreateRGBSurface(SDL_SWSURFACE, backup_w, backup_h, 32,
+				surface->format->Rmask, surface->format->Gmask, surface->format->Bmask, 0);
+			if(!ship_backup) return;
+		}
+		SDL_Rect source = area;
+		SDL_Rect target;
+		target.x = 0;
+		target.y = 0;
+		target.w = 0;
+		target.h = 0;
+		SDL_BlitSurface(surface, &source, ship_backup, &target);
+	}
+	SDL_Rect previous_clip;
+	SDL_GetClipRect(surface, &previous_clip);
+	SDL_SetClipRect(surface, &area);
+
+	int outline_width = xf.scale * 10.0 >= 16.0 ? 2 : 1;
+	int engine_radius = (int)(SHIP_ENGINE_SIZE * xf.scale + 0.5);
+	if(engine_radius < 1) engine_radius = 1;
+
+	// Engine plumes go behind the hull.
+	int nozzle_x[3], nozzle_y[3];
+	for(int engine = 0; engine < design->engine_count; engine++) {
+		ship_to_pixels(&xf, design->engines[engine][0], design->engines[engine][1],
+			&nozzle_x[engine], &nozzle_y[engine]);
+		for(int layer = 0; layer < 4; layer++) {
+			int plume = (int)(engine_radius * (8.0 - layer * 1.8));
+			int plume_width = (int)(engine_radius * (1.3 - layer * 0.25));
+			if(plume_width < 1) plume_width = 1;
+			// The plume points straight back from the nose; its width is across the ship.
+			double tail_x = -direction * xf.cos_pitch, tail_y = xf.sin_pitch;
+			double side_x = direction * xf.sin_pitch, side_y = xf.cos_pitch;
+			filledTrigonRGBA(surface,
+				nozzle_x[engine] + (int)(side_x * plume_width), nozzle_y[engine] + (int)(side_y * plume_width),
+				nozzle_x[engine] - (int)(side_x * plume_width), nozzle_y[engine] - (int)(side_y * plume_width),
+				nozzle_x[engine] + (int)(tail_x * plume), nozzle_y[engine] + (int)(tail_y * plume),
+				team->glow[0], team->glow[1], team->glow[2], 36 + layer * 30);
+		}
+		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine], engine_radius * 2,
+			team->glow[0], team->glow[1], team->glow[2], 46);
+	}
+
+	int px[24], py[24];
+	for(int spike = 0; spike < design->spike_count; spike++) {
+		for(int side = -1; side <= 1; side += 2) {
+			int spike_x = design->spikes[spike][0];
+			int spike_height = design->spikes[spike][1];
+			ship_to_pixels(&xf, spike_x, side * 7, &px[0], &py[0]);
+			ship_to_pixels(&xf, spike_x - 5, side * spike_height, &px[1], &py[1]);
+			ship_to_pixels(&xf, spike_x - 10, side * 7, &px[2], &py[2]);
+			ship_paint(surface, team, px, py, 3, -0.30, outline_width);
+		}
+	}
+	int count = ship_build_polygon(&xf, &design->hull, px, py);
+	ship_paint(surface, team, px, py, count, 0.0, outline_width);
+	for(int plate = 0; plate < 2; plate++) {
+		if(design->plates[plate].count == 0) continue;
+		count = ship_build_polygon(&xf, &design->plates[plate], px, py);
+		ship_paint(surface, team, px, py, count, 0.16 * (plate + 1), 1);
+	}
+
+	if(design->accent_on) {
+		int x1, y1, x2, y2;
+		ship_to_pixels(&xf, design->accent[0][0], design->accent[0][1], &x1, &y1);
+		ship_to_pixels(&xf, design->accent[1][0], design->accent[1][1], &x2, &y2);
+		thickLineRGBA(surface, x1, y1, x2, y2, 3,
+			team->accent[0], team->accent[1], team->accent[2], 70);
+		thickLineRGBA(surface, x1, y1, x2, y2, 1,
+			team->accent[0], team->accent[1], team->accent[2], 255);
+	}
+	// Gun turrets: a round mount with barrels that look different for each weapon.
+	for(int turret = 0; turret < design->turret_count; turret++) {
+		int cx, cy;
+		ship_to_pixels(&xf, design->turrets[turret][0], design->turrets[turret][1], &cx, &cy);
+		int base = (int)(xf.scale * 3.4 + 0.5);
+		if(base < 2) base = 2;
+		double forward_x = direction * xf.cos_pitch, forward_y = -xf.sin_pitch;
+		double across_x = -forward_y, across_y = forward_x;
+		int weapon = design->turret_weapon;
+		double barrel = base * (weapon == WEAPON_FLAK ? 1.7 : 2.5);
+		int barrels = weapon == WEAPON_MASS_DRIVER ? 2 : 1;
+		int barrel_width = (weapon == WEAPON_FLAK || base >= 4) ? 3 : 2;
+		filledCircleRGBA(surface, cx, cy, base + 1, 8, 10, 18, 255);
+		for(int b = 0; b < barrels; b++) {
+			double shift = barrels == 2 ? (b ? 0.5 : -0.5) * base : 0.0;
+			int sx = cx + (int)(across_x * shift), sy = cy + (int)(across_y * shift);
+			int ex = sx + (int)(forward_x * barrel), ey = sy + (int)(forward_y * barrel);
+			thickLineRGBA(surface, sx, sy, ex, ey, barrel_width + 2, 8, 10, 18, 255);
+			thickLineRGBA(surface, sx, sy, ex, ey, barrel_width,
+				team->tone[2][0], team->tone[2][1], team->tone[2][2], 255);
+			if(weapon == WEAPON_BEAM || weapon == WEAPON_PULSE) {
+				filledCircleRGBA(surface, ex, ey, 1,
+					team->accent[0], team->accent[1], team->accent[2], 255);
+			}
+		}
+		filledCircleRGBA(surface, cx, cy, base, team->tone[2][0], team->tone[2][1],
+			team->tone[2][2], 255);
+		filledCircleRGBA(surface, cx - base / 3, cy - base / 3, (base + 2) / 3,
+			team->tone[3][0], team->tone[3][1], team->tone[3][2], 255);
+	}
+	if(design->eye) {
+		int eye_x, eye_y;
+		ship_to_pixels(&xf, 0, 0, &eye_x, &eye_y);
+		int eye_unit = (int)(xf.scale * 10.0 + 0.5);
+		filledCircleRGBA(surface, eye_x, eye_y, eye_unit * 6 / 10 + 2,
+			team->accent[0], team->accent[1], team->accent[2], 60);
+		filledEllipseRGBA(surface, eye_x, eye_y, 3 * eye_unit / 10 + 2, eye_unit / 10 + 1,
+			team->accent[0], team->accent[1], team->accent[2], 255);
+		filledCircleRGBA(surface, eye_x, eye_y, eye_unit / 10 < 1 ? 1 : eye_unit / 10,
+			255, 255, 255, 255);
+	}
+	// Hot engine cores sit on top of the hull.
+	for(int engine = 0; engine < design->engine_count; engine++) {
+		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine], engine_radius + 1,
+			ship_mix(team->glow[0], 255, 0.5), ship_mix(team->glow[1], 255, 0.5),
+			ship_mix(team->glow[2], 255, 0.5), 255);
+		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine],
+			engine_radius / 2 < 1 ? 1 : engine_radius / 2, 255, 255, 255, 255);
+	}
+
+	if(opacity < 255) {
+		// Blend the saved background back over the ship: ship * opacity + scene * (1 - opacity).
+		SDL_SetAlpha(ship_backup, SDL_SRCALPHA, (Uint8)(255 - opacity));
+		SDL_Rect source;
+		source.x = 0;
+		source.y = 0;
+		source.w = area.w;
+		source.h = area.h;
+		SDL_Rect target = area;
+		SDL_BlitSurface(ship_backup, &source, surface, &target);
+		SDL_SetAlpha(ship_backup, 0, 255);
+	}
+	SDL_SetClipRect(surface, &previous_clip);
+}
+
+// The design that `variety` picks among the ships of a role.
+static int ship_design_index(int role, unsigned int variety) {
+	const int *designs = ship_small_designs;
+	int count = (int)(sizeof(ship_small_designs) / sizeof(ship_small_designs[0]));
+	if(role == SHIP_MID) {
+		designs = ship_mid_designs;
+		count = (int)(sizeof(ship_mid_designs) / sizeof(ship_mid_designs[0]));
+	} else if(role == SHIP_BIG) {
+		designs = ship_big_designs;
+		count = (int)(sizeof(ship_big_designs) / sizeof(ship_big_designs[0]));
+	}
+	return designs[variety % (unsigned int)count];
+}
+
+// Draws a ship of the given role. `variety` picks one of the designs of that role.
+static void draw_ship_role(SDL_Surface *surface, int x, int y, int role,
+	unsigned int variety, int length, int direction, int team_index, Uint8 opacity,
+	double pitch = 0.0) {
+	draw_ship_design(surface, x, y, ship_design_index(role, variety), length,
+		direction, team_index, opacity, pitch);
+}
+
+// Where a point of a design (the nose, a turret) ends up on screen.
+static void ship_mount_point(int design_index, int x, int y, int length, int direction,
+	double pitch, int tx, int ty, double *out_x, double *out_y) {
+	const ShipDesign *design = &ship_designs[design_index];
+	double scale = length / (double)(design->nose - design->tail);
+	double middle = (design->nose + design->tail) / 2.0;
+	double along = (tx - middle) * scale;
+	double down = ty * scale;
+	*out_x = x + direction * (along * cos(pitch) + down * sin(pitch));
+	*out_y = y - along * sin(pitch) + down * cos(pitch);
+}
+
+/*
+ * Weapon and explosion effects
+ *
+ * Both are stateless: given how many milliseconds ago a shot was fired they
+ * draw exactly what is on screen now.
+ */
+static const Uint8 weapon_team_colors[2][3] = { { 110, 205, 235 }, { 255, 165, 105 } };
+
+static unsigned int fx_hash(unsigned int a, unsigned int b) {
+	unsigned int value = a * 2654435761u + b * 2246822519u + 0x9e3779b9u;
+	value ^= value >> 15;
+	value *= 2246822519u;
+	value ^= value >> 13;
+	return value;
+}
+
+static Uint8 weapon_alpha(double alpha) {
+	if(alpha < 0.0) alpha = 0.0;
+	if(alpha > 255.0) alpha = 255.0;
+	return (Uint8)alpha;
+}
+
+// Radius a shot of a ship `length` pixels long is drawn at.
+static double weapon_unit(int length) {
+	double unit = 10.0 + length * 0.25;
+	return unit > 34.0 ? 34.0 : unit;
+}
+
+// A soft round glow: a faint halo, a brighter body and a hot core.
+static void weapon_glow(SDL_Surface *surface, double x, double y, double radius,
+	const Uint8 *color, double alpha) {
+	int r = (int)(radius + 0.5);
+	if(r < 1) r = 1;
+	filledCircleRGBA(surface, (int)x, (int)y, r * 2, color[0], color[1], color[2],
+		weapon_alpha(alpha * 0.22));
+	filledCircleRGBA(surface, (int)x, (int)y, r + r / 2, color[0], color[1], color[2],
+		weapon_alpha(alpha * 0.55));
+	filledCircleRGBA(surface, (int)x, (int)y, (r + 1) / 2, 255, 255, 255, weapon_alpha(alpha));
+}
+
+// An explosion `age` ms after it began: a white flash, a fireball of overlapping
+// blobs that cools from yellow through orange to grey smoke, a shockwave ring,
+// glowing debris, and for a destroyed ship tumbling hull fragments and two
+// smaller blasts after the first.
+static void draw_explosion(SDL_Surface *surface, double x, double y, double age,
+	double radius, bool big, unsigned int seed, int team, double fade) {
+	if(radius < 2.0) radius = 2.0;
+	double life = big ? 1700.0 : 380.0 + radius * 10.0;
+	if(!big && life > 900.0) life = 900.0;
+	if(age < 0.0 || age >= life || fade <= 0.0) return;
+	double p = age / life;
+	double inv = 1.0 - p;
+
+	static const Uint8 stops[4][3] = {
+		{ 255, 238, 190 }, { 246, 142, 62 }, { 118, 50, 34 }, { 60, 58, 66 } };
+	double position = p * 3.0;
+	int stop = (int)position;
+	if(stop > 2) stop = 2;
+	double between = position - stop;
+	Uint8 red = ship_mix(stops[stop][0], stops[stop + 1][0], between);
+	Uint8 green = ship_mix(stops[stop][1], stops[stop + 1][1], between);
+	Uint8 blue = ship_mix(stops[stop][2], stops[stop + 1][2], between);
+	double body = 215.0 * fade * pow(inv, 1.3);
+	int blobs = big ? 9 : 5;
+	for(int blob = 0; blob < blobs; blob++) {
+		unsigned int h = fx_hash(seed, blob);
+		double angle = (h % 6283) / 1000.0;
+		double spread = ((h >> 12) % 100) / 100.0;
+		double distance = radius * (0.15 + 0.7 * spread) * (0.3 + 0.7 * sqrt(p));
+		double size = radius * (0.35 + 0.35 * ((h >> 20) % 100) / 100.0)
+			* (0.3 + 0.7 * smooth_step(0.0, 0.3, p));
+		filledCircleRGBA(surface, (int)(x + cos(angle) * distance),
+			(int)(y + sin(angle) * distance), (int)size + 1,
+			red, green, blue, weapon_alpha(body * 0.8));
+	}
+	if(p < 0.3) {
+		double hot = 1.0 - p / 0.3;
+		filledCircleRGBA(surface, (int)x, (int)y, (int)(radius * (0.2 + 0.6 * hot)) + 1,
+			255, 250, 235, weapon_alpha(240.0 * fade * hot));
+	}
+	double ring = radius * (0.5 + 2.2 * sqrt(p));
+	circleRGBA(surface, (int)x, (int)y, (int)ring, 255, 214, 160,
+		weapon_alpha(170.0 * fade * inv * inv));
+	if(big) {
+		circleRGBA(surface, (int)x, (int)y, (int)(ring * 0.7), 255, 180, 110,
+			weapon_alpha(120.0 * fade * inv * inv));
+	}
+	int pieces = big ? 16 : 8;
+	for(int piece = 0; piece < pieces; piece++) {
+		unsigned int h = fx_hash(seed + 77u, piece);
+		double angle = (h % 6283) / 1000.0;
+		double speed = radius * (1.2 + 2.0 * ((h >> 12) % 100) / 100.0);
+		double reach = speed * (1.0 - pow(inv, 2.2));
+		double trail = radius * 0.55 * inv;
+		thickLineRGBA(surface, (int)(x + cos(angle) * reach), (int)(y + sin(angle) * reach),
+			(int)(x + cos(angle) * (reach - trail)), (int)(y + sin(angle) * (reach - trail)),
+			1, 255, 215 - piece * 3, 120, weapon_alpha(230.0 * fade * inv));
+	}
+	if(big) {
+		const ShipTeam *hull = &ship_teams[team];
+		for(int fragment = 0; fragment < 6; fragment++) {
+			unsigned int h = fx_hash(seed + 191u, fragment);
+			double angle = (h % 6283) / 1000.0;
+			double speed = radius * (0.5 + 1.1 * ((h >> 12) % 100) / 100.0);
+			double reach = speed * (1.0 - pow(inv, 1.6));
+			double cx = x + cos(angle) * reach;
+			double cy = y + sin(angle) * reach * 0.8;
+			double spin = ((h >> 8) % 628) / 100.0 + p * (3.0 + fragment);
+			double size = radius * 0.2;
+			int px[3], py[3];
+			for(int corner = 0; corner < 3; corner++) {
+				double corner_angle = spin + corner * 2.0944;
+				double corner_size = size * (corner == 0 ? 1.5 : 0.8);
+				px[corner] = (int)(cx + cos(corner_angle) * corner_size);
+				py[corner] = (int)(cy + sin(corner_angle) * corner_size);
+			}
+			Uint8 piece_alpha = weapon_alpha(255.0 * fade * inv);
+			filledTrigonRGBA(surface, px[0], py[0], px[1], py[1], px[2], py[2],
+				hull->tone[2][0], hull->tone[2][1], hull->tone[2][2], piece_alpha);
+			lineRGBA(surface, px[0], py[0], px[1], py[1], hull->glow[0], hull->glow[1],
+				hull->glow[2], weapon_alpha(piece_alpha * 0.8));
+		}
+		if(age > 160.0) {
+			draw_explosion(surface, x + radius * 0.6, y - radius * 0.25, age - 160.0,
+				radius * 0.55, false, seed + 1u, team, fade);
+		}
+		if(age > 340.0) {
+			draw_explosion(surface, x - radius * 0.55, y + radius * 0.3, age - 340.0,
+				radius * 0.5, false, seed + 2u, team, fade);
+		}
+	}
+}
+
+// Point on the route of a guided shot: the straight line from the muzzle to the
+// target, bent sideways by up to `bend` pixels half way.
+static void weapon_route(double fx, double fy, double dx, double dy, double nx, double ny,
+	double fraction, double bend, double *x, double *y) {
+	double arc = fraction < 1.0 ? bend * sin(3.14159265359 * fraction) : 0.0;
+	*x = fx + dx * fraction + nx * arc;
+	*y = fy + dy * fraction + ny * arc;
+}
+
+/*
+ * One shot of `weapon`, fired from (fx, fy) at (tx, ty), `age` ms ago.
+ * outcome: 0 the shot misses (guided weapons are shot down half way),
+ *          1 it hits, 2 it hits and destroys the target (the caller draws that).
+ * `unit` is the size of a shot in pixels (see weapon_unit), `shot` the index
+ * of the shot within its volley.
+ */
+static void draw_weapon_shot(SDL_Surface *surface, int weapon, int shot, double fx, double fy,
+	double tx, double ty, double age, double unit, int team, double fade, int outcome,
+	unsigned int seed) {
+	const WeaponSpec *spec = &weapon_specs[weapon];
+	if(age < 0.0 || age >= spec->life_ms || fade <= 0.0) return;
+	const Uint8 *color = weapon_team_colors[team];
+	bool guided = weapon == WEAPON_MISSILE || weapon == WEAPON_SWARM || weapon == WEAPON_TORPEDO;
+	if(guided && outcome == 0) {
+		// Shot down by point defence before it arrives.
+		tx = fx + (tx - fx) * 0.7;
+		ty = fy + (ty - fy) * 0.7;
+	}
+	double dx = tx - fx, dy = ty - fy;
+	double span = sqrt(dx * dx + dy * dy);
+	if(span < 1.0) span = 1.0;
+	double ux = dx / span, uy = dy / span;
+	double nx = -uy, ny = ux;
+	double p = age / spec->impact_ms;
+	double after = age - spec->impact_ms;
+	bool lands = outcome != 0 || guided;
+	bool arrived = lands && p >= 1.0;
+	double miss_fade = 1.0;
+	if(!lands && p > 1.0) miss_fade = 1.0 - (p - 1.0) / (spec->life_ms / spec->impact_ms - 1.0);
+	double blast = unit * spec->blast * 1.6;
+	if(age < 90.0 && weapon != WEAPON_RAIL && weapon != WEAPON_BEAM) {
+		weapon_glow(surface, fx, fy, unit * 0.2 * (1.0 - age / 90.0), color, 230.0 * fade);
+	}
+
+	switch(weapon) {
+		case WEAPON_PULSE: {
+			if(!arrived) {
+				double hx = fx + dx * p, hy = fy + dy * p;
+				double tail = unit * 0.55;
+				thickLineRGBA(surface, (int)(hx - ux * tail), (int)(hy - uy * tail),
+					(int)hx, (int)hy, 2, color[0], color[1], color[2],
+					weapon_alpha(170.0 * fade * miss_fade));
+				thickLineRGBA(surface, (int)(hx - ux * tail * 0.55), (int)(hy - uy * tail * 0.55),
+					(int)hx, (int)hy, 1, 255, 255, 255, weapon_alpha(240.0 * fade * miss_fade));
+			}
+			break;
+		}
+		case WEAPON_MASS_DRIVER: {
+			double offset = ((shot % 3) - 1) * unit * 0.1;
+			if(!arrived) {
+				double hx = fx + dx * p + nx * offset, hy = fy + dy * p + ny * offset;
+				double tail = unit * 0.55;
+				thickLineRGBA(surface, (int)(hx - ux * tail), (int)(hy - uy * tail),
+					(int)hx, (int)hy, 1, 255, 232, 160, weapon_alpha(235.0 * fade * miss_fade));
+				pixelRGBA(surface, (int)hx, (int)hy, 255, 255, 255, weapon_alpha(255.0 * fade));
+			}
+			break;
+		}
+		case WEAPON_PLASMA: {
+			static const Uint8 plasma[3] = { 140, 255, 170 };
+			if(!arrived) {
+				double radius = unit * 0.2 * (1.0 + 0.12 * sin(age / 45.0));
+				for(int k = 5; k >= 1; k--) {
+					double pk = p - k * 0.05;
+					if(pk < 0.0) continue;
+					weapon_glow(surface, fx + dx * pk, fy + dy * pk, radius * (1.0 - k * 0.13),
+						plasma, 150.0 * fade * miss_fade * (1.0 - k / 6.0));
+				}
+				weapon_glow(surface, fx + dx * p, fy + dy * p, radius, plasma,
+					235.0 * fade * miss_fade);
+			} else if(outcome != 0 && after < 500.0) {
+				circleRGBA(surface, (int)tx, (int)ty, (int)(unit * 0.3 + after * unit * 0.0018),
+					plasma[0], plasma[1], plasma[2], weapon_alpha(200.0 * fade * (1.0 - after / 500.0)));
+			}
+			break;
+		}
+		case WEAPON_FLAK: {
+			double bx = fx + dx * 0.92, by = fy + dy * 0.92;
+			if(p < 1.0) {
+				double hx = fx + dx * 0.92 * p, hy = fy + dy * 0.92 * p;
+				double tail = unit * 0.4;
+				thickLineRGBA(surface, (int)(hx - ux * tail), (int)(hy - uy * tail),
+					(int)hx, (int)hy, 2, 255, 185, 90, weapon_alpha(210.0 * fade));
+				pixelRGBA(surface, (int)hx, (int)hy, 255, 255, 255, weapon_alpha(255.0 * fade));
+			} else if(after < 560.0) {
+				double burst = after / 560.0;
+				for(int piece = 0; piece < 14; piece++) {
+					unsigned int h = fx_hash(seed + 5u, piece);
+					double angle = piece * 0.4488 + (h % 100) * 0.003;
+					double near_edge = unit * (0.15 + 0.95 * sqrt(burst));
+					double far_edge = near_edge + unit * 0.4 * (1.0 - burst);
+					thickLineRGBA(surface, (int)(bx + cos(angle) * near_edge),
+						(int)(by + sin(angle) * near_edge), (int)(bx + cos(angle) * far_edge),
+						(int)(by + sin(angle) * far_edge), 1, 255, 215, 120,
+						weapon_alpha(235.0 * fade * (1.0 - burst)));
+				}
+				filledCircleRGBA(surface, (int)bx, (int)by, (int)(unit * 0.3 * (0.5 + burst)) + 1,
+					110, 96, 84, weapon_alpha(110.0 * fade * (1.0 - burst)));
+				if(after < 140.0) {
+					filledCircleRGBA(surface, (int)bx, (int)by, (int)(unit * 0.45),
+						255, 245, 210, weapon_alpha(230.0 * fade * (1.0 - after / 140.0)));
+				}
+			}
+			if(outcome == 1) draw_explosion(surface, bx, by, after, blast, false, seed, team, fade);
+			return;
+		}
+		case WEAPON_MISSILE:
+		case WEAPON_SWARM:
+		case WEAPON_TORPEDO: {
+			bool swarm = weapon == WEAPON_SWARM, torpedo = weapon == WEAPON_TORPEDO;
+			double bend = torpedo ? 0.0
+				: swarm ? unit * (0.9 + 0.35 * (shot % 3)) * (shot % 2 ? 1.0 : -1.0)
+				: unit * 0.7 * ((seed & 1) ? 1.0 : -1.0);
+			double step = torpedo ? 0.035 : 0.05;
+			double smoke_size = torpedo ? 3.0 : (swarm ? 1.0 : 1.5);
+			double smoke_fade = p < 1.0 ? 1.0
+				: 1.0 - after / (spec->life_ms - spec->impact_ms);
+			if(smoke_fade < 0.0) smoke_fade = 0.0;
+			double reach = p < 1.0 ? p : 1.0;
+			for(int k = 1; k <= 10; k++) {
+				double pk = reach - k * step;
+				if(pk < 0.0) break;
+				double sx, sy;
+				weapon_route(fx, fy, dx, dy, nx, ny, pk, bend, &sx, &sy);
+				filledCircleRGBA(surface, (int)sx, (int)sy, (int)(smoke_size + k / 3.0),
+					176, 176, 188, weapon_alpha(90.0 * fade * smoke_fade * (1.0 - k / 11.0)));
+			}
+			if(p < 1.0) {
+				double hx, hy, ax, ay;
+				weapon_route(fx, fy, dx, dy, nx, ny, p, bend, &hx, &hy);
+				weapon_route(fx, fy, dx, dy, nx, ny, p + 0.01, bend, &ax, &ay);
+				double bx = ax - hx, by = ay - hy;
+				double bl = sqrt(bx * bx + by * by);
+				if(bl < 0.001) { bx = ux; by = uy; } else { bx /= bl; by /= bl; }
+				double body = unit * (torpedo ? 0.7 : (swarm ? 0.22 : 0.42));
+				int width = torpedo ? 3 : (swarm ? 1 : 2);
+				double tail_x = hx - bx * body, tail_y = hy - by * body;
+				double flame = body * (0.9 + 0.3 * sin(age / 25.0 + shot));
+				static const Uint8 flame_color[3] = { 255, 170, 80 };
+				static const Uint8 torpedo_flame[3] = { 120, 190, 255 };
+				weapon_glow(surface, tail_x, tail_y, torpedo ? unit * 0.28 : unit * 0.12,
+					torpedo ? torpedo_flame : flame_color, 200.0 * fade);
+				thickLineRGBA(surface, (int)tail_x, (int)tail_y,
+					(int)(tail_x - bx * flame), (int)(tail_y - by * flame), width,
+					255, 200, 120, weapon_alpha(210.0 * fade));
+				thickLineRGBA(surface, (int)tail_x, (int)tail_y, (int)hx, (int)hy, width + (torpedo ? 1 : 0),
+					torpedo ? 150 : 205, torpedo ? 160 : 208, torpedo ? 190 : 218, weapon_alpha(255.0 * fade));
+				filledCircleRGBA(surface, (int)hx, (int)hy, torpedo ? 2 : 1,
+					255, torpedo ? 90 : 255, torpedo ? 80 : 255, weapon_alpha(255.0 * fade));
+			}
+			if(arrived && outcome != 2) {
+				draw_explosion(surface, tx, ty, after, blast, torpedo && outcome == 1,
+					seed, team, fade);
+			}
+			return;
+		}
+		case WEAPON_RAIL: {
+			if(age < 300.0) {
+				double charge = age / 300.0;
+				weapon_glow(surface, fx, fy, unit * 0.5 * charge, color, 230.0 * fade * charge);
+				for(int tick = 0; tick < 4; tick++) {
+					double angle = tick * 1.5708 + 0.4;
+					double outer = unit * (1.1 - 0.8 * charge);
+					lineRGBA(surface, (int)(fx + cos(angle) * outer), (int)(fy + sin(angle) * outer),
+						(int)(fx + cos(angle) * outer * 0.6), (int)(fy + sin(angle) * outer * 0.6),
+						255, 255, 255, weapon_alpha(210.0 * fade * charge));
+				}
+			} else {
+				double since = age - 300.0;
+				double f = (1.0 - since / 550.0) * fade;
+				double ex = tx, ey = ty;
+				if(outcome == 0) { ex = tx + ux * span * 0.6; ey = ty + uy * span * 0.6; }
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)ex, (int)ey, 5,
+					color[0], color[1], color[2], weapon_alpha(70.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)ex, (int)ey, 3,
+					color[0], color[1], color[2], weapon_alpha(150.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)ex, (int)ey, 1,
+					255, 255, 255, weapon_alpha(255.0 * f));
+				circleRGBA(surface, (int)fx, (int)fy, (int)(unit * 0.15 + since * unit * 0.001),
+					color[0], color[1], color[2], weapon_alpha(170.0 * f));
+				if(outcome == 1) draw_explosion(surface, tx, ty, since, blast, false, seed, team, fade);
+			}
+			return;
+		}
+		case WEAPON_BEAM: {
+			if(age < 900.0) {
+				double sweep = outcome == 0
+					? unit * 1.1 * (1.0 - 2.0 * age / 900.0)
+					: unit * 0.06 * sin(age / 23.0);
+				double ex = tx + nx * sweep, ey = ty + ny * sweep;
+				double reach = smooth_step(0.0, 70.0, age);
+				double hx = fx + (ex - fx) * reach, hy = fy + (ey - fy) * reach;
+				double f = smooth_step(0.0, 60.0, age) * (1.0 - smooth_step(650.0, 900.0, age)) * fade;
+				int thick = 1 + (int)(unit / 16.0);
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)hx, (int)hy, thick * 2 + 3,
+					color[0], color[1], color[2], weapon_alpha(50.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)hx, (int)hy, thick + 1,
+					color[0], color[1], color[2], weapon_alpha(130.0 * f));
+				thickLineRGBA(surface, (int)fx, (int)fy, (int)hx, (int)hy, thick,
+					255, 255, 255, weapon_alpha(245.0 * f));
+				weapon_glow(surface, fx, fy, unit * 0.22, color, 220.0 * f);
+				weapon_glow(surface, hx, hy, unit * 0.28, color, 220.0 * f);
+				if(outcome != 0 && reach >= 1.0) {
+					for(int spark = 0; spark < 4; spark++) {
+						unsigned int h = fx_hash(seed + (unsigned int)(age / 45.0), spark);
+						double angle = (h % 6283) / 1000.0;
+						double length = unit * (0.3 + ((h >> 12) % 60) / 100.0);
+						lineRGBA(surface, (int)hx, (int)hy, (int)(hx + cos(angle) * length),
+							(int)(hy + sin(angle) * length), 255, 230, 170, weapon_alpha(220.0 * f));
+					}
+				}
+			}
+			if(outcome == 1 && after > 0.0) {
+				draw_explosion(surface, tx, ty, after, blast, false, seed, team, fade);
+			}
+			return;
+		}
+	}
+	// Pulse, mass driver and plasma end in a small blast where they hit.
+	if(arrived && outcome == 1) {
+		draw_explosion(surface, tx, ty, after, blast < 2.0 ? 2.0 : blast, false, seed, team, fade);
+	}
+}
+
+static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale,
+	const SceneWeather *weather) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_FULLSCREEN, ticks, &window)) return;
+	Uint32 seed = window.seed;
+	Uint32 phase = window.phase;
+	double fade = window.fade;
+	// Kinds 4 and 5 are quiet slots that fullscreen_accept() already filters out.
+	// When forced, fold them back so the effect always shows something.
 	int kind = (seed >> 5) % 6;
-	if(slot_phase < start || slot_phase >= start + duration || kind >= 6) return;
-	Uint32 phase = slot_phase - start;
-	double progress = (double)phase / duration;
-
-	double fade = smooth_step(0.0, 1300.0, phase)
-		* (1.0 - smooth_step(duration - 1200.0, duration, phase));
+	if(forced_effect == &EFFECT_FULLSCREEN) kind %= 4;
+	kind = effect_kind(&EFFECT_FULLSCREEN, kind);
+	if(kind >= 4) return;
 	if(kind == 0) {
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			62, 94, 132, (Uint8)(10 * fade));
-		int segments = 20;
-		for(int band = 0; band < 3; band++) {
-			int previous_x = 0;
-			int previous_y = surface->h * (18 + band * 12) / 100;
-			for(int i = 1; i <= segments; i++) {
-				int x = surface->w * i / segments;
-				double nx = (double)x / surface->w;
-				int y = surface->h * (18 + band * 12) / 100
-					+ (int)(sin(nx * 6.28318530718 + ticks / 900.0 + band * 1.7)
-						* scale * (0.025 + band * 0.006));
-				Uint8 alpha = (Uint8)((30 - band * 5) * fade);
-				thickLineRGBA(surface, previous_x, previous_y, x, y,
-					2, (Uint8)(82 + band * 28), (Uint8)(166 + band * 15),
-					(Uint8)(167 + band * 24), alpha);
-				previous_x = x;
-				previous_y = y;
-			}
-		}
+		// Top up to full strength without doubling up when the aurora weather is on.
+		draw_aurora(surface, ticks, scale, fade * (1.0 - weather->aurora));
 	} else if(kind == 1) {
 		Uint32 flash_phase = phase % 3400;
 		double flash = smooth_step(0.0, 90.0, flash_phase)
@@ -708,20 +1694,20 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 		int radius = scale / 8;
 		int moon_x = surface->w * (25 + (seed >> 12) % 50) / 100;
 		int moon_y = surface->h * (18 + (seed >> 20) % 24) / 100;
-		soft_glow(surface, moon_x, moon_y, radius + scale / 12,
-			119, 158, 194, (int)(60 * fade));
+		filledCircleRGBA(surface, moon_x, moon_y, radius + scale / 18,
+			119, 158, 194, (Uint8)(24 * fade));
 		filledCircleRGBA(surface, moon_x, moon_y, radius,
 			171, 183, 190, (Uint8)(190 * fade));
 		filledCircleRGBA(surface, moon_x + radius / 3, moon_y, radius - radius / 7,
 			22, 27, 38, (Uint8)(220 * fade));
-	} else if(kind == 3) {
+	} else {
 		int flare_x = surface->w * (28 + (seed >> 12) % 44) / 100;
 		int flare_y = surface->h * (18 + (seed >> 20) % 25) / 100;
 		int radius = scale / 13;
 		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 			177, 82, 45, (Uint8)(13 * fade));
-		soft_glow(surface, flare_x, flare_y, radius * 2,
-			245, 137, 75, (int)(70 * fade));
+		filledCircleRGBA(surface, flare_x, flare_y, radius,
+			245, 137, 75, (Uint8)(45 * fade));
 		filledCircleRGBA(surface, flare_x, flare_y, radius / 3,
 			255, 222, 169, (Uint8)(90 * fade));
 		for(int ray = 0; ray < 12; ray++) {
@@ -731,1323 +1717,3915 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 			thickLineRGBA(surface, flare_x, flare_y, end_x, end_y, 1,
 				251, 174, 105, (Uint8)(18 * fade));
 		}
-	} else if(kind == 4) {
-		// Solar eclipse: the sky darkens and a corona appears around the moon.
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			8, 10, 18, (Uint8)(70 * fade));
-		int eclipse_x = surface->w * (30 + (seed >> 12) % 40) / 100;
-		int eclipse_y = surface->h * (20 + (seed >> 20) % 20) / 100;
-		int sun_radius = scale / 9;
-		int moon_radius = sun_radius * 9 / 10;
-		double cover = smooth_step(0.15, 0.55, progress)
-			* (1.0 - smooth_step(0.75, 0.95, progress));
-		int moon_offset = (int)((0.5 - cover) * sun_radius * 2.2);
-		soft_glow(surface, eclipse_x, eclipse_y, sun_radius + scale / 10,
-			255, 200, 90, (int)(90 * fade));
-		filledCircleRGBA(surface, eclipse_x, eclipse_y, sun_radius,
-			255, 220, 130, (Uint8)(120 * fade));
-		filledCircleRGBA(surface, eclipse_x + moon_offset, eclipse_y, moon_radius,
-			10, 12, 22, (Uint8)(230 * fade));
-		for(int ray = 0; ray < 16; ray++) {
-			double angle = ray * 0.39269908169 + ticks / 4000.0;
-			int end_x = eclipse_x + (int)(cos(angle) * sun_radius * 1.6);
-			int end_y = eclipse_y + (int)(sin(angle) * sun_radius * 1.6);
-			thickLineRGBA(surface, eclipse_x, eclipse_y, end_x, end_y, 1,
-				255, 235, 180, (Uint8)(14 * fade));
-		}
+	}
+}
+
+/*
+ * Dogfights
+ *
+ * Like every effect a dogfight is stateless: where each ship is, which way it
+ * points and which shots are in the air are all worked out from the time since
+ * the effect began. A dogfight is made of pairs of ships, one of each team.
+ * Each pair flies several passes across the sky. In a pass the leader flies a
+ * route of wide loops, and the chaser follows the same route a little behind,
+ * closing and dropping back, and fires its weapon at it. Most volleys miss; one
+ * hits. The leader that was hit trails smoke for the rest of the pass, and on
+ * the last pass it is destroyed. The next pass goes the other way with the
+ * roles swapped.
+ */
+#define DOG_BURSTS 5            // volleys the chaser fires in a pass
+#define DOG_HIT_BURST 3         // the volley that hits (the middle shot of it)
+
+typedef struct {
+	SDL_Surface *surface;
+	int scale;
+	Uint32 seed;
+	int pair_count;
+	int pass_count;
+	double pass_ms;             // length of one pass
+	double stagger_ms;          // delay between the start of one pair and the next
+	int length;                 // ship length in pixels
+} Dogfight;
+
+typedef struct {
+	bool visible;
+	double x, y;
+	int direction;              // 1: nose points right, -1: left
+	double pitch;               // nose above the horizontal, radians
+	double u;                   // 0: entering the screen, 1: leaving it
+	int pass;
+	int team;
+} DogPose;
+
+static unsigned int dog_hash(unsigned int a, unsigned int b) {
+	return fx_hash(a, b);
+}
+
+// A point of the looping route of pair `pair` on pass `pass`; u runs 0..1 across the screen.
+static void dog_route_point(const Dogfight *fight, int pair, int pass, double u,
+	double *x, double *y) {
+	int width = fight->surface->w;
+	int loops = (int)(width / (fight->scale * 0.4) + 0.5);
+	if(loops < 2) loops = 2;
+	if(loops > 6) loops = 6;
+	double margin = fight->scale / 10.0;
+	double travel = width + 2.0 * margin;
+	double drift = travel / (6.28318530718 * loops);
+	double reach = drift * 1.45;          // wider than the drift, so the route loops
+	double height = fight->scale * 0.032;
+	double start = (dog_hash(fight->seed, pair * 8 + pass) % 6283) / 1000.0;
+	double angle = 6.28318530718 * loops * u + start;
+	double along = -margin + travel * u - reach * (sin(angle) - sin(start));
+	*x = (pass % 2) ? width - along : along;
+	*y = fight->surface->h * 0.078 - height * cos(angle);
+}
+
+// Where a ship of `pair` is at time t (ms since the effect began). Role 0 leads, role 1 chases.
+static void dog_pose(const Dogfight *fight, int pair, int role, double t, DogPose *pose) {
+	pose->visible = false;
+	double local = t - pair * fight->stagger_ms;
+	if(local < 0.0 || local >= fight->pass_count * fight->pass_ms) return;
+	int pass = (int)(local / fight->pass_ms);
+	double u = (local - pass * fight->pass_ms) / fight->pass_ms * 1.15;
+	if(role == 1) u -= 0.1 * (1.0 + 0.4 * sin(u * 9.0 + pair + pass));
+	double before_x, before_y, after_x, after_y;
+	dog_route_point(fight, pair, pass, u - 0.003, &before_x, &before_y);
+	dog_route_point(fight, pair, pass, u + 0.003, &after_x, &after_y);
+	dog_route_point(fight, pair, pass, u, &pose->x, &pose->y);
+	double heading = atan2(-(after_y - before_y), after_x - before_x);
+	if(after_x >= before_x) {
+		pose->direction = 1;
+		pose->pitch = heading;
 	} else {
-		// Meteor shower: streaks of light falling across the sky.
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			10, 12, 24, (Uint8)(30 * fade));
-		int meteor_count = 18 + (seed >> 8) % 10;
-		for(int meteor = 0; meteor < meteor_count; meteor++) {
-			unsigned int meteor_seed = (unsigned int)meteor * 2246822519u + seed;
-			double meteor_progress = fmod((meteor_seed >> 8) / 4294967295.0
-				+ progress * (0.7 + (meteor_seed >> 16) % 40 / 100.0), 1.0);
-			int start_x = (int)(meteor_seed % surface->w);
-			int start_y = (int)((meteor_seed >> 12) % (surface->h * 45 / 100));
-			int length = scale / (14 + (meteor_seed >> 20) % 10);
-			int dx = length / 3;
-			int dy = length;
-			int meteor_x = start_x + (int)(meteor_progress * surface->w * 0.6);
-			int meteor_y = start_y + (int)(meteor_progress * surface->h * 0.5);
-			Uint8 meteor_alpha = (Uint8)((60 + (meteor_seed >> 24) % 60) * fade
-				* (1.0 - meteor_progress));
-			thickLineRGBA(surface, meteor_x - dx, meteor_y - dy, meteor_x, meteor_y,
-				1, 220, 230, 245, meteor_alpha);
-			filledCircleRGBA(surface, meteor_x, meteor_y, 1,
-				255, 255, 250, (Uint8)(meteor_alpha * 1.2));
+		pose->direction = -1;
+		pose->pitch = atan2(sin(3.14159265359 - heading), cos(3.14159265359 - heading));
+	}
+	pose->u = u;
+	pose->pass = pass;
+	pose->team = (role + pass) % 2;
+	pose->visible = pose->x > -fight->length && pose->x < fight->surface->w + fight->length;
+}
+
+// When, within a pass, a volley starts; and when its shot number `bolt` is fired.
+static double dog_shot_time(const Dogfight *fight, int burst, int bolt, int weapon) {
+	return (0.18 + 0.15 * burst) * fight->pass_ms + bolt * weapon_specs[weapon].gap_ms;
+}
+
+// When, within a pass, the leader is hit by the chaser's weapon.
+static double dog_hit_time(const Dogfight *fight, int weapon) {
+	return dog_shot_time(fight, DOG_HIT_BURST, weapon_specs[weapon].shots / 2, weapon)
+		+ weapon_specs[weapon].impact_ms;
+}
+
+static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, int scale,
+	int pair_count, int pass_count, double stagger) {
+	Dogfight fight;
+	fight.surface = surface;
+	fight.scale = scale;
+	fight.seed = window->seed;
+	fight.pair_count = pair_count;
+	fight.pass_count = pass_count;
+	fight.pass_ms = (window->duration - 800.0) / (pass_count + (pair_count - 1) * stagger);
+	fight.stagger_ms = fight.pass_ms * stagger;
+	fight.length = scale / 34;
+	if(fight.length < 14) fight.length = 14;
+	double t = window->phase;
+	double fade = window->fade;
+	Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+	double unit = weapon_unit(fight.length);
+
+	for(int pair = 0; pair < pair_count; pair++) {
+		double local = t - pair * fight.stagger_ms;
+		if(local < 0.0 || local >= pass_count * fight.pass_ms) continue;
+		int pass = (int)(local / fight.pass_ms);
+		double pass_age = local - pass * fight.pass_ms;
+		bool last_pass = pass == pass_count - 1;
+		double pass_start = pair * fight.stagger_ms + pass * fight.pass_ms;
+		// The chaser is the second ship; it and the leader swap teams every pass.
+		int chaser_team = (1 + pass) % 2, leader_team = pass % 2;
+		int chaser_design = ship_design_index(SHIP_SMALL,
+			dog_hash(fight.seed, pair * 2 + chaser_team) >> 4);
+		int weapon = ship_designs[chaser_design].weapon;
+		const WeaponSpec *spec = &weapon_specs[weapon];
+		double hit_time = dog_hit_time(&fight, weapon);
+		bool leader_hit = pass_age >= hit_time;
+		bool leader_destroyed = leader_hit && last_pass;
+
+		// Engine trails, and smoke behind the leader once it has been hit.
+		for(int role = 0; role < 2; role++) {
+			DogPose pose;
+			dog_pose(&fight, pair, role, t, &pose);
+			if(!pose.visible || (role == 0 && leader_destroyed)) continue;
+			double last_x = pose.x, last_y = pose.y;
+			for(int step = 1; step <= 10; step++) {
+				DogPose earlier;
+				dog_pose(&fight, pair, role, t - step * 50.0, &earlier);
+				if(!earlier.visible || earlier.pass != pose.pass) break;
+				thickLineRGBA(surface, (int)last_x, (int)last_y, (int)earlier.x, (int)earlier.y,
+					1, ship_teams[pose.team].glow[0], ship_teams[pose.team].glow[1],
+					ship_teams[pose.team].glow[2], (Uint8)(95 * fade * (1.0 - step / 11.0)));
+				last_x = earlier.x;
+				last_y = earlier.y;
+			}
+			if(role == 0 && leader_hit) {
+				for(int puff = 1; puff <= 9; puff++) {
+					double puff_time = t - puff * 110.0;
+					if(puff_time - pass_start < hit_time) break;
+					DogPose smoke;
+					dog_pose(&fight, pair, 0, puff_time, &smoke);
+					if(!smoke.visible || smoke.pass != pose.pass) break;
+					filledCircleRGBA(surface, (int)smoke.x, (int)smoke.y, 1 + puff / 2,
+						150, 150, 160, (Uint8)(70 * fade * (1.0 - puff / 10.0)));
+				}
+			}
+		}
+
+		// The ships.
+		for(int role = 0; role < 2; role++) {
+			DogPose pose;
+			dog_pose(&fight, pair, role, t, &pose);
+			if(!pose.visible || (role == 0 && leader_destroyed)) continue;
+			unsigned int variety = dog_hash(fight.seed, pair * 2 + pose.team) >> 4;
+			draw_ship_role(surface, (int)floor(pose.x + 0.5), (int)floor(pose.y + 0.5),
+				SHIP_SMALL, variety, fight.length, pose.direction, pose.team, opacity,
+				pose.pitch);
+			if(role == 0 && leader_hit && !leader_destroyed) {
+				// A burning patch where it was hit.
+				filledCircleRGBA(surface, (int)pose.x, (int)pose.y, fight.length / 5 + 1,
+					255, 140, 60, (Uint8)(110 * fade * (0.5 + 0.5 * sin(t / 70.0))));
+			}
+		}
+
+		// Shots from the chaser at the leader, using the chaser's own weapon.
+		for(int burst = 0; burst < DOG_BURSTS; burst++) {
+			if(last_pass && burst > DOG_HIT_BURST) break;
+			for(int bolt = 0; bolt < spec->shots; bolt++) {
+				double fired = pass_start + dog_shot_time(&fight, burst, bolt, weapon);
+				double age = t - fired;
+				if(age < 0.0 || age >= spec->life_ms) continue;
+				bool hit = burst == DOG_HIT_BURST && bolt == spec->shots / 2;
+				// A beam stays on its target, so it follows both ships live.
+				bool live = weapon == WEAPON_BEAM;
+				DogPose shooter, target;
+				dog_pose(&fight, pair, 1, live ? t : fired, &shooter);
+				dog_pose(&fight, pair, 0, live ? t : fired + spec->impact_ms, &target);
+				if(!shooter.visible || !target.visible) continue;
+				double from_x, from_y;
+				ship_mount_point(chaser_design, (int)shooter.x, (int)shooter.y, fight.length,
+					shooter.direction, shooter.pitch, ship_designs[chaser_design].nose, 0,
+					&from_x, &from_y);
+				double to_x = target.x, to_y = target.y;
+				if(!hit) {
+					// Misses pass to one side or the other of the target.
+					double side = ((burst * 3 + bolt) % 2 ? 1.0 : -1.0)
+						* fight.length * (0.7 + 0.2 * ((burst + bolt) % 3));
+					double dx = to_x - from_x, dy = to_y - from_y;
+					double span = sqrt(dx * dx + dy * dy) + 1.0;
+					to_x += -dy / span * side;
+					to_y += dx / span * side;
+				}
+				draw_weapon_shot(surface, weapon, bolt, from_x, from_y, to_x, to_y, age, unit,
+					chaser_team, fade, hit ? (last_pass ? 2 : 1) : 0,
+					dog_hash(fight.seed, pair * 64 + pass * 16 + burst * 4 + bolt));
+			}
+		}
+
+		// The destroyed leader blows up where it was when the shot landed.
+		if(leader_destroyed) {
+			DogPose last;
+			dog_pose(&fight, pair, 0, pass_start + hit_time, &last);
+			draw_explosion(surface, last.x, last.y, pass_age - hit_time, fight.length * 1.0,
+				true, dog_hash(fight.seed, pair * 5 + 1), leader_team, fade);
 		}
 	}
 }
 
-// Defined further down; declared here so the long scenes can use the
-// soft-light helpers without reordering the file.
-static void soft_glow(SDL_Surface *surface, int cx, int cy, int radius,
-	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
-static void set_pixel_glow(SDL_Surface *surface, int x, int y,
-	Uint8 red, Uint8 green, Uint8 blue, int alpha);
-static void soft_band(SDL_Surface *surface, int y0, int y1,
-	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
-static void soft_column(SDL_Surface *surface, int cx, int base_y, int height,
-	int half_width, Uint8 red, Uint8 green, Uint8 blue, int peak_alpha);
+// The old flyby: one ship from each side crosses the sky, firing pulse bolts at the
+// other and passing it in the middle. Nothing is hit.
+static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
+	Uint32 phase = window.phase;
+
+	int size = scale / 170;
+	if(size < 4) size = 4;
+	int length = scale / 38;
+	if(length < 14) length = 14;
+	double fade = window.fade;
+	double progress = window.progress;
+	int left_x = (int)(-length + progress * (surface->w + 2.0 * length));
+	int right_x = surface->w - left_x;
+	int center_y = surface->h * 11 / 100;
+	int arc = (int)(sin(progress * 6.28318530718) * scale * 0.018);
+	int maneuver = (int)(sin(progress * 12.56637061436) * scale * 0.014);
+	int left_y = center_y + arc + maneuver;
+	int right_y = center_y - arc - maneuver;
+	Uint8 alpha = (Uint8)(150 * fade);
+	Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+
+	draw_ship_role(surface, left_x, left_y, SHIP_SMALL, window.seed >> 4,
+		length, 1, 0, opacity);
+	draw_ship_role(surface, right_x, right_y, SHIP_SMALL, window.seed >> 11,
+		length, -1, 1, opacity);
+
+	Uint32 volley_phase = phase % 2600;
+	if(volley_phase < 300 && progress > 0.08 && progress < 0.94) {
+		int bolt_length = scale / 18;
+		if(bolt_length < 12) bolt_length = 12;
+		Uint8 bolt_alpha = (Uint8)(alpha * 0.8);
+		thickLineRGBA(surface, left_x + length / 2, left_y,
+			left_x + length / 2 + bolt_length, left_y - size / 3,
+			1, 143, 204, 224, bolt_alpha);
+		thickLineRGBA(surface, right_x - length / 2, right_y,
+			right_x - length / 2 - bolt_length, right_y + size / 3,
+			1, 220, 164, 126, bolt_alpha);
+	}
+	if(volley_phase > 1850 && volley_phase < 2250) {
+		double hit_progress = (double)(volley_phase - 1850) / 400.0;
+		int impact_x = surface->w / 2
+			+ (int)(sin(phase / 1700.0) * scale * 0.045);
+		int impact_y = center_y + (int)(sin(phase / 950.0) * scale * 0.025);
+		Uint8 impact_alpha = (Uint8)(alpha * (1.0 - hit_progress));
+		int radius = size / 2 + (int)(size * hit_progress);
+		filledCircleRGBA(surface, impact_x, impact_y, radius,
+			219, 158, 111, (Uint8)(impact_alpha * 0.65));
+		filledCircleRGBA(surface, impact_x, impact_y, size / 4,
+			238, 216, 177, impact_alpha);
+	}
+}
+
+// One pair of small ships chasing each other in loops, then trading places.
+static void render_dogfight_effect(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
+	render_dogfight(surface, &window, scale, 1, 2, 0.0);
+}
+
+// A furball: two or three pairs fighting at once.
+static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
+	render_dogfight(surface, &window, scale, 2 + (window.seed >> 5) % 2, 3, 0.35);
+}
+
+/*
+ * Fleet battle
+ *
+ * Two fleets close, hold and trade fire. Like every effect it is stateless: a
+ * ship's place is a function of time, each gun fires on a schedule of its own,
+ * and a shot is drawn from how long ago it was fired. The losing fleet loses its
+ * ships one at a time in the second half of the battle (the last one survives and
+ * retreats); the winners' guns favour a ship that is about to die, so every
+ * destruction is preceded by hits.
+ */
+typedef struct {
+	SDL_Surface *surface;
+	int scale;
+	Uint32 seed;
+	double start;               // scene time the battle began
+	double duration;
+	int winner;                 // the side that does not lose ships
+	int size, fighter_size;
+	int count[2];
+	int center_y;
+} Fleet;
+
+// Time between volleys of each weapon (ms); turrets fire half as often again.
+static const double weapon_period[WEAPON_COUNT] = {
+	1300.0, 3400.0, 2800.0, 1700.0, 2100.0, 3800.0, 3400.0, 6500.0, 4200.0 };
+
+static double fleet_progress(const Fleet *fleet, double t) {
+	return (t - fleet->start) / fleet->duration;
+}
+
+static void fleet_pose(const Fleet *fleet, int side, int ship, double t, double *x, double *y) {
+	double progress = fleet_progress(fleet, t);
+	double approach = smooth_step(0.04, 0.31, progress);
+	double retreat = smooth_step(0.78, 0.97, progress);
+	int width = fleet->surface->w;
+	double anchor;
+	if(side == 0) {
+		double hold = width * (0.37 + 0.008 * sin(t / 3600.0));
+		anchor = -fleet->size * 6 + approach * (hold + fleet->size * 6)
+			- (fleet->winner == 0 ? 0.0 : retreat * width * 0.62);
+	} else {
+		double hold = width * (0.63 + 0.008 * sin(t / 3900.0 + 1.7));
+		anchor = width + fleet->size * 6 - approach * (width - hold + fleet->size * 6)
+			+ (fleet->winner == 1 ? 0.0 : retreat * width * 0.62);
+	}
+	int direction = side == 0 ? 1 : -1;
+	int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
+	double offset = direction * ((ship + 1) / 2) * fleet->size * 3;
+	double weave = sin(t / (510.0 + ship * 127) + ship * 1.8 + side * 2.4) * fleet->scale * 0.009;
+	double arc = sin(t / 1900.0 + progress * 8.0) * fleet->scale * 0.010;
+	*x = anchor + offset + weave;
+	*y = fleet->center_y + (side == 0 ? arc : -arc) + lane * fleet->scale / 36.0
+		+ sin(t / (370.0 + ship * 83) + ship * 1.3) * fleet->size * 0.75;
+}
+
+static int fleet_role(const Fleet *fleet, int side, int ship) {
+	unsigned int type = fleet->seed >> ((ship * 3 + side * 7) % 24);
+	if(ship == 0 && ((fleet->seed >> (side + 2)) & 1)) return SHIP_BIG;
+	if(type % 3 == 0) return SHIP_MID;
+	return SHIP_SMALL;
+}
+
+static int fleet_length(const Fleet *fleet, int ship, int role) {
+	if(role == SHIP_BIG) return fleet->size * 10;
+	if(role == SHIP_MID) return fleet->size * 7;
+	return (fleet->fighter_size + (ship % 3 == 0 ? 2 : 0)) * 5;
+}
+
+static int fleet_design(const Fleet *fleet, int side, int ship) {
+	unsigned int variety = (fleet->seed >> 9) + ship * 5 + side * 3;
+	return ship_design_index(fleet_role(fleet, side, ship), variety);
+}
+
+// Scene time at which a ship of the losing fleet is destroyed; -1 for any other ship.
+static double fleet_death(const Fleet *fleet, int side, int ship) {
+	if(side == fleet->winner || ship == fleet->count[side] - 1) return -1.0;
+	double when = 0.46 + 0.34 * (fx_hash(fleet->seed, side * 16 + ship) % 100) / 100.0;
+	return fleet->start + when * fleet->duration;
+}
+
+// Draws the shots in the air now from every gun of one ship.
+static void fleet_fire(const Fleet *fleet, int side, int ship, double now, double fade) {
+	int design_index = fleet_design(fleet, side, ship);
+	const ShipDesign *design = &ship_designs[design_index];
+	int length = fleet_length(fleet, ship, fleet_role(fleet, side, ship));
+	double unit = weapon_unit(length);
+	double death = fleet_death(fleet, side, ship);
+	int direction = side == 0 ? 1 : -1;
+	int enemy = 1 - side;
+	for(int gun = 0; gun < 1 + design->turret_count; gun++) {
+		int weapon = gun == 0 ? design->weapon : design->turret_weapon;
+		const WeaponSpec *spec = &weapon_specs[weapon];
+		unsigned int gun_hash = fx_hash(fleet->seed, 1000 + side * 200 + ship * 20 + gun);
+		double period = weapon_period[weapon] * (gun == 0 ? 1.0 : 1.5)
+			* (0.85 + 0.3 * (gun_hash % 100) / 100.0);
+		double offset = (gun_hash >> 8) % (unsigned int)period;
+		double volley = (spec->shots - 1) * spec->gap_ms;
+		double since = now - fleet->start - offset;
+		if(since < 0.0) continue;
+		int newest = (int)(since / period);
+		double earliest = since - spec->life_ms - volley;
+		int oldest = earliest < 0.0 ? 0 : (int)(earliest / period);
+		int mount_x = gun == 0 ? design->nose : design->turrets[gun - 1][0];
+		int mount_y = gun == 0 ? 0 : design->turrets[gun - 1][1];
+		for(int k = oldest; k <= newest; k++) {
+			double volley_start = fleet->start + offset + k * period;
+			double volley_progress = fleet_progress(fleet, volley_start);
+			if(volley_progress < 0.14 || volley_progress > 0.9) continue;
+			if(death >= 0.0 && volley_start >= death) continue;
+			unsigned int volley_hash = fx_hash(gun_hash, k);
+			double lands = volley_start + spec->impact_ms;
+			// Prefer a ship that is about to be destroyed.
+			int target = -1;
+			bool finishing = false;
+			for(int j = 0; j < fleet->count[enemy]; j++) {
+				double d = fleet_death(fleet, enemy, j);
+				if(d > lands && d < lands + 1500.0 && volley_hash % 100 < 70) {
+					target = j;
+					finishing = true;
+					break;
+				}
+			}
+			if(target < 0) {
+				int first = (volley_hash >> 8) % fleet->count[enemy];
+				for(int tries = 0; tries < fleet->count[enemy]; tries++) {
+					int j = (first + tries) % fleet->count[enemy];
+					double d = fleet_death(fleet, enemy, j);
+					if(d < 0.0 || d > lands) {
+						target = j;
+						break;
+					}
+				}
+			}
+			if(target < 0) continue;
+			bool hit = finishing || (volley_hash >> 16) % 100 < 40;
+			int target_length = fleet_length(fleet, target, fleet_role(fleet, enemy, target));
+			for(int bolt = 0; bolt < spec->shots; bolt++) {
+				double fired = volley_start + bolt * spec->gap_ms;
+				double age = now - fired;
+				if(age < 0.0 || age >= spec->life_ms) continue;
+				// A beam stays on its target, so it follows both ships live.
+				bool live = weapon == WEAPON_BEAM;
+				double sx, sy, tx, ty, mx, my;
+				fleet_pose(fleet, side, ship, live ? now : fired, &sx, &sy);
+				fleet_pose(fleet, enemy, target, live ? now : fired + spec->impact_ms, &tx, &ty);
+				ship_mount_point(design_index, (int)sx, (int)sy, length, direction, 0.0,
+					mount_x, mount_y, &mx, &my);
+				double dx = tx - mx, dy = ty - my;
+				double span = sqrt(dx * dx + dy * dy) + 1.0;
+				if(hit) {
+					// Hits spread over the hull.
+					ty += ((bolt + k) % 3 - 1) * target_length * 0.12;
+				} else {
+					double side_offset = ((volley_hash >> 4) % 2 ? 1.0 : -1.0)
+						* target_length * (0.5 + 0.25 * (bolt % 3));
+					tx += -dy / span * side_offset;
+					ty += dx / span * side_offset;
+				}
+				draw_weapon_shot(fleet->surface, weapon, bolt, mx, my, tx, ty, age, unit,
+					side, fade, hit ? 1 : 0, fx_hash(volley_hash, bolt));
+			}
+		}
+	}
+}
+
+static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_FLEET_BATTLE, ticks, &window)) return;
+	Fleet fleet;
+	fleet.surface = surface;
+	fleet.scale = scale;
+	fleet.seed = window.seed;
+	fleet.start = (double)ticks - window.phase;
+	fleet.duration = window.duration;
+	fleet.winner = (window.seed ^ (window.seed >> 13) ^ (window.seed >> 23)) & 1;
+	fleet.size = scale / 72;
+	if(fleet.size < 10) fleet.size = 10;
+	fleet.fighter_size = fleet.size / 2;
+	if(fleet.fighter_size < 7) fleet.fighter_size = 7;
+	fleet.count[0] = 3 + (window.seed >> 4) % 4;
+	fleet.count[1] = 3 + (window.seed >> 12) % 4;
+	fleet.center_y = surface->h * 12 / 100;
+	Uint32 seed = window.seed;
+	double progress = window.progress;
+	double fade = window.fade;
+	double now = ticks;
+	Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+
+	// The ships. One that is about to be destroyed burns and trails smoke.
+	for(int side = 0; side < 2; side++) {
+		int direction = side == 0 ? 1 : -1;
+		for(int ship = 0; ship < fleet.count[side]; ship++) {
+			double death = fleet_death(&fleet, side, ship);
+			if(death >= 0.0 && now >= death) continue;
+			double x, y;
+			fleet_pose(&fleet, side, ship, now, &x, &y);
+			int role = fleet_role(&fleet, side, ship);
+			int length = fleet_length(&fleet, ship, role);
+			if(death >= 0.0 && now > death - 3500.0) {
+				for(int puff = 1; puff <= 9; puff++) {
+					double px, py;
+					fleet_pose(&fleet, side, ship, now - puff * 110.0, &px, &py);
+					filledCircleRGBA(surface, (int)(px - direction * length * 0.3), (int)py,
+						2 + puff / 2 + length / 30, 150, 150, 160,
+						weapon_alpha(85.0 * fade * (1.0 - puff / 10.0)));
+				}
+			}
+			draw_ship_design(surface, (int)floor(x + 0.5), (int)floor(y + 0.5),
+				fleet_design(&fleet, side, ship), length, direction, side, opacity);
+			if(death >= 0.0 && now > death - 3500.0) {
+				weapon_glow(surface, x - direction * length * 0.15, y - length * 0.04,
+					length * 0.09, weapon_team_colors[1], fade * (110.0 + 90.0 * sin(now / 55.0 + ship)));
+			}
+		}
+	}
+
+	double reinforcement = smooth_step(0.36, 0.45, progress)
+		* (1.0 - smooth_step(0.70, 0.79, progress));
+	if(reinforcement > 0.0) {
+		int reserves = 1 + (seed >> 20) % 3;
+		for(int side = 0; side < 2; side++) {
+			int direction = side == 0 ? 1 : -1;
+			double anchor_x, anchor_y;
+			fleet_pose(&fleet, side, 0, now, &anchor_x, &anchor_y);
+			for(int ship = 0; ship < reserves; ship++) {
+				int x = (int)anchor_x - direction * (int)(surface->w * 0.16 * (1.0 - reinforcement))
+					- direction * ship * fleet.fighter_size * 3;
+				int y = (int)anchor_y + (ship - reserves / 2) * scale / 25;
+				draw_ship_role(surface, x, y, SHIP_SMALL, (seed >> 13) + ship * 5 + side * 3,
+					fleet.fighter_size * 5, direction, side,
+					(Uint8)(SHIP_OPACITY * 0.85 * fade * reinforcement));
+			}
+		}
+	}
+
+	// Weapons fire, and the doomed ships blow up.
+	for(int side = 0; side < 2; side++) {
+		for(int ship = 0; ship < fleet.count[side]; ship++) {
+			fleet_fire(&fleet, side, ship, now, fade);
+		}
+	}
+	for(int side = 0; side < 2; side++) {
+		for(int ship = 0; ship < fleet.count[side]; ship++) {
+			double death = fleet_death(&fleet, side, ship);
+			if(death < 0.0 || now < death || now - death >= 1700.0) continue;
+			double x, y;
+			fleet_pose(&fleet, side, ship, death, &x, &y);
+			int length = fleet_length(&fleet, ship, fleet_role(&fleet, side, ship));
+			draw_explosion(surface, x, y, now - death, length * 0.55 + 6.0, true,
+				fx_hash(seed, 300 + side * 16 + ship), side, fade);
+		}
+	}
+}
+
+// Screen row of ridge `layer` at pixel column x.
+static double ground_y(SDL_Surface *surface, int layer, double x) {
+	double nx = x / surface->w;
+	if(nx < 0.0) nx = 0.0;
+	if(nx > 0.999) nx = 0.999;
+	return surface->h * ridge_height(layer, nx);
+}
+
+/*
+ * The garden: plants grow on the near ridge, one after another. There are five
+ * kinds (round trees, pines, cypresses, flowering bushes and giant glowing
+ * mushrooms) in one of three colour themes (lush, autumn, blossom), with grass
+ * sprouting between them. Saplings shoot up, canopies fill out, trees sway in
+ * the wind, and late in the event the bushes flower and the trees bear fruit.
+ */
+static void draw_hill_garden(SDL_Surface *surface, Uint32 ticks, int scale, Uint32 seed,
+	double progress, double fade) {
+	static const Uint8 themes[3][3][3] = {
+		{ { 44, 84, 60 }, { 96, 154, 88 }, { 245, 238, 200 } },     // lush
+		{ { 118, 58, 30 }, { 214, 130, 52 }, { 232, 196, 76 } },    // autumn
+		{ { 58, 96, 72 }, { 116, 170, 116 }, { 248, 152, 196 } }    // blossom
+	};
+	const Uint8 *dark = themes[seed % 3][0];
+	const Uint8 *light = themes[seed % 3][1];
+	const Uint8 *flower = themes[seed % 3][2];
+	int width = surface->w;
+	Uint8 alpha = (Uint8)(215 * fade);
+	scale = scale * 17 / 10;     // plants are drawn larger than the other hill things
+
+	// Grass first, so the plants stand in it.
+	for(int blade = 0; blade < 96; blade++) {
+		unsigned int h = fx_hash(seed, 500 + blade);
+		double x = width * (blade + 0.5) / 96.0 + (int)(h % 9) - 4;
+		double sprout = smooth_step(0.02, 0.3, progress - (h % 11) * 0.012);
+		double length = scale * (0.010 + (h >> 8) % 8 * 0.002) * sprout;
+		if(length < 1.0) continue;
+		double sway = sin(ticks / 650.0 + blade * 0.8) * length * 0.35;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		thickLineRGBA(surface, (int)x, (int)base, (int)(x + sway), (int)(base - length), 1,
+			(Uint8)(dark[0] + 20), (Uint8)(dark[1] + 24), (Uint8)(dark[2] + 14),
+			(Uint8)(alpha * 0.8));
+	}
+
+	const int plants = 11;
+	for(int plant = 0; plant < plants; plant++) {
+		unsigned int h = fx_hash(seed, plant);
+		double r = (h % 100) / 100.0;
+		double x = width * (0.05 + 0.9 * plant / (plants - 1.0)) + (int)((h >> 8) % 36) - 18;
+		double start = 0.03 + plant * 0.028;
+		double growth = smooth_step(start, start + 0.45, progress);
+		double canopy = smooth_step(start + 0.28, start + 0.65, progress);
+		if(growth <= 0.0) continue;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double sway = sin(ticks / 900.0 + plant * 1.3) * scale * 0.004 * canopy;
+		// A fixed mix of the five kinds, rotated by the seed, so every garden has some of each.
+		static const int species_plan[11] = { 0, 1, 3, 0, 2, 1, 4, 0, 3, 1, 2 };
+		int species = species_plan[(plant + seed) % 11];
+		int bx = (int)x, by = (int)base;
+
+		if(species == 0) {
+			// Round tree: a trunk and a crown of overlapping blobs, lit from above.
+			double th = scale * (0.030 + 0.014 * r) * growth;
+			int tx = (int)(x + sway * 0.3), ty = (int)(base - th);
+			thickLineRGBA(surface, bx, by, tx, ty, 2 + (int)(growth * 2), 54, 40, 34, alpha);
+			double crown = scale * (0.022 + 0.008 * r) * canopy;
+			for(int blob = 0; blob < 5; blob++) {
+				double angle = blob * 1.2566 + r * 3.0;
+				int cx = (int)(x + sway + cos(angle) * crown * 0.75);
+				int cy = (int)(base - th - crown * 0.4 + sin(angle) * crown * 0.5);
+				filledCircleRGBA(surface, cx, cy, (int)(crown * 0.62) + 1,
+					dark[0], dark[1], dark[2], alpha);
+			}
+			for(int blob = 0; blob < 3; blob++) {
+				double angle = blob * 2.1 + r * 3.0 + 0.6;
+				int cx = (int)(x + sway + cos(angle) * crown * 0.5 - crown * 0.15);
+				int cy = (int)(base - th - crown * 0.75 + sin(angle) * crown * 0.3);
+				filledCircleRGBA(surface, cx, cy, (int)(crown * 0.4) + 1,
+					light[0], light[1], light[2], (Uint8)(alpha * 0.85));
+			}
+			double fruit = smooth_step(0.72, 0.9, progress);
+			if(fruit > 0.0 && canopy > 0.9) {
+				for(int f = 0; f < 5; f++) {
+					double angle = f * 1.7 + r * 5.0;
+					int fx = (int)(x + sway + cos(angle) * crown * 0.8);
+					int fy = (int)(base - th - crown * 0.4 + sin(angle) * crown * 0.5);
+					filledCircleRGBA(surface, fx, fy, 2, flower[0], flower[1], flower[2],
+						(Uint8)(alpha * fruit));
+				}
+			}
+		} else if(species == 1) {
+			// Pine: stacked tiers that widen toward the ground.
+			double th = scale * (0.045 + 0.016 * r) * growth;
+			thickLineRGBA(surface, bx, by, bx, (int)(base - th * 0.25), 2, 54, 40, 34, alpha);
+			for(int tier = 0; tier < 4; tier++) {
+				double tier_base = base - th * (0.12 + tier * 0.2);
+				double tier_width = scale * 0.017 * (1.0 - tier * 0.2) * (0.3 + 0.7 * canopy);
+				double tier_top = tier_base - th * 0.3;
+				int shift = (int)(sway * (tier + 1) * 0.35);
+				filledTrigonRGBA(surface, (int)(x - tier_width) + shift / 2, (int)tier_base,
+					(int)(x + tier_width) + shift / 2, (int)tier_base, bx + shift, (int)tier_top,
+					dark[0], dark[1], dark[2], alpha);
+				filledTrigonRGBA(surface, (int)(x - tier_width * 0.5) + shift / 2, (int)tier_base - 1,
+					bx + shift / 2, (int)tier_base - 1, bx + shift, (int)tier_top,
+					light[0], light[1], light[2], (Uint8)(alpha * 0.6));
+			}
+		} else if(species == 2) {
+			// Cypress: a tall slim flame of leaves.
+			double ch = scale * (0.05 + 0.018 * r) * growth;
+			double cw = scale * 0.0085 * (0.4 + 0.6 * canopy);
+			filledEllipseRGBA(surface, (int)(x + sway * 0.6), (int)(base - ch * 0.5), (int)cw + 1,
+				(int)(ch * 0.5) + 1, dark[0], dark[1], dark[2], alpha);
+			filledEllipseRGBA(surface, (int)(x + sway * 0.6 - cw * 0.3), (int)(base - ch * 0.55),
+				(int)(cw * 0.45) + 1, (int)(ch * 0.4) + 1, light[0], light[1], light[2],
+				(Uint8)(alpha * 0.7));
+		} else if(species == 3) {
+			// Bush that comes into flower late in the event.
+			double bush = scale * 0.018 * growth;
+			for(int blob = 0; blob < 3; blob++) {
+				filledCircleRGBA(surface, (int)(x + (blob - 1) * bush * 0.8 + sway * 0.4),
+					(int)(base - bush * 0.6), (int)(bush * (blob == 1 ? 0.8 : 0.6)) + 1,
+					dark[0], dark[1], dark[2], alpha);
+			}
+			double bloom = smooth_step(0.5 + start * 0.4, 0.78 + start * 0.4, progress);
+			for(int f = 0; f < 9; f++) {
+				unsigned int fh = fx_hash(h, f);
+				int fx = (int)(x + ((int)(fh % 100) - 50) * bush * 0.022 + sway * 0.4);
+				int fy = (int)(base - bush * (0.4 + (fh >> 8) % 60 / 100.0));
+				if((fh >> 16) % 100 > bloom * 100.0) continue;
+				filledCircleRGBA(surface, fx, fy, 2, flower[0], flower[1], flower[2], alpha);
+				pixelRGBA(surface, fx, fy, 255, 255, 235, alpha);
+			}
+		} else {
+			// Giant mushroom with a softly glowing cap.
+			double mh = scale * (0.026 + 0.010 * r) * growth;
+			double cap = scale * 0.016 * (0.3 + 0.7 * canopy);
+			boxRGBA(surface, bx - 2, (int)(base - mh), bx + 2, by, 150, 142, 130, alpha);
+			double pulse = 0.65 + 0.35 * sin(ticks / 420.0 + plant);
+			filledCircleRGBA(surface, bx, (int)(base - mh), (int)(cap * 1.8) + 1,
+				light[0], light[1], light[2], (Uint8)(26 * fade * pulse * canopy));
+			filledEllipseRGBA(surface, bx, (int)(base - mh), (int)cap + 1, (int)(cap * 0.7) + 1,
+				dark[0] + 40, dark[1] + 10, dark[2] + 20, alpha);
+			boxRGBA(surface, bx - (int)cap - 1, (int)(base - mh), bx + (int)cap + 1,
+				(int)(base - mh) + 2, 30, 24, 30, alpha);
+			for(int spot = 0; spot < 3; spot++) {
+				filledCircleRGBA(surface, bx + (int)((spot - 1) * cap * 0.55),
+					(int)(base - mh - cap * 0.3 - (spot == 1 ? cap * 0.15 : 0)), 1 + (int)(cap * 0.12),
+					190, 255, 230, (Uint8)(235 * fade * pulse * canopy));
+			}
+		}
+	}
+}
 
 static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 cycle = 210000;
-	Uint32 slot = ticks / cycle;
-	Uint32 slot_phase = ticks % cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	if(seed % 5 != 0) return;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	Uint32 duration = 72000 + (seed >> 8) % 28000;
-	Uint32 start = (seed >> 16) % (cycle - duration);
-	if(slot_phase < start || slot_phase >= start + duration) return;
-	Uint32 phase = slot_phase - start;
-	double progress = (double)phase / duration;
-	double fade = smooth_step(0.0, 6000.0, phase)
-		* (1.0 - smooth_step(duration - 7000.0, duration, phase));
-	int kind = seed % 8;
+		EffectWindow window;
+		if(!effect_window(&EFFECT_LONG_SCENE, ticks, &window)) return;
+		Uint32 seed = window.seed;
+		double progress = window.progress;
+		double fade = window.fade;
+		int kind = effect_kind(&EFFECT_LONG_SCENE, seed % 5);
 
-	if(kind == 0) {
-		// Ridges emerging from haze as the light comes up. Each rank is ONE
-		// polygon: a chain of adjacent alpha-blended triangles double-blends
-		// every shared edge, which reads as a row of scallops.
-		enum { RIDGE_STEPS = 120 };
-		static Sint16 ridge_x[RIDGE_STEPS + 3];
-		static Sint16 ridge_y[RIDGE_STEPS + 3];
-		for(int rank = 0; rank < 4; rank++) {
-			int base_y = surface->h * (66 + rank * 7) / 100;
-			Uint8 shade = (Uint8)(30 + rank * 14);
-			Uint8 alpha = (Uint8)((150 - rank * 22) * fade);
-			for(int segment = 0; segment <= RIDGE_STEPS; segment++) {
-				double t = (double)segment / RIDGE_STEPS;
-				// Low frequencies only: high ones make the ridge scallop.
-				double ridge =
-					smooth_noise(t * 2.6 + rank * 3.1, rank * 1.7, 1123) * 0.62
-					+ smooth_noise(t * 5.4, rank * 2.3, 1451) * 0.26
-					+ smooth_noise(t * 11.0, rank * 1.1, 1601) * 0.12;
-				ridge_x[segment] = (Sint16)(t * surface->w);
-				ridge_y[segment] = (Sint16)(base_y
-					- (ridge - 0.35) * scale * 0.17);
-			}
-			ridge_x[RIDGE_STEPS + 1] = (Sint16)(surface->w - 1);
-			ridge_y[RIDGE_STEPS + 1] = (Sint16)(surface->h - 1);
-			ridge_x[RIDGE_STEPS + 2] = 0;
-			ridge_y[RIDGE_STEPS + 2] = (Sint16)(surface->h - 1);
-			filledPolygonRGBA(surface, ridge_x, ridge_y, RIDGE_STEPS + 3,
-				shade, (Uint8)(shade + 7), (Uint8)(shade + 15), alpha);
-			// Haze pooling at the foot of each rank.
-			soft_band(surface, base_y - scale / 30, base_y + scale / 12,
-				150, 164, 186, (int)((9 + rank * 3) * fade));
-		}
-	} else if(kind == 1) {
-		int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
-		boxRGBA(surface, 0, flood_y, surface->w - 1, surface->h - 1,
-			28, 79, 116, (Uint8)(58 * fade));
-		for(int band = 0; band < 5; band++) {
-			int previous_x = 0;
-			int previous_y = flood_y + band * scale / 38;
-			for(int segment = 1; segment <= 20; segment++) {
-				int next_x = surface->w * segment / 20;
-				int next_y = flood_y + band * scale / 38
-					+ (int)(sin(segment * 0.8 + ticks / (500.0 + band * 80))
-						* scale * 0.012);
-				thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
-					1 + band % 2, 115, 183, 208, (Uint8)(70 * fade));
-				previous_x = next_x;
-				previous_y = next_y;
-			}
-		}
-	} else if(kind == 2) {
-		// A wildfire burning somewhere beyond the ridge. Only the glow and the
-		// smoke are visible; no flame is ever resolved at this distance.
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			135, 57, 27, (Uint8)(17 * fade));
-		int fire_x = surface->w * (24 + (seed >> 8) % 52) / 100;
-		double nx = (double)fire_x / surface->w;
-		double ridge = 0.79
-			+ (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
-		int fire_y = (int)(surface->h * ridge);
-		// Slow breathing rather than a flicker, so it reads as a large fire
-		// seen from far away.
-		double breathe = 0.72 + 0.28 * sin(ticks / 3400.0);
-		soft_glow(surface, fire_x, fire_y, scale / 4,
-			226, 118, 58, (int)(52 * fade * breathe));
-		soft_glow(surface, fire_x, fire_y, scale / 9,
-			246, 168, 92, (int)(44 * fade * breathe));
-		soft_glow(surface, fire_x, fire_y - scale / 40, scale / 22,
-			255, 214, 150, (int)(30 * fade * breathe));
-		// Smoke lifting off the fire and drifting with the wind.
-		for(int plume = 0; plume < 7; plume++) {
-			double t = (double)plume / 6;
-			int px = fire_x + (int)(sin(t * 2.6 + ticks / 5200.0)
-				* scale * 0.05 * t);
-			int py = fire_y - (int)(t * scale * 0.30);
-			soft_glow(surface, px, py, (int)(scale / 16 * (1.0 + t * 0.8)),
-				74, 66, 62, (int)(26 * fade * (1.0 - t * 0.5)));
-		}
-		// The lit underside of the smoke, close to the source.
-		soft_band(surface, fire_y - scale / 12, fire_y + scale / 40,
-			198, 122, 74, (int)(30 * fade * breathe));
-	} else if(kind == 3) {
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			36, 57, 78, (Uint8)(24 * fade));
-		for(int band = 0; band < 6; band++) {
-			int previous_x = 0;
-			int previous_y = surface->h * (17 + band * 10) / 100;
-			for(int segment = 1; segment <= 18; segment++) {
-				int next_x = surface->w * segment / 18;
-				int next_y = surface->h * (17 + band * 10) / 100
-					+ (int)(sin(segment * 0.6 + ticks / 1400.0 + band) * scale * 0.05);
-				thickLineRGBA(surface, previous_x, previous_y, next_x, next_y, 2,
-					78, 162, 163, (Uint8)(28 * fade));
-				previous_x = next_x;
-				previous_y = next_y;
-			}
-		}
-	} else if(kind == 4) {
-		// Mist filling a valley at dawn: layered veils that thicken toward the
-		// floor, with the far ridge dissolving into them. No hard edges.
-		int ridge_y = surface->h * 62 / 100;
-		double drift = sin(ticks / 9000.0) * scale * 0.012;
-		for(int layer = 0; layer < 5; layer++) {
-			int top = ridge_y + (int)(layer * scale * 0.045 + drift * layer);
-			int bottom = surface->h * (74 + layer * 5) / 100;
-			soft_band(surface, top, bottom, 196, 208, 220,
-				(int)((26 + layer * 9) * fade));
-		}
-		// A low sun behind the mist, only its glow reaching through.
-		int sun_x = surface->w * (30 + (seed >> 8) % 40) / 100;
-		soft_glow(surface, sun_x, ridge_y - scale / 14, scale / 6,
-			246, 226, 196, (int)(34 * fade));
-		soft_glow(surface, sun_x, ridge_y - scale / 14, scale / 16,
-			252, 240, 214, (int)(26 * fade));
-	} else if(kind == 5) {
-		// A slow curtain of rain crossing the valley, lit from behind so it
-		// reads as a sheet of water rather than individual drops.
-		int curtain_x = surface->w * (10 + (int)(progress * 80)) / 100;
-		int curtain_w = scale / 2;
-		int top_y = surface->h * 18 / 100;
-		int bottom_y = surface->h * 92 / 100;
-		// The veil: a wide, faint column so the rain has body before any
-		// individual streak is drawn.
-		soft_column(surface, curtain_x, bottom_y, bottom_y - top_y,
-			curtain_w / 2, 168, 186, 206, (int)(26 * fade));
-		soft_band(surface, top_y, bottom_y, 172, 190, 210, (int)(14 * fade));
-		int streak_len = scale / 22;
-		for(int streak = 0; streak < 260; streak++) {
-			unsigned int s = (unsigned int)streak * 1664525u + seed;
-			int sx = curtain_x - curtain_w / 2
-				+ (int)((s % 1000) / 1000.0 * curtain_w);
-			int span = bottom_y - top_y;
-			int sy = top_y + (int)((s >> 10) % (Uint32)span);
-			// Fall, wrapping within the curtain.
-			sy = top_y + ((sy - top_y + (int)(ticks / 9.0)) % span + span) % span;
-			// Fade the streaks at the curtain edges so it has no hard sides.
-			double edge = 1.0 - fabs((double)(sx - curtain_x) / (curtain_w / 2.0));
-			if(edge < 0.0) edge = 0.0;
-			thickLineRGBA(surface, sx, sy, sx - 2, sy + streak_len, 1,
-				186, 202, 220, (Uint8)(44 * fade * edge));
-		}
-	} else if(kind == 6) {
-		// A distant forest at dusk. The canopy is a noise-driven silhouette
-		// rather than a row of triangles: individual trees are never resolved,
-		// only the ragged edge of the mass, which is what a treeline actually
-		// looks like from a distance.
-		//
-		// Each rank is filled as ONE polygon. Drawing it as a chain of adjacent
-		// alpha-blended triangles double-blends every shared edge, which shows
-		// up as a vertical seam every few pixels.
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			17, 20, 32, (Uint8)(34 * fade));
-		enum { CANOPY_STEPS = 160 };
-		static Sint16 canopy_x[CANOPY_STEPS + 3];
-		static Sint16 canopy_y[CANOPY_STEPS + 3];
-		for(int rank = 0; rank < 4; rank++) {
-			int base_y = surface->h * (70 + rank * 5) / 100;
-			Uint8 shade = (Uint8)(40 + rank * 18);
-			Uint8 alpha = (Uint8)((185 - rank * 28) * fade);
-			for(int segment = 0; segment <= CANOPY_STEPS; segment++) {
-				double t = (double)segment / CANOPY_STEPS;
-				// Three octaves: broad clumps, individual crowns, fine twigs.
-				double canopy =
-					smooth_noise(t * 9.0 + rank * 4.7, rank * 2.3, 2111) * 0.55
-					+ smooth_noise(t * 34.0 + rank * 1.9, rank * 3.1, 2237) * 0.30
-					+ smooth_noise(t * 90.0, rank * 1.3, 2371) * 0.15;
-				canopy_x[segment] = (Sint16)(t * surface->w);
-				canopy_y[segment] = (Sint16)(base_y
-					- (canopy - 0.30) * scale * 0.13 * (1.0 - rank * 0.10));
-			}
-			// Close the polygon down to the bottom of the frame.
-			canopy_x[CANOPY_STEPS + 1] = (Sint16)(surface->w - 1);
-			canopy_y[CANOPY_STEPS + 1] = (Sint16)(surface->h - 1);
-			canopy_x[CANOPY_STEPS + 2] = 0;
-			canopy_y[CANOPY_STEPS + 2] = (Sint16)(surface->h - 1);
-			filledPolygonRGBA(surface, canopy_x, canopy_y, CANOPY_STEPS + 3,
-				shade, (Uint8)(shade + 7), (Uint8)(shade + 16), alpha);
-			// Haze pooling along the base of each rank, so the layers separate
-			// by depth rather than by outline.
-			soft_band(surface, base_y - scale / 26, base_y + scale / 10,
-				150, 164, 186, (int)((8 + rank * 3) * fade));
-		}
-	} else {
-		// A distant engagement, seen from far enough away that no ship is
-		// larger than a sliver. Two lines pass each other in the dark; the
-		// only light is engine glow, tracer fire, and the occasional hit
-		// blooming on a hull. Nothing is close enough to read as a model,
-		// which is what keeps it from looking like a toy.
-		Uint8 alpha = (Uint8)(150 * fade);
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			8, 10, 20, (Uint8)(46 * fade));
-		int horizon = surface->h * 62 / 100;
-		int span = surface->w + 400;
-		// A band of light along the engagement line, so the eye has something
-		// to read the silhouettes against. Without it the hulls vanish.
-		soft_band(surface, horizon - scale / 4, horizon + scale / 4,
-			74, 88, 128, (int)(58 * fade));
-		// The two lines: one receding, one advancing, each ship on its own
-		// lane so neither line is ever straight.
-		for(int side = 0; side < 2; side++) {
-			int dir = side == 0 ? 1 : -1;
-			int line_y = horizon + (side == 0 ? -scale / 10 : scale / 12);
-			for(int ship = 0; ship < 6; ship++) {
-				unsigned int s = (unsigned int)ship * 2246822519u
-					+ (unsigned int)side * 3266489917u + seed;
-				int lane = (int)((s % 1000) / 1000.0 * surface->h * 0.14)
-					- surface->h / 11;
-				int travel = (int)((Uint64)ticks
-					* (40 + (s >> 10) % 60) / 1000);
-				int x = (travel + (int)(s % 1000)) % span - 200;
-				if(dir < 0) x = span - x - 200;
-				int y = line_y + lane;
-				// Big enough to read as a hull. Anything under ~30px at this
-				// distance is a speck, which is what made the old ones
-				// invisible. The upper bound keeps a 4K screen from drawing
-				// 360px hulls, which would read as models rather than ships.
-				int len = scale / (6 + (s >> 20) % 4);
-				if(len < 34) len = 34;
-				if(len > 190) len = 190;
-				// Each side is a different race, so the two lines read as two
-				// fleets rather than one fleet mirrored.
-				draw_ship(surface, x, y, len, dir, 0,
-					(Uint8)(alpha * 1.4), (int)(alpha * 0.9),
-					side == 0 ? 0 : 2);
-			}
-		}
-		// Tracer fire: bright streaks crossing the gap between the lines.
-		// Drawn as a streak with a head, not as a dot — a dot reads as bokeh,
-		// a streak reads as fire.
-		for(int tracer = 0; tracer < 30; tracer++) {
-			unsigned int s = (unsigned int)tracer * 1664525u + seed;
-			double t = fmod((s % 1000) / 1000.0 + progress * 2.4, 1.0);
-			int from_x = (int)((s >> 10) % (unsigned int)surface->w);
-			int from_y = horizon - scale / 10
-				+ (int)((s >> 20) % (unsigned int)(scale / 5 + 1));
-			int to_x = from_x + (int)((s >> 4) % 300) - 150;
-			int to_y = horizon + scale / 12;
-			int px = from_x + (int)((to_x - from_x) * t);
-			int py = from_y + (int)((to_y - from_y) * t);
-			double life = sin(t * 3.14159265359);
-			int a = (int)(alpha * 1.1 * life);
-			if(a < 3) continue;
-			// The streak trails well behind the head along the flight path.
-			int tail_x = px - (to_x - from_x) / 5;
-			int tail_y = py - (to_y - from_y) / 5;
-			thickLineRGBA(surface, tail_x, tail_y, px, py, 2,
-				246, 206, 148, (Uint8)(a / 2));
-			thickLineRGBA(surface, tail_x, tail_y, px, py, 1,
-				255, 232, 190, (Uint8)a);
-			soft_glow(surface, px, py, scale / 150, 255, 226, 176, a);
-		}
-		// Hits: a bloom on a hull, then a fading ember. Kept small — a large
-		// glow reads as a planet, not as a hit.
-		for(int hit = 0; hit < 6; hit++) {
-			unsigned int s = (unsigned int)hit * 2246822519u + seed;
-			double t = fmod((s % 1000) / 1000.0 + progress * 1.3, 1.0);
-			int hx = (int)((s >> 10) % (unsigned int)surface->w);
-			int hy = horizon + (int)((s >> 20) % (unsigned int)(scale / 4 + 1))
-				- scale / 8;
-			double burst = t < 0.10 ? t / 0.10 : 1.0 - (t - 0.10) / 0.90;
-			if(burst <= 0.0) continue;
-			int a = (int)(alpha * 0.55 * burst);
-			soft_glow(surface, hx, hy, scale / 110, 240, 158, 84, a);
-			soft_glow(surface, hx, hy, scale / 260, 255, 236, 198, a * 2);
-		}
-		// The whole engagement sits in haze, so it reads as distance.
-		soft_band(surface, horizon - scale / 7, horizon + scale / 5,
-			96, 108, 138, (int)(30 * fade));
-	}
-}
-
-// --- Atmospheric light helpers -------------------------------------------
-// Hard-edged primitives at low alpha read as sticks and stripes rather than
-// air. These accumulate many faint passes so edges dissolve into a gradient,
-// which is what makes distant light look like weather instead of geometry.
-
-// A soft radial falloff. The centre accumulates every pass, the rim only one,
-// so brightness decays smoothly with no visible disc edge.
-static void soft_glow(SDL_Surface *surface, int cx, int cy, int radius,
-	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha) {
-	if(radius < 2 || peak_alpha < 1) return;
-	const int layers = 16;
-	int step_alpha = peak_alpha / 5;
-	if(step_alpha < 2) step_alpha = 2;
-	for(int layer = layers; layer >= 1; layer--) {
-		int r = radius * layer / layers;
-		if(r < 1) continue;
-		filledCircleRGBA(surface, cx, cy, r, red, green, blue,
-			(Uint8)step_alpha);
-	}
-}
-
-// A single lit point with a one-pixel falloff, cheap enough to use in loops.
-static void set_pixel_glow(SDL_Surface *surface, int x, int y,
-	Uint8 red, Uint8 green, Uint8 blue, int alpha) {
-	if(alpha < 1) return;
-	pixelRGBA(surface, x, y, red, green, blue, (Uint8)alpha);
-	pixelRGBA(surface, x + 1, y, red, green, blue, (Uint8)(alpha / 3));
-	pixelRGBA(surface, x - 1, y, red, green, blue, (Uint8)(alpha / 3));
-	pixelRGBA(surface, x, y + 1, red, green, blue, (Uint8)(alpha / 3));
-	pixelRGBA(surface, x, y - 1, red, green, blue, (Uint8)(alpha / 3));
-}
-
-// A horizontal veil with soft top and bottom edges, built from thin strips of
-// varying alpha. Used for fog, low cloud and snow walls.
-static void soft_band(SDL_Surface *surface, int y0, int y1,
-	Uint8 red, Uint8 green, Uint8 blue, int peak_alpha) {
-	if(y1 <= y0 || peak_alpha < 1) return;
-	const int strips = 24;
-	int strip_h = (y1 - y0) / strips;
-	if(strip_h < 1) strip_h = 1;
-	for(int i = 0; i < strips; i++) {
-		double t = (double)i / (strips - 1);
-		// sine envelope: transparent at both edges, strongest in the middle
-		double envelope = sin(t * 3.14159265359);
-		int a = (int)(peak_alpha * envelope * 0.30);
-		if(a < 1) continue;
-		int y = y0 + (int)(t * (y1 - y0));
-		boxRGBA(surface, 0, y, surface->w - 1, y + strip_h,
-			red, green, blue, (Uint8)a);
-	}
-}
-
-// A vertical light column (light pillars, aurora sheets) fading out with
-// height, built the same way so it has no hard top.
-static void soft_column(SDL_Surface *surface, int cx, int base_y, int height,
-	int half_width, Uint8 red, Uint8 green, Uint8 blue, int peak_alpha) {
-	if(height < 2 || peak_alpha < 1) return;
-	const int strips = 28;
-	for(int i = 0; i < strips; i++) {
-		double t = (double)i / (strips - 1);
-		double envelope = 1.0 - t;
-		envelope *= envelope;
-		int a = (int)(peak_alpha * envelope * 0.30);
-		if(a < 1) continue;
-		int y = base_y - (int)(t * height);
-		int w = (int)(half_width * (0.35 + 0.65 * (1.0 - t)));
-		if(w < 1) w = 1;
-		boxRGBA(surface, cx - w, y, cx + w, y + height / strips + 1,
-			red, green, blue, (Uint8)a);
-	}
-}
-
-static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale) {
-	const Uint32 event_cycle = 48000;
-	Uint32 slot = ticks / event_cycle;
-	Uint32 slot_phase = ticks % event_cycle;
-	Uint32 seed = slot * 2246822519u + 3266489917u;
-	seed ^= seed >> 15;
-	seed *= 2246822519u;
-	seed ^= seed >> 13;
-	Uint32 event_duration = 4200 + (seed >> 8) % 3200;
-	Uint32 event_start = (seed >> 16) % (event_cycle - event_duration);
-	if(slot_phase < event_start || slot_phase >= event_start + event_duration
-		|| seed % 3 != 0) return;
-	Uint32 phase = slot_phase - event_start;
-	double progress = (double)phase / event_duration;
-	double fade = smooth_step(0.0, 350.0, phase)
-		* (1.0 - smooth_step(event_duration - 400.0, event_duration, phase));
-	int direction = (seed & 1) ? 1 : -1;
-	int y = surface->h * (8 + (seed >> 8) % 39) / 100;
-	int margin = scale / 12;
-	int x = direction > 0
-		? -margin + (int)(progress * (surface->w + 2.0 * margin))
-		: surface->w + margin - (int)(progress * (surface->w + 2.0 * margin));
-	int size = scale / (26 + (seed >> 16) % 24);
-	if(size < 4) size = 4;
-	Uint8 alpha = (Uint8)(150 * fade);
-	int kind = (seed >> 24) % 63;
-	if(kind >= 23) {
-		unsigned int rare_gate = slot * 2654435761u + 0x9e3779b9u;
-		if(rare_gate % 7 != 0) return;
-	}
-	if(kind >= 23) {
-		if(kind == 23) {
-			// Aurora curtains: horizontal sheets of light that drift and fold,
-			// fading out toward the ridge. Drawn as stacked translucent strokes
-			// so the bands overlap into a glow instead of reading as lines.
-			double strength = smooth_step(0.0, 1200.0, phase)
-				* (1.0 - smooth_step(event_duration - 1400.0, event_duration, phase));
-			for(int sheet = 0; sheet < 4; sheet++) {
-				int base_y = surface->h * (10 + sheet * 7) / 100;
-				int previous_x = 0;
-				int previous_y = base_y;
-				for(int segment = 1; segment <= 30; segment++) {
-					double t = (double)segment / 30;
-					int px = (int)(t * surface->w);
-					int py = base_y
-						+ (int)(sin(t * 4.1 + ticks / (2600.0 + sheet * 430)
-							+ sheet * 1.6) * scale * (0.030 + sheet * 0.008))
-						+ (int)(sin(t * 11.0 + ticks / 1700.0) * scale * 0.006);
-					int alpha_here = (int)(strength * (26 - sheet * 4));
-					if(alpha_here < 2) alpha_here = 2;
-					// three overlapping widths give the band a soft, feathered edge
-					thickLineRGBA(surface, previous_x, previous_y, px, py,
-						7 + sheet, (Uint8)(64 + sheet * 12), (Uint8)(150 + sheet * 10),
-						(Uint8)(136 + sheet * 14), (Uint8)(alpha_here / 4));
-					thickLineRGBA(surface, previous_x, previous_y, px, py,
-						3 + sheet, (Uint8)(78 + sheet * 12), (Uint8)(176 + sheet * 8),
-						(Uint8)(150 + sheet * 12), (Uint8)(alpha_here / 2));
-					thickLineRGBA(surface, previous_x, previous_y, px, py,
-						1, (Uint8)(96 + sheet * 10), (Uint8)(198 + sheet * 6),
-						(Uint8)(164 + sheet * 10), (Uint8)alpha_here);
-					previous_x = px;
-					previous_y = py;
-				}
-			}
-		} else if(kind == 24) {
-			// Distant storm: a low bank of cloud lit from within, far enough
-			// away that no bolt is ever resolved.
-			int bank_y = surface->h * 62 / 100;
-			// A stack of hard-edged boxRGBA strips reads as a set of stripes.
-			// soft_band gives the bank a top and bottom that dissolve into the
-			// sky instead of ending on a line.
-			soft_band(surface, bank_y - scale / 20, bank_y + scale / 8,
-				58, 66, 88, (int)(alpha * 0.55));
-			soft_band(surface, bank_y + scale / 40, bank_y + scale / 5,
-				48, 55, 74, (int)(alpha * 0.40));
-			Uint32 pulse_phase = ticks % 9000;
-			double pulse = 0.0;
-			if(pulse_phase < 260) pulse = 1.0 - pulse_phase / 260.0;
-			else if(pulse_phase > 1400 && pulse_phase < 1620)
-				pulse = 0.45 * (1.0 - (pulse_phase - 1400) / 220.0);
-			if(pulse > 0.0) {
-				int glow_x = surface->w * (24 + (seed >> 12) % 52) / 100;
-				soft_glow(surface, glow_x, bank_y + scale / 60, scale / 7,
-					132, 148, 186, (int)(alpha * 1.1 * pulse));
-				soft_glow(surface, glow_x, bank_y + scale / 60, scale / 18,
-					196, 208, 232, (int)(alpha * 1.5 * pulse));
-			}
-		} else if(kind == 25) {
-			// A single satellite: one steady point of light crossing the sky,
-			// with a faint trail fading behind it.
-			int sat_y = surface->h * (14 + (seed >> 8) % 26) / 100;
-			int sat_x = direction > 0
-				? -scale / 20 + (int)(progress * (surface->w + scale / 10.0))
-				: surface->w + scale / 20 - (int)(progress * (surface->w + scale / 10.0));
-			int trail = scale / 14;
-			for(int step = 1; step <= 6; step++) {
-				int trail_x = sat_x - direction * trail * step / 6;
-				Uint8 trail_alpha = (Uint8)(alpha * 0.30 * (1.0 - step / 7.0));
-				thickLineRGBA(surface, trail_x, sat_y, trail_x + direction, sat_y,
-					1, 198, 212, 232, trail_alpha);
-			}
-			filledCircleRGBA(surface, sat_x, sat_y, 1, 236, 242, 250, alpha);
-		} else if(kind == 26) {
-			// Meteor: a brief streak that burns out rather than travelling.
-			int meteor_y = surface->h * (10 + (seed >> 8) % 30) / 100;
-			int meteor_x = surface->w * (20 + (seed >> 12) % 60) / 100;
-			int length = scale / (10 + (seed >> 20) % 8);
-			double burn = sin(progress * 3.14159265359);
-			int head_x = meteor_x + (int)(progress * length * 1.6) * direction;
-			int head_y = meteor_y + (int)(progress * length * 0.9);
-			Uint8 meteor_alpha = (Uint8)(alpha * burn);
-			thickLineRGBA(surface, head_x - direction * length,
-				head_y - length * 9 / 16, head_x, head_y,
-				1, 214, 226, 244, (Uint8)(meteor_alpha * 0.55));
-			thickLineRGBA(surface, head_x - direction * length / 2,
-				head_y - length * 9 / 32, head_x, head_y,
-				1, 238, 244, 252, meteor_alpha);
-			filledCircleRGBA(surface, head_x, head_y, 1, 255, 255, 255, meteor_alpha);
-		} else if(kind == 27) {
-			// Comet: a slow, wide-tailed body that holds its place in the sky.
-			int comet_x = surface->w * (30 + (seed >> 12) % 40) / 100;
-			int comet_y = surface->h * (16 + (seed >> 8) % 22) / 100;
-			int tail = scale / 5;
-			for(int layer = 0; layer < 5; layer++) {
-				double spread = (layer - 2) * 0.16;
-				int tail_x = comet_x - direction * tail * (1.0 - layer * 0.08);
-				int tail_y = comet_y + (int)(tail * spread);
-				Uint8 tail_alpha = (Uint8)(alpha * (0.16 - layer * 0.02));
-				thickLineRGBA(surface, tail_x, tail_y, comet_x, comet_y,
-					2, 176, 200, 226, tail_alpha);
-			}
-			filledCircleRGBA(surface, comet_x, comet_y, scale / 150 + 1,
-				226, 234, 246, alpha);
-			filledCircleRGBA(surface, comet_x, comet_y, scale / 400 + 1,
-				255, 255, 255, alpha);
-		} else if(kind == 28) {
-			// Moonrise: a large, low moon with a soft halo, rising slowly.
-			int moon_x = surface->w * (24 + (seed >> 12) % 52) / 100;
-			int moon_y = surface->h * (58 - (int)(progress * 16)) / 100;
-			int moon_radius = scale / 16;
-			soft_glow(surface, moon_x, moon_y, moon_radius + scale / 14,
-				186, 198, 216, (int)(alpha * 0.55));
-			filledCircleRGBA(surface, moon_x, moon_y, moon_radius,
-				214, 220, 228, (Uint8)(alpha * 0.55));
-			filledCircleRGBA(surface, moon_x - moon_radius / 4,
-				moon_y - moon_radius / 5, moon_radius / 3,
-				232, 236, 242, (Uint8)(alpha * 0.30));
-		} else if(kind == 29) {
-			// Distant city: a warm band of light along the horizon, hazed by the
-			// atmosphere so no individual building is ever legible.
-			int city_x = surface->w * (20 + (seed >> 12) % 60) / 100;
-			int city_y = surface->h * 76 / 100;
-			double strength = sin(progress * 3.14159265359);
-			soft_glow(surface, city_x, city_y, scale / 4,
-				204, 152, 96, (int)(58 * strength));
-			soft_band(surface, surface->h * 70 / 100, surface->h * 80 / 100,
-				188, 142, 92, (int)(70 * strength));
-			for(int light = 0; light < 30; light++) {
-				unsigned int s = (unsigned int)light * 2246822519u + seed;
-				int lx = (int)((s % 1000) / 1000.0 * surface->w);
-				int ly = city_y - (int)((s >> 10) % (unsigned int)(scale / 50 + 1));
-				set_pixel_glow(surface, lx, ly, 240, 206, 148,
-					(int)(90 * strength));
-			}
-		} else if(kind == 30) {
-			// Fog bank: a low drift of haze swallowing the ridge. Soft edges
-			// only; a hard-edged band looks like a stripe, not weather.
-			int drift = (int)(sin(ticks / 5200.0) * scale * 0.010);
-			soft_band(surface, surface->h * 62 / 100 + drift,
-				surface->h * 78 / 100 + drift, 138, 150, 166, 74);
-			soft_band(surface, surface->h * 70 / 100 + drift,
-				surface->h * 88 / 100 + drift, 150, 160, 176, 48);
-		} else if(kind == 31) {
-			// Nebula bloom: a slow-breathing patch of deep-sky colour with a
-			// dense core and no discernible boundary.
-			int nebula_x = surface->w * (24 + (seed >> 12) % 52) / 100;
-			int nebula_y = surface->h * (14 + (seed >> 8) % 22) / 100;
-			double breathe = 0.55 + 0.45 * sin(ticks / 6400.0);
-			int peak = (int)(alpha * 0.55 * breathe);
-			if(peak < 4) peak = 4;
-			soft_glow(surface, nebula_x, nebula_y, scale / 7,
-				104, 78, 152, peak);
-			soft_glow(surface, nebula_x + scale / 40, nebula_y - scale / 60,
-				scale / 14, 138, 96, 168, peak * 2 / 3);
-			soft_glow(surface, nebula_x - scale / 50, nebula_y + scale / 70,
-				scale / 26, 176, 150, 210, peak / 2);
-			for(int star = 0; star < 22; star++) {
-				unsigned int s = (unsigned int)star * 1664525u + seed;
-				int sx = nebula_x
-					+ (int)(s % (unsigned int)(scale / 5 + 1)) - scale / 10;
-				int sy = nebula_y
-					+ (int)((s >> 8) % (unsigned int)(scale / 8 + 1)) - scale / 16;
-				pixelRGBA(surface, sx, sy, 228, 234, 248,
-					(Uint8)(alpha * 0.45));
-			}
-		} else if(kind == 32) {
-			// Distant thunderhead: a column of soft, overlapping masses. Built
-			// from glows so it reads as depth rather than a stack of discs.
-			int cloud_x = surface->w * (26 + (seed >> 12) % 48) / 100;
-			int base_y = surface->h * 72 / 100;
-			int height = scale / 4;
-			for(int layer = 0; layer < 6; layer++) {
-				double t = (double)layer / 5;
-				int layer_y = base_y - (int)(t * height);
-				int layer_x = cloud_x
-					+ (int)(sin(t * 2.4 + ticks / 6200.0) * scale * 0.014);
-				int radius = (int)(scale / 14 * (1.0 - t * 0.40));
-				soft_glow(surface, layer_x, layer_y, radius,
-					60, 68, 92, 34 - layer * 3);
-			}
-			Uint32 glow_phase = ticks % 11000;
-			if(glow_phase < 420) {
-				double glow = 1.0 - glow_phase / 420.0;
-				soft_glow(surface, cloud_x, base_y - height / 2,
-					scale / 12, 150, 166, 204, (int)(70 * glow));
-			}
-		} else if(kind == 33) {
-			// A ringed planet hanging low, far too large to be near.
-			int planet_x = surface->w * (22 + (seed >> 12) % 56) / 100;
-			int planet_y = surface->h * (34 + (seed >> 8) % 12) / 100;
-			int radius = scale / 9;
-			for(int ring = 0; ring < 3; ring++) {
-				int rx = radius * (16 + ring * 3) / 10;
-				int ry = rx / 4;
-				ellipseRGBA(surface, planet_x, planet_y, rx, ry,
-					(Uint8)(150 + ring * 14), (Uint8)(140 + ring * 12),
-					(Uint8)(120 + ring * 10), (Uint8)(alpha * (0.26 - ring * 0.07)));
-			}
-			filledCircleRGBA(surface, planet_x, planet_y, radius + scale / 40,
-				44, 52, 74, (Uint8)(alpha * 0.28));
-			filledCircleRGBA(surface, planet_x, planet_y, radius,
-				58, 66, 90, (Uint8)(alpha * 0.50));
-			filledCircleRGBA(surface, planet_x + radius / 3,
-				planet_y + radius / 6, radius, 16, 20, 34, (Uint8)(alpha * 0.55));
-		} else if(kind == 34) {
-			// Two moons at different distances, drifting slowly apart.
-			int moon_y = surface->h * (16 + (seed >> 8) % 18) / 100;
-			int base_x = surface->w * (30 + (seed >> 12) % 40) / 100;
-			int separation = (int)(progress * scale * 0.16);
-			int near_radius = scale / 34;
-			int far_radius = scale / 52;
-			int near_x = base_x - separation;
-			int far_x = base_x + separation + scale / 20;
-			soft_glow(surface, far_x, moon_y - scale / 60, far_radius + scale / 30,
-				190, 198, 212, (int)(alpha * 0.30));
-			filledCircleRGBA(surface, far_x, moon_y - scale / 60, far_radius,
-				206, 212, 224, (Uint8)(alpha * 0.40));
-			soft_glow(surface, near_x, moon_y, near_radius + scale / 24,
-				198, 206, 220, (int)(alpha * 0.34));
-			filledCircleRGBA(surface, near_x, moon_y, near_radius,
-				220, 226, 234, (Uint8)(alpha * 0.58));
-		} else if(kind == 35) {
-			// The galactic band, brightening as the air settles.
-			double rise = sin(progress * 3.14159265359);
-			for(int band = 0; band < 3; band++) {
-				int previous_x = 0;
-				int previous_y = 0;
-				for(int segment = 0; segment <= 22; segment++) {
-					double t = (double)segment / 22;
-					int px = (int)(t * surface->w);
-					int py = surface->h * (8 + band * 5) / 100
-						+ (int)(t * surface->h * 0.34)
-						+ (int)(sin(t * 2.2 + band) * scale * 0.03);
-					if(segment > 0) {
-						thickLineRGBA(surface, previous_x, previous_y, px, py,
-							band == 1 ? 5 : 3, 176, 186, 214,
-							(Uint8)(alpha * 0.16 * rise));
-					}
-					previous_x = px;
-					previous_y = py;
-				}
-			}
-			for(int star = 0; star < 90; star++) {
-				unsigned int s = (unsigned int)star * 1664525u + seed;
-				double t = (s % 1000) / 1000.0;
-				int sx = (int)(t * surface->w);
-				int sy = surface->h * (8 + (s >> 10) % 30) / 100
-					+ (int)(t * surface->h * 0.30);
-				pixelRGBA(surface, sx, sy, 214, 222, 240,
-					(Uint8)(alpha * 0.45 * rise));
-			}
-		} else if(kind == 36) {
-			// Sheet lightning beyond the range: the far side lights up, but no
-			// bolt ever resolves. The lit cloud bank is always present; the
-			// pulses only brighten it, so the sky is never empty.
-			// Everything here is soft. Stacked filledCircleRGBA discs at low
-			// alpha leave a visible rim where each disc ends, which reads as a
-			// bullseye rather than as light inside cloud.
-			int glow_x = surface->w * (20 + (seed >> 12) % 60) / 100;
-			int ridge_y = surface->h * 66 / 100;
-			soft_glow(surface, glow_x, ridge_y, scale / 5,
-				104, 118, 154, (int)(alpha * 0.55));
-			soft_band(surface, ridge_y - scale / 14, ridge_y + scale / 12,
-				88, 100, 132, (int)(alpha * 0.42));
-			Uint32 pulse = phase % 2600;
-			double flash = 0.0;
-			if(pulse < 180) flash = 1.0 - pulse / 180.0;
-			else if(pulse > 700 && pulse < 860)
-				flash = 0.6 * (1.0 - (pulse - 700) / 160.0);
-			if(flash > 0.0) {
-				soft_glow(surface, glow_x, ridge_y, scale / 4,
-					128, 146, 186, (int)(alpha * 1.6 * flash));
-				soft_band(surface, ridge_y - scale / 10, ridge_y + scale / 16,
-					112, 128, 168, (int)(alpha * 0.9 * flash));
-			}
-		} else if(kind == 37) {
-			// High cirrus: soft smears of thin cloud, no visible strokes.
-			for(int wisp = 0; wisp < 7; wisp++) {
-				unsigned int s = (unsigned int)wisp * 2246822519u + seed;
-				int wy = surface->h * (10 + (s >> 8) % 28) / 100;
-				int wx = (int)((s % 1000) / 1000.0 * surface->w);
-				int drift = (int)(sin(ticks / 9000.0 + wisp) * scale * 0.010);
-				soft_glow(surface, wx + drift, wy,
-					scale / (16 + wisp % 3 * 4), 168, 176, 196, 22);
-				soft_glow(surface, wx + drift + scale / 12, wy + scale / 90,
-					scale / (22 + wisp % 2 * 5), 176, 184, 202, 14);
-			}
-		} else if(kind == 38) {
-			// Volumetric shafts breaking through high cloud: a soft source with
-			// wide, very faint wedges beneath it.
-			int source_x = surface->w * (26 + (seed >> 12) % 48) / 100;
-			int source_y = surface->h * 6 / 100;
-			double strength = sin(progress * 3.14159265359);
-			soft_glow(surface, source_x, source_y, scale / 14,
-				228, 220, 192, (int)(52 * strength));
-			for(int ray = 0; ray < 7; ray++) {
-				double angle = 1.57079632679 + (ray - 3) * 0.105;
-				int end_x = source_x + (int)(cos(angle) * scale * 0.70);
-				int end_y = source_y + (int)(sin(angle) * scale * 0.70);
-				thickLineRGBA(surface, source_x, source_y, end_x, end_y,
-					11, 214, 206, 178, (Uint8)(alpha * 0.045 * strength));
-				thickLineRGBA(surface, source_x, source_y, end_x, end_y,
-					4, 222, 214, 186, (Uint8)(alpha * 0.075 * strength));
-			}
-		} else if(kind == 39) {
-			// Space elevator: a hairline from the ridge into the sky, with a
-			// single slow climber.
-			int base_x = surface->w * (18 + (seed >> 12) % 64) / 100;
-			int ridge_y = surface->h * 70 / 100;
-			thickLineRGBA(surface, base_x, ridge_y, base_x, -scale / 40, 1,
-				146, 158, 180, (Uint8)(alpha * 0.55));
-			int climber_y = ridge_y - (int)(progress * (ridge_y + scale / 40));
-			filledCircleRGBA(surface, base_x, climber_y, scale / 180 + 1,
-				198, 214, 236, (Uint8)(alpha * 0.45));
-			filledCircleRGBA(surface, base_x, climber_y, 1,
-				232, 238, 248, (Uint8)(alpha * 0.75));
-		} else if(kind == 40) {
-			// A faint orbital arc crossing the whole sky.
-			int previous_x = 0;
-			int previous_y = surface->h * 62 / 100;
-			for(int segment = 1; segment <= 26; segment++) {
-				double t = (double)segment / 26;
-				int px = (int)(t * surface->w);
-				int py = (int)(surface->h * 62 / 100
-					- sin(t * 3.14159265359) * surface->h * 0.44);
-				thickLineRGBA(surface, previous_x, previous_y, px, py, 1,
-					152, 164, 190, (Uint8)(alpha * 0.38));
-				previous_x = px;
-				previous_y = py;
-			}
-		} else if(kind == 41) {
-			// Light pollution: the dome a distant city throws onto low cloud.
-			// Only the glow is visible, never the source.
-			int dome_x = surface->w * (24 + (seed >> 12) % 52) / 100;
-			int dome_y = surface->h * 74 / 100;
-			double strength = sin(progress * 3.14159265359);
-			soft_glow(surface, dome_x, dome_y, scale / 5,
-				206, 158, 104, (int)(46 * strength));
-			soft_glow(surface, dome_x, dome_y, scale / 11,
-				228, 186, 132, (int)(34 * strength));
-			for(int lamp = 0; lamp < 14; lamp++) {
-				unsigned int s = (unsigned int)lamp * 2246822519u + seed;
-				int lx = dome_x
-					+ (int)(s % (unsigned int)(scale / 8 + 1)) - scale / 16;
-				int ly = dome_y
-					+ (int)((s >> 9) % (unsigned int)(scale / 60 + 1));
-				pixelRGBA(surface, lx, ly, 236, 200, 140,
-					(Uint8)(alpha * 0.30 * strength));
-			}
-		} else if(kind == 42) {
-			// A derelict station, far off and tumbling. Built as a silhouette:
-			// a long spine, a ring seen almost edge-on, and a cluster of
-			// modules. A ring plus a disc read as a mouse pointer, so the ring
-			// is drawn as a flattened ellipse and the spine carries the shape.
-			int body = size * 5;
-			double tumble = progress * 0.9;
-			int spine_len = (int)(body * (0.55 + 0.45 * fabs(cos(tumble))));
-			int tilt = (int)(sin(progress * 1.7) * body * 0.22);
-			// Hull: a dark elongated body, not a line.
-			int hull_h = scale / 150;
-			if(hull_h < 2) hull_h = 2;
-			Sint16 hx[4], hy[4];
-			hx[0] = (Sint16)(x + spine_len);
-			hy[0] = (Sint16)(y + tilt);
-			hx[1] = (Sint16)(x + spine_len / 4);
-			hy[1] = (Sint16)(y + tilt / 4 - hull_h);
-			hx[2] = (Sint16)(x - spine_len);
-			hy[2] = (Sint16)(y - tilt - hull_h / 2);
-			hx[3] = (Sint16)(x - spine_len);
-			hy[3] = (Sint16)(y - tilt + hull_h / 2);
-			filledPolygonRGBA(surface, hx, hy, 4, 12, 15, 24, alpha);
-			// Rim light along the top edge only.
-			aalineRGBA(surface, hx[0], hy[0], hx[1], hy[1], 128, 146, 176, alpha);
-			aalineRGBA(surface, hx[1], hy[1], hx[2], hy[2], 84, 100, 128, alpha);
-			// The ring, foreshortened to a sliver as it turns edge-on.
-			int ring_rx = (int)(body * 0.55);
-			int ring_ry = (int)(body * 0.55 * fabs(sin(tumble)) * 0.55) + 1;
-			ellipseRGBA(surface, x, y, ring_rx, ring_ry,
-				96, 112, 140, (Uint8)(alpha * 0.55));
-			// A few lit windows along the spine, and a warm core.
-			for(int win = 0; win < 5; win++) {
-				int wx = x - spine_len + spine_len * 2 * win / 5;
-				int wy = y - tilt + tilt * 2 * win / 5 - hull_h / 3;
-				pixelRGBA(surface, wx, wy, 226, 208, 168,
-					(Uint8)(alpha * 0.75));
-			}
-			soft_glow(surface, x, y, scale / 70, 210, 190, 150,
-				(int)(alpha * 0.30));
-		} else if(kind == 43) {
-			// Only the running lights of something moving out there. No hull,
-			// no shape, just points holding formation.
-			int fleet_y = surface->h * (18 + (seed >> 8) % 20) / 100;
-			for(int light = 0; light < 9; light++) {
-				unsigned int s = (unsigned int)light * 2246822519u + seed;
-				int lx = (int)((s % 1000) / 1000.0 * surface->w)
-					+ direction * (int)(progress * surface->w * 0.35);
-				lx = ((lx % surface->w) + surface->w) % surface->w;
-				int ly = fleet_y
-					+ (int)((s >> 10) % (unsigned int)(scale / 16 + 1)) - scale / 32;
-				double flicker = 0.6 + 0.4 * sin(ticks / 1600.0 + light * 1.7);
-				soft_glow(surface, lx, ly, scale / 45, 202, 216, 240,
-					(int)(120 * flicker));
-			}
-		} else if(kind == 44) {
-			// The aurora again, but only as it appears in the mist below: the
-			// sky event is over, its light is still in the air.
-			int mist_y = surface->h * 70 / 100;
-			double strength = sin(progress * 3.14159265359);
+		if(kind == 0) {
+			draw_hill_garden(surface, ticks, scale, seed, progress, fade);
+		} else if(kind == 1) {
+			int flood_y = surface->h * (82 - (int)(progress * 9)) / 100;
+			boxRGBA(surface, 0, flood_y, surface->w - 1, surface->h - 1,
+				28, 79, 116, (Uint8)(58 * fade));
 			for(int band = 0; band < 5; band++) {
 				int previous_x = 0;
-				int previous_y = mist_y + band * scale / 50;
-				for(int segment = 1; segment <= 24; segment++) {
-					int px = surface->w * segment / 24;
-					int py = mist_y + band * scale / 50
-						+ (int)(sin(segment * 0.45 + ticks / 3200.0 + band)
-							* scale * 0.012);
-					thickLineRGBA(surface, previous_x, previous_y, px, py, 6,
-						88, 170, 148, (Uint8)(strength * 14));
-					thickLineRGBA(surface, previous_x, previous_y, px, py, 2,
-						120, 198, 172, (Uint8)(strength * 26));
-					previous_x = px;
-					previous_y = py;
-				}
-			}
-		} else if(kind == 45) {
-			// A shower rather than a single streak. One continuous tapered tail
-			// per meteor: stacking short segments made the tail read as dashes.
-			double burst = sin(progress * 3.14159265359);
-			for(int meteor = 0; meteor < 16; meteor++) {
-				unsigned int s = (unsigned int)meteor * 2246822519u + seed;
-				double t = fmod((s % 1000) / 1000.0 + progress * 0.75, 1.0);
-				int sx = (int)(t * surface->w);
-				int sy = (int)(t * surface->h * 0.50);
-				double life = 1.0 - t;
-				int head = (int)(150 * burst * life);
-				if(head < 3) continue;
-				int tail_len = scale / 14;
-				// three nested widths give a taper without visible steps
-				thickLineRGBA(surface, sx - tail_len, sy - tail_len * 3 / 4,
-					sx, sy, 4, 206, 218, 242, (Uint8)(burst * life * 12));
-				thickLineRGBA(surface, sx - tail_len / 2, sy - tail_len * 3 / 8,
-					sx, sy, 3, 216, 228, 248, (Uint8)(burst * life * 26));
-				thickLineRGBA(surface, sx - tail_len / 4, sy - tail_len * 3 / 16,
-					sx, sy, 1, 236, 244, 255, (Uint8)(burst * life * 44));
-				soft_glow(surface, sx, sy, scale / 80, 228, 236, 252, head);
-			}
-		} else if(kind == 46) {
-			// False dawn: a wide, low wash of light lifting off the horizon,
-			// brightening the sky before any source is visible.
-			int apex_x = surface->w * (24 + (seed >> 12) % 52) / 100;
-			double rise = sin(progress * 3.14159265359);
-			int ridge_y = surface->h * 76 / 100;
-			soft_band(surface, surface->h * 58 / 100, ridge_y + scale / 20,
-				196, 184, 156, (int)(80 * rise));
-			soft_glow(surface, apex_x, ridge_y, scale / 5,
-				206, 194, 164, (int)(46 * rise));
-			soft_glow(surface, apex_x, ridge_y - scale / 40, scale / 12,
-				220, 208, 178, (int)(30 * rise));
-		} else if(kind == 47) {
-			// Light pillar: a column of ice-crystal glow above a bright point.
-			int pillar_x = surface->w * (20 + (seed >> 12) % 60) / 100;
-			int ground_y = surface->h * 76 / 100;
-			int height = scale / 3;
-			soft_column(surface, pillar_x, ground_y, height, scale / 60,
-				226, 220, 202, 90);
-			soft_glow(surface, pillar_x, ground_y, scale / 22,
-				240, 232, 204, 60);
-		} else if(kind == 48) {
-			// A moon with its halo: the ice ring is the subject, not the moon.
-			int halo_x = surface->w * (26 + (seed >> 12) % 48) / 100;
-			int halo_y = surface->h * (16 + (seed >> 8) % 16) / 100;
-			int halo_r = scale / 8;
-			// The ring is real, but a bare circleRGBA reads as a drawn circle.
-			// A soft wash behind it, and a second ring at a quarter of the
-			// alpha, make it read as light scattered through ice crystals.
-			soft_glow(surface, halo_x, halo_y, halo_r + scale / 40,
-				202, 210, 226, (int)(alpha * 0.30));
-			circleRGBA(surface, halo_x, halo_y, halo_r,
-				202, 210, 226, (Uint8)(alpha * 0.16));
-			circleRGBA(surface, halo_x, halo_y, halo_r + 2,
-				202, 210, 226, (Uint8)(alpha * 0.08));
-			soft_glow(surface, halo_x, halo_y, scale / 30,
-				226, 230, 238, (int)(alpha * 0.55));
-		} else if(kind == 49) {
-			// A sea of cloud filling the valley: soft, layered, catching light.
-			int sea_y = surface->h * 64 / 100;
-			int drift = (int)(sin(ticks / 7000.0) * scale * 0.006);
-			soft_band(surface, sea_y + drift, surface->h * 82 / 100 + drift,
-				176, 186, 204, 62);
-			soft_band(surface, sea_y + scale / 20 + drift,
-				surface->h * 92 / 100 + drift, 190, 198, 214, 44);
-		} else if(kind == 50) {
-			// A snow squall crossing the valley. Only soft glows and falling
-			// flakes: a wide low-alpha column reads as a flat grey rectangle,
-			// so the body is built from overlapping puffs instead.
-			double reach = sin(progress * 3.14159265359);
-			int edge_x = direction > 0
-				? (int)(reach * surface->w * 1.15) - surface->w / 6
-				: surface->w + surface->w / 6
-					- (int)(reach * surface->w * 1.15);
-			int top_y = surface->h * 8 / 100;
-			int bottom_y = surface->h * 88 / 100;
-			int span_y = bottom_y - top_y;
-			if(span_y < 1) span_y = 1;
-			// Body: a lattice of soft puffs trailing behind the leading edge.
-			for(int puff = 0; puff < 26; puff++) {
-				unsigned int s = (unsigned int)puff * 2246822519u + seed;
-				double t = (double)puff / 25;
-				int py = top_y + (int)(t * span_y);
-				int depth = (int)((s % 1000) / 1000.0 * surface->w / 3);
-				int px = edge_x - direction * depth;
-				soft_glow(surface, px, py,
-					(int)(scale * (0.07 + (s >> 10) % 60 / 1000.0)),
-					208, 214, 226, (int)(alpha * 0.13));
-			}
-			// The leading edge: overlapping glows, so the boundary dissolves
-			// into the air instead of ending in a wall.
-			for(int puff = 0; puff < 14; puff++) {
-				double t = (double)puff / 13;
-				int py = top_y + (int)(t * span_y);
-				int jitter = (int)(sin(t * 7.0 + ticks / 2600.0)
-					* scale * 0.02);
-				soft_glow(surface, edge_x + jitter, py,
-					(int)(scale * (0.10 + 0.05 * sin(t * 5.0))),
-					210, 216, 228, (int)(alpha * 0.16));
-			}
-			// Flakes inside the squall, falling and drifting.
-			for(int flake = 0; flake < 90; flake++) {
-				unsigned int s = (unsigned int)flake * 1664525u + seed;
-				int fx = edge_x - direction
-					* (int)((s % 1000) / 1000.0 * surface->w / 3);
-				int fy = top_y + (int)((s >> 10) % (Uint32)span_y);
-				fy = top_y + ((fy - top_y + (int)(ticks / 14.0)) % span_y);
-				pixelRGBA(surface, fx, fy, 226, 232, 242,
-					(Uint8)(alpha * 0.30));
-			}
-		} else if(kind == 51) {
-			// Heat lightning: the horizon pulses, nothing else moves. A dim
-			// warm haze sits on the ridge permanently so the scene reads even
-			// between flashes.
-			int glow_x = surface->w * (20 + (seed >> 8) % 60) / 100;
-			int span = surface->w * (30 + (seed >> 12) % 40) / 100;
-			int ridge_y = surface->h * 76 / 100;
-			soft_glow(surface, glow_x, ridge_y, span / 3,
-				92, 88, 96, (int)(alpha * 0.55));
-			soft_band(surface, ridge_y - scale / 16, ridge_y + scale / 14,
-				92, 88, 96, (int)(alpha * 0.30));
-			Uint32 pulse = phase % 1700;
-			double flash = pulse < 240 ? 1.0 - pulse / 240.0 : 0.0;
-			if(flash > 0.0) {
-				soft_glow(surface, glow_x, ridge_y, span / 3,
-					126, 138, 176, (int)(alpha * 2.2 * flash));
-				soft_band(surface, ridge_y - scale / 12, ridge_y + scale / 12,
-					126, 138, 176, (int)(alpha * 1.1 * flash));
-			}
-		} else if(kind == 52) {
-			// Diamond ring: totality ending, one point of photosphere left.
-			int sun_x = surface->w * (28 + (seed >> 12) % 44) / 100;
-			int sun_y = surface->h * (16 + (seed >> 8) % 16) / 100;
-			int sun_r = scale / 26;
-			soft_glow(surface, sun_x, sun_y, sun_r + scale / 16,
-				226, 220, 198, (int)(alpha * 0.30));
-			filledCircleRGBA(surface, sun_x, sun_y, sun_r, 14, 16, 26,
-				(Uint8)(alpha * 0.60));
-			double edge = smooth_step(0.15, 0.6, progress);
-			int diamond_x = sun_x
-				+ (int)(sun_r * 1.05 * cos(progress * 6.28318530718));
-			int diamond_y = sun_y
-				+ (int)(sun_r * 1.05 * sin(progress * 6.28318530718));
-			filledCircleRGBA(surface, diamond_x, diamond_y, scale / 150 + 1,
-				255, 250, 232, (Uint8)(alpha * 0.80 * edge));
-			for(int ray = 0; ray < 6; ray++) {
-				double a = ray * 1.0471975512 + progress;
-				thickLineRGBA(surface, diamond_x, diamond_y,
-					diamond_x + (int)(cos(a) * scale * 0.05),
-					diamond_y + (int)(sin(a) * scale * 0.05), 1,
-					255, 246, 220, (Uint8)(alpha * 0.12 * edge));
-			}
-		} else if(kind == 53) {
-			// A planet crossing a distant sun: a small dark disc, bright rim.
-			int sun_x = surface->w * (30 + (seed >> 12) % 40) / 100;
-			int sun_y = surface->h * (14 + (seed >> 8) % 14) / 100;
-			int sun_r = scale / 30;
-			soft_glow(surface, sun_x, sun_y, sun_r + scale / 12,
-				238, 228, 196, (int)(alpha * 0.34));
-			filledCircleRGBA(surface, sun_x, sun_y, sun_r, 246, 236, 206,
-				(Uint8)(alpha * 0.28));
-			double transit = smooth_step(0.2, 0.8, progress);
-			int planet_x = sun_x - sun_r + (int)(transit * sun_r * 2);
-			int planet_y = sun_y + sun_r / 5;
-			filledCircleRGBA(surface, planet_x, planet_y, sun_r / 5,
-				26, 28, 38, (Uint8)(alpha * 0.70));
-		} else if(kind == 54) {
-			// A comet whose nucleus is coming apart, fragments trailing wide.
-			int comet_x = surface->w * (26 + (seed >> 12) % 48) / 100;
-			int comet_y = surface->h * (16 + (seed >> 8) % 20) / 100;
-			for(int frag = 0; frag < 7; frag++) {
-				double t = (double)frag / 6;
-				int fx = comet_x - direction * (int)(t * scale * 0.10);
-				int fy = comet_y + (int)(t * scale * 0.03);
-				Uint8 fa = (Uint8)(alpha * (0.42 - t * 0.05));
-				filledCircleRGBA(surface, fx, fy, 1 + frag % 2,
-					226, 232, 244, fa);
-				if(frag > 0) {
-					thickLineRGBA(surface, fx, fy,
-						fx + direction * scale / 40, fy - scale / 90, 1,
-						190, 204, 228, (Uint8)(fa * 0.55));
-				}
-			}
-		} else if(kind == 55) {
-			// A monolith on the plain: the only straight line for miles. The
-			// face catches a little skylight so the slab reads as a solid, not
-			// as an edge highlight floating in the dark.
-			int mono_x = surface->w * (22 + (seed >> 12) % 56) / 100;
-			double nx = (double)mono_x / surface->w;
-			double ridge = 0.88
-				+ (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-			int base_y = (int)(surface->h * ridge);
-			int height = scale / 6;
-			int half = height / 6;
-			if(half < 3) half = 3;
-			// body: a very dark blue-grey, just above the sky value
-			boxRGBA(surface, mono_x - half, base_y - height,
-				mono_x + half, base_y, 26, 31, 42, 235);
-			// lit vertical edge and top
-			boxRGBA(surface, mono_x + half - 1, base_y - height,
-				mono_x + half, base_y, 96, 112, 138, 235);
-			boxRGBA(surface, mono_x - half, base_y - height,
-				mono_x + half, base_y - height + 1, 74, 88, 112, 235);
-			soft_glow(surface, mono_x + half, base_y - height / 2,
-				scale / 26, 116, 132, 160, 22);
-		} else if(kind == 56) {
-			// Distant turbines: large enough to read as silhouettes against the
-			// last light, slow enough that the motion is barely perceptible.
-			for(int turbine = 0; turbine < 3; turbine++) {
-				int tx = surface->w * (20 + turbine * 30) / 100;
-				double nx = (double)tx / surface->w;
-				double ridge = 0.88
-					+ (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-				int base_y = (int)(surface->h * ridge);
-				int th = scale / 9;
-				thickLineRGBA(surface, tx, base_y, tx, base_y - th, 3,
-					8, 10, 15, 245);
-				double spin = ticks / (5200.0 + turbine * 460) + turbine;
-				for(int blade = 0; blade < 3; blade++) {
-					double a = spin + blade * 2.09439510239;
-					thickLineRGBA(surface, tx, base_y - th,
-						tx + (int)(cos(a) * th * 0.62),
-						base_y - th + (int)(sin(a) * th * 0.62),
-						3, 8, 10, 15, 230);
-				}
-			}
-		} else if(kind == 57) {
-			// A bridge reduced to its lights, reflected in still water.
-			int water_y = surface->h * 74 / 100;
-			for(int light = 0; light < 15; light++) {
-				int lx = surface->w * (14 + light * 72 / 15) / 100;
-				int ly = water_y - scale / 18
-					- (int)(sin(light * 3.14159265359 / 14) * scale / 34);
-				soft_glow(surface, lx, ly, scale / 70, 236, 206, 152, 60);
-				for(int r = 1; r <= 5; r++) {
-					if((light * 7 + r * 3) % 4 == 0) continue;
-					pixelRGBA(surface, lx, ly + r * 3, 220, 192, 144,
-						(Uint8)(alpha * (0.34 - r * 0.05)));
-				}
-			}
-			soft_band(surface, water_y, surface->h * 88 / 100,
-				36, 44, 62, 40);
-		} else if(kind == 58) {
-			// A substorm: the aurora brightens sharply, then falls back.
-			double surge = smooth_step(0.3, 0.5, progress)
-				* (1.0 - smooth_step(0.6, 0.85, progress));
-			for(int band = 0; band < 4; band++) {
-				int previous_x = 0;
-				int previous_y = surface->h * (14 + band * 8) / 100;
+				int previous_y = flood_y + band * scale / 38;
 				for(int segment = 1; segment <= 20; segment++) {
-					int px = surface->w * segment / 20;
-					double nx = (double)px / surface->w;
-					int py = surface->h * (14 + band * 8) / 100
-						+ (int)(sin(nx * 5.0 + ticks / (1400.0 + band * 220) + band)
-							* scale * (0.02 + surge * 0.03));
-					thickLineRGBA(surface, previous_x, previous_y, px, py, 2,
-						(Uint8)(96 + band * 16), (Uint8)(186 + band * 12),
-						(Uint8)(150 + band * 18),
-						(Uint8)(alpha * (0.22 + surge * 0.30)));
-					previous_x = px;
-					previous_y = py;
+					int next_x = surface->w * segment / 20;
+					int next_y = flood_y + band * scale / 38
+						+ (int)(sin(segment * 0.8 + ticks / (500.0 + band * 80))
+							* scale * 0.012);
+					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
+						1 + band % 2, 115, 183, 208, (Uint8)(70 * fade));
+					previous_x = next_x;
+					previous_y = next_y;
 				}
 			}
-		} else if(kind == 59) {
-			// Moon dogs: two faint bright spots flanking a moon.
-			int moon_x = surface->w * (30 + (seed >> 12) % 40) / 100;
-			int moon_y = surface->h * (18 + (seed >> 8) % 14) / 100;
-			int radius = scale / 9;
-			soft_glow(surface, moon_x, moon_y, scale / 26,
-				226, 230, 238, (int)(alpha * 0.50));
-			for(int side = -1; side <= 1; side += 2) {
-				int dog_x = moon_x + side * radius;
-				soft_glow(surface, dog_x, moon_y, scale / 40,
-					206, 214, 230, (int)(alpha * 0.22));
-				soft_glow(surface, dog_x, moon_y, scale / 90,
-					226, 232, 242, (int)(alpha * 0.30));
+		} else if(kind == 2) {
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				135, 57, 27, (Uint8)(17 * fade));
+			for(int fire = 0; fire < 12; fire++) {
+				int fire_x = surface->w * (8 + fire * 7) / 100;
+				double nx = (double)fire_x / surface->w;
+				double ridge = ridge_height(RIDGE_MIDDLE, nx);
+				int fire_y = (int)(surface->h * ridge);
+				int flicker = (int)(fabs(sin(ticks / (170.0 + fire * 11) + fire)) * scale * 0.025);
+				thickLineRGBA(surface, fire_x, fire_y, fire_x + 2, fire_y - flicker,
+					2, 238, 112, 55, (Uint8)(120 * fade));
+				filledCircleRGBA(surface, fire_x + 4, fire_y - flicker, 2,
+					255, 192, 106, (Uint8)(145 * fade));
 			}
-		} else if(kind == 60) {
-			// A dust devil on the plain, seen from far off: a soft tapering
-			// column of lifted dust, leaning slightly.
-			int devil_x = surface->w * (24 + (seed >> 12) % 52) / 100;
-			double nx = (double)devil_x / surface->w;
-			double ridge = 0.88
-				+ (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
-			int base_y = (int)(surface->h * ridge);
-			int height = scale / 5;
-			double strength = sin(progress * 3.14159265359);
-			for(int segment = 0; segment < 12; segment++) {
-				double t = (double)segment / 11;
-				int sway = (int)(sin(t * 3.0 + ticks / 1200.0)
-					* scale * 0.014 * t);
-				int gy = base_y - (int)(t * height);
-				soft_glow(surface, devil_x + sway, gy,
-					(int)(scale / 26 * (1.0 - t * 0.5)),
-					180, 168, 148, (int)(46 * strength * (1.0 - t * 0.5)));
-			}
-		} else if(kind == 61) {
-			// Slow parallax: the sky turning, near stars sliding faster.
-			for(int star = 0; star < 130; star++) {
-				unsigned int s = (unsigned int)star * 1664525u + seed;
-				int depth = 1 + (int)((s >> 20) % 3);
-				int sx = (int)((s % 1000) / 1000.0 * surface->w
-					+ ticks / (4000.0 * depth));
-				sx = ((sx % surface->w) + surface->w) % surface->w;
-				int sy = surface->h * (4 + (s >> 8) % 46) / 100;
-				pixelRGBA(surface, sx, sy, 226, 234, 250,
-					(Uint8)(alpha * (0.45 + depth * 0.30)));
-				if(star % 11 == 0) {
-					soft_glow(surface, sx, sy, scale / 110, 214, 228, 248, 60);
+		} else if(kind == 3) {
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				36, 57, 78, (Uint8)(24 * fade));
+			for(int band = 0; band < 6; band++) {
+				int previous_x = 0;
+				int previous_y = surface->h * (17 + band * 10) / 100;
+				for(int segment = 1; segment <= 18; segment++) {
+					int next_x = surface->w * segment / 18;
+					int next_y = surface->h * (17 + band * 10) / 100
+						+ (int)(sin(segment * 0.6 + ticks / 1400.0 + band) * scale * 0.05);
+					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y, 2,
+						78, 162, 163, (Uint8)(28 * fade));
+					previous_x = next_x;
+					previous_y = next_y;
 				}
 			}
 		} else {
-			// A single craft crossing high up, seen from below and behind. The
-			// hull is a silhouette with one lit edge; the wake is a smooth
-			// taper, not a row of dashes. A bright point with a stepped trail
-			// read as a wine bottle, which is why the hull is drawn at all.
-			int craft_x = direction > 0
-				? -scale / 20
-					+ (int)(progress * (surface->w + scale / 10.0))
-				: surface->w + scale / 20
-					- (int)(progress * (surface->w + scale / 10.0));
-			int craft_y = surface->h * (12 + (seed >> 8) % 22) / 100
-				+ (int)(sin(progress * 3.14159265359) * scale * 0.02);
-			int hull_len = scale / 13;
-			if(hull_len < 30) hull_len = 30;
-			// Wake first, so the hull sits on top of it. Nested widths give a
-			// taper with no visible steps.
-			int wake = hull_len * 5;
-			for(int step = 1; step <= 12; step++) {
-				double t = (double)step / 12;
-				int wx = craft_x - direction * (int)(t * wake);
-				int wy = craft_y + (int)(t * t * scale * 0.010);
-				int w = (int)(hull_len / 5.0 * (1.0 - t) + 1.0);
-				thickLineRGBA(surface, wx, wy, wx - direction, wy, w,
-					150, 176, 214, (Uint8)(alpha * 0.22 * (1.0 - t)));
-			}
-			draw_ship(surface, craft_x, craft_y, hull_len, direction,
-				(int)(sin(progress * 3.14159265359) * hull_len * 0.10),
-				alpha, (int)(alpha * 0.55), (int)(seed >> 20) % 3);
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				17, 20, 32, (Uint8)(34 * fade));
+			int figure_x = surface->w * (25 + seed % 50) / 100;
+			int figure_y = surface->h * 83 / 100;
+			int figure_height = scale / 10;
+			filledTrigonRGBA(surface, figure_x, figure_y - figure_height,
+				figure_x - figure_height / 3, figure_y,
+				figure_x + figure_height / 3, figure_y, 12, 16, 25,
+				(Uint8)(150 * fade));
+			filledCircleRGBA(surface, figure_x, figure_y - figure_height,
+				figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
 		}
-		return;
 	}
 
-	// The common events are the ones seen most often, so they carry the tone:
-	// a point of light, a few birds, a meteor, a wisp of high cloud. Nothing
-	// here has a hull, a cockpit or a face.
-	switch(kind % 4) {
-		case 0: {
-			// A single point of light crossing the sky, with a soft halo and a
-			// short fading wake. No shape is ever resolved.
-			soft_glow(surface, x, y, size * 3, 214, 226, 246,
-				(int)(alpha * 0.30));
-			soft_glow(surface, x, y, size, 236, 242, 252,
-				(int)(alpha * 0.55));
-			for(int step = 1; step <= 8; step++) {
-				int wx = x - direction * step * size;
-				thickLineRGBA(surface, wx, y, wx - direction, y, 1,
-					206, 218, 240,
-					(Uint8)(alpha * 0.30 * (1.0 - step / 9.0)));
-			}
-			filledCircleRGBA(surface, x, y, 1, 250, 252, 255, alpha);
-			break;
+/*
+ * Hill events
+ *
+ * Things that happen on the hills. Each is a small function taking a HillEvent.
+ * They stand on the near ridge (the one below the clock cards, so they are
+ * seen), except the volcano, which sits on the middle ridge at one edge of the
+ * screen. `t` is seconds since the event began, `progress` runs 0..1 over it,
+ * and `fade` fades the whole thing in and out. To add one: write hill_xxx(),
+ * append it to hill_event_kinds[] and bump HILL_EVENT_KINDS.
+ */
+typedef struct {
+	SDL_Surface *surface;
+	Uint32 ticks;
+	int scale;
+	Uint32 seed;
+	double t;
+	double progress;
+	double fade;
+	int direction;         // 1: things go left to right, -1: right to left
+} HillEvent;
+
+// A repeatable random number in 0..1 for the event.
+static double hill_random(const HillEvent *event, int a, int b) {
+	return (fx_hash(event->seed + a * 7919u, b) % 1000) / 1000.0;
+}
+
+// A small walking figure with a lantern on a pole.
+static void hill_walker(SDL_Surface *surface, double x, double ground, double height,
+	int direction, double step, bool lantern, double fade, double t, int index) {
+	Uint8 alpha = weapon_alpha(235.0 * fade);
+	double hip = ground - height * 0.45;
+	double swing = sin(step) * height * 0.22;
+	int width = height > 22 ? 3 : 2;
+	thickLineRGBA(surface, (int)x, (int)hip, (int)(x + swing), (int)ground, width, 12, 15, 22, alpha);
+	thickLineRGBA(surface, (int)x, (int)hip, (int)(x - swing), (int)ground, width, 12, 15, 22, alpha);
+	thickLineRGBA(surface, (int)x, (int)hip, (int)(x + direction * height * 0.05),
+		(int)(ground - height * 0.8), width + 1, 14, 18, 26, alpha);
+	filledCircleRGBA(surface, (int)(x + direction * height * 0.07), (int)(ground - height * 0.92),
+		(int)(height * 0.1) + 1, 14, 18, 26, alpha);
+	if(lantern) {
+		double hand_x = x + direction * height * 0.2, hand_y = ground - height * 0.58;
+		double lamp_x = x + direction * height * 0.42, lamp_y = ground - height * 0.5;
+		thickLineRGBA(surface, (int)hand_x, (int)hand_y, (int)lamp_x, (int)(lamp_y - height * 0.1), 1,
+			12, 15, 22, alpha);
+		static const Uint8 warm[3] = { 255, 190, 100 };
+		weapon_glow(surface, lamp_x, lamp_y, height * 0.11 * (0.9 + 0.1 * sin(t * 9.0 + index)),
+			warm, 235.0 * fade);
+		ellipseRGBA(surface, (int)lamp_x, (int)ground, (int)(height * 0.8), (int)(height * 0.09),
+			255, 190, 100, weapon_alpha(40.0 * fade));
+	}
+}
+
+// A village of small houses: windows light up one by one, chimneys smoke, and a
+// church tower stands in the middle.
+static void hill_village(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int houses = 8;
+	for(int house = 0; house < houses; house++) {
+		double r = hill_random(event, house, 1), r2 = hill_random(event, house, 2);
+		double x = surface->w * (0.06 + 0.88 * (house + 0.5 + (r - 0.5) * 0.5) / houses);
+		double base = ground_y(surface, RIDGE_NEAR, x) + event->scale * 0.004;
+		double width = event->scale * (0.04 + 0.016 * r2);
+		double height = width * (0.75 + 0.5 * r);
+		bool tower = house == 3;
+		if(tower) { width *= 0.7; height *= 2.4; }
+		double arrive = smooth_step(0.0, 0.1, event->progress - house * 0.012);
+		if(arrive <= 0.0) continue;
+		Uint8 alpha = weapon_alpha(235.0 * event->fade * arrive);
+		int x0 = (int)(x - width / 2), x1 = (int)(x + width / 2);
+		int y1 = (int)base, y0 = (int)(base - height);
+		boxRGBA(surface, x0, y0, x1, y1, 16, 20, 30, alpha);
+		int roof = (int)(width * (tower ? 1.2 : 0.55));
+		filledTrigonRGBA(surface, x0 - 2, y0, x1 + 2, y0, (int)x, y0 - roof, 10, 12, 20, alpha);
+		int windows = tower ? 2 : 2 + (int)(r * 2.0);
+		for(int k = 0; k < windows; k++) {
+			double lit = smooth_step(0.15 + house * 0.045 + k * 0.03, 0.2 + house * 0.045 + k * 0.03,
+				event->progress) * (1.0 - smooth_step(0.9, 0.97, event->progress));
+			if(lit <= 0.0) continue;
+			double flicker = 0.88 + 0.12 * sin(event->t * 7.0 + house * 3.1 + k);
+			int wx = x0 + (int)(width * (k + 0.5) / windows) - 1;
+			int wy = y0 + (int)(height * (0.3 + 0.25 * (k % 2)));
+			filledCircleRGBA(surface, wx + 1, wy + 2, 6, 255, 190, 100,
+				weapon_alpha(32.0 * lit * event->fade));
+			boxRGBA(surface, wx, wy, wx + 2, wy + 3, 255, 214, 130,
+				weapon_alpha(240.0 * lit * flicker * event->fade));
 		}
-		case 1: {
-			// Three gulls crossing in loose formation, each beating at its own
-			// rate so the group ripples rather than pulsing together.
-			for(int bird = 0; bird < 3; bird++) {
-				int bird_x = x - direction * bird * size * 3;
-				int bird_y = y + (bird - 1) * size * 2
-					+ (int)(sin(ticks / (900.0 + bird * 170) + bird * 2.1)
-						* size * 0.8);
-				double beat = sin(ticks / (150.0 + bird * 13) + bird * 2.3);
-				int flap = (int)((0.5 + 0.5 * beat) * (size + 1));
-				draw_bird(surface, bird_x, bird_y, size, flap);
+		if(!tower && house % 2 == 0) {
+			int chimney_x = x1 - 4, chimney_y = y0 - roof / 2 - 3;
+			boxRGBA(surface, chimney_x, chimney_y, chimney_x + 2, chimney_y + 5, 12, 15, 24, alpha);
+			for(int puff = 0; puff < 5; puff++) {
+				double age = fmod(event->t / 2.2 + puff * 0.2 + house * 0.13, 1.0);
+				filledCircleRGBA(surface, (int)(chimney_x + sin(age * 5.0 + house) * 3.0 + age * 8.0),
+					(int)(chimney_y - age * event->scale * 0.07), (int)(1.5 + age * 3.5),
+					150, 152, 162, weapon_alpha(85.0 * (1.0 - age) * event->fade));
 			}
+		}
+	}
+}
+
+// A line of travellers with lanterns walks along the ridge.
+static void hill_caravan(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int walkers = 7;
+	double spacing = event->scale * 0.05;
+	double margin = event->scale * 0.1;
+	double travel = surface->w + 2.0 * margin + walkers * spacing;
+	double lead = event->progress * travel - margin;
+	for(int walker = 0; walker < walkers; walker++) {
+		double progress_x = lead - walker * spacing;
+		double x = event->direction > 0 ? progress_x : surface->w - progress_x;
+		if(x < -20 || x > surface->w + 20) continue;
+		double ground = ground_y(surface, RIDGE_NEAR, x) + 1.0;
+		double height = event->scale * (walker == 3 ? 0.046 : 0.04);
+		if(walker == walkers - 1) height *= 0.7;
+		hill_walker(surface, x, ground, height, event->direction,
+			event->t * 6.0 + walker * 1.9, walker % 2 == 0, event->fade, event->t, walker);
+	}
+}
+
+// Wind turbines rise on the ridge and begin to turn, with red lights blinking on top.
+static void hill_turbines(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int turbines = 5;
+	Uint8 alpha = weapon_alpha(235.0 * event->fade);
+	for(int i = 0; i < turbines; i++) {
+		double x = event->surface->w * (0.07 + 0.86 * i / (turbines - 1.0));
+		double rise = smooth_step(0.02 + i * 0.03, 0.14 + i * 0.03, event->progress);
+		if(rise <= 0.0) continue;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double tower = event->scale * (0.1 + 0.016 * (i % 2)) * rise;
+		int top_x = (int)x, top_y = (int)(base - tower);
+		thickLineRGBA(surface, (int)x, (int)base, top_x, top_y, 3, 20, 26, 38, alpha);
+		thickLineRGBA(surface, (int)x + 1, (int)base, top_x + 1, top_y, 1, 52, 62, 82, (Uint8)(alpha * 0.8));
+		double blade = tower * 0.5;
+		double spin = event->t * (1.1 + 0.18 * i) * (0.4 + 0.6 * rise) + i;
+		for(int b = 0; b < 3; b++) {
+			double angle = spin + b * 2.0944;
+			int tip_x = top_x + (int)(cos(angle) * blade), tip_y = top_y + (int)(sin(angle) * blade);
+			thickLineRGBA(surface, top_x, top_y, tip_x, tip_y, 3, 28, 34, 48, alpha);
+			thickLineRGBA(surface, top_x, top_y, tip_x, tip_y, 1, 90, 104, 128, (Uint8)(alpha * 0.8));
+		}
+		filledCircleRGBA(surface, top_x, top_y, 3, 40, 46, 62, alpha);
+		if(fmod(event->t + i * 0.37, 1.6) < 0.35 && rise > 0.9) {
+			static const Uint8 red[3] = { 255, 60, 50 };
+			weapon_glow(surface, top_x, top_y - 4, 3.0, red, 235.0 * event->fade);
+		}
+	}
+}
+
+// Paper lanterns float up from the hills, swaying as they climb and fading near the top.
+static void hill_lanterns(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int lanterns = 28;
+	for(int i = 0; i < lanterns; i++) {
+		double rx = hill_random(event, i, 1), ph = hill_random(event, i, 2), rs = hill_random(event, i, 3);
+		double cycle = 13.0 + rs * 8.0;
+		double u = fmod(event->t / cycle + ph, 1.0);
+		double x0 = surface->w * (0.03 + 0.94 * rx);
+		double x = x0 + sin(event->t * 0.8 + i) * event->scale * 0.012 + u * event->scale * 0.06 * event->direction;
+		double y = ground_y(surface, RIDGE_NEAR, x0) - u * surface->h * 0.62;
+		double envelope = smooth_step(0.0, 0.1, u) * (1.0 - smooth_step(0.7, 1.0, u));
+		double size = event->scale * (0.013 + 0.006 * rs);
+		double flicker = 0.85 + 0.15 * sin(event->t * 8.0 + i * 2.0);
+		Uint8 a = weapon_alpha(255.0 * envelope * event->fade);
+		filledCircleRGBA(surface, (int)x, (int)y, (int)(size * 3.4), 255, 140, 60,
+			weapon_alpha(22.0 * envelope * event->fade * flicker));
+		filledCircleRGBA(surface, (int)x, (int)y, (int)(size * 2.2), 255, 160, 70,
+			weapon_alpha(40.0 * envelope * event->fade * flicker));
+		boxRGBA(surface, (int)(x - size * 0.5), (int)(y - size * 0.65), (int)(x + size * 0.5),
+			(int)(y + size * 0.65), 255, (Uint8)(150 + 40 * flicker), 70, a);
+		boxRGBA(surface, (int)(x - size * 0.3), (int)(y - size * 0.4), (int)(x + size * 0.3),
+			(int)(y + size * 0.4), 255, 224, 150, weapon_alpha(220.0 * envelope * event->fade * flicker));
+		lineRGBA(surface, (int)(x - size * 0.5), (int)(y - size * 0.65), (int)(x + size * 0.5),
+			(int)(y - size * 0.65), 90, 40, 20, a);
+		lineRGBA(surface, (int)(x - size * 0.5), (int)(y + size * 0.65), (int)(x + size * 0.5),
+			(int)(y + size * 0.65), 90, 40, 20, a);
+	}
+}
+
+// A tent and a campfire at the edge of the screen; two figures sit by the fire and
+// sparks and smoke rise from it.
+static void hill_campfire(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double x = event->direction > 0 ? surface->w * 0.075 : surface->w * 0.925;
+	double ground = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+	double s = event->scale * 1.4;
+	double build = smooth_step(0.0, 0.1, event->progress)
+		* (1.0 - smooth_step(0.9, 1.0, event->progress));
+	Uint8 alpha = weapon_alpha(235.0 * event->fade);
+	// The tent stands on the far side of the fire.
+	double tent_x = x - event->direction * s * 0.06;
+	double tent_width = s * 0.035;
+	filledTrigonRGBA(surface, (int)(tent_x - tent_width), (int)ground, (int)(tent_x + tent_width),
+		(int)ground, (int)tent_x, (int)(ground - s * 0.045), 22, 28, 40, alpha);
+	filledTrigonRGBA(surface, (int)tent_x, (int)ground, (int)(tent_x + event->direction * s * 0.012),
+		(int)ground, (int)tent_x, (int)(ground - s * 0.03), 8, 10, 16, alpha);
+	// The glow of the fire on the ground and the tent.
+	filledEllipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.09), (int)(s * 0.014),
+		255, 150, 60, weapon_alpha(34.0 * event->fade * build));
+	double flare = 0.85 + 0.15 * sin(event->t * 11.0) + 0.1 * sin(event->t * 17.0);
+	filledCircleRGBA(surface, (int)x, (int)(ground - s * 0.015), (int)(s * 0.05 * flare), 255, 140, 50,
+		weapon_alpha(26.0 * event->fade * build));
+	thickLineRGBA(surface, (int)(x - s * 0.012), (int)ground, (int)(x + s * 0.012), (int)(ground - s * 0.004),
+		3, 44, 30, 24, alpha);
+	thickLineRGBA(surface, (int)(x + s * 0.012), (int)ground, (int)(x - s * 0.012), (int)(ground - s * 0.004),
+		3, 54, 36, 26, alpha);
+	for(int tongue = 0; tongue < 5; tongue++) {
+		double sway = sin(event->t * (9.0 + tongue * 2.0) + tongue) * s * 0.003;
+		double h = s * (0.018 + 0.006 * (tongue % 3)) * build * (0.75 + 0.25 * sin(event->t * 13.0 + tongue * 2.3));
+		double w = s * 0.007;
+		double fx = x + (tongue - 2) * s * 0.004;
+		filledTrigonRGBA(surface, (int)(fx - w), (int)(ground - 2), (int)(fx + w), (int)(ground - 2),
+			(int)(fx + sway), (int)(ground - h), 250, 120, 40, weapon_alpha(215.0 * event->fade));
+		filledTrigonRGBA(surface, (int)(fx - w * 0.55), (int)(ground - 2), (int)(fx + w * 0.55), (int)(ground - 2),
+			(int)(fx + sway), (int)(ground - h * 0.75), 255, 205, 110, weapon_alpha(225.0 * event->fade));
+	}
+	for(int spark = 0; spark < 12; spark++) {
+		double u = fmod(event->t / 1.7 + spark * 0.083, 1.0);
+		double sx = x + sin(spark * 7.0 + event->t * 2.5) * s * 0.014 * u + event->direction * u * s * 0.01;
+		double sy = ground - s * 0.02 - u * s * 0.13;
+		filledCircleRGBA(surface, (int)sx, (int)sy, spark % 3 == 0 ? 2 : 1, 255, (Uint8)(210 - 90 * u), 100,
+			weapon_alpha(240.0 * (1.0 - u) * event->fade * build));
+	}
+	for(int puff = 0; puff < 6; puff++) {
+		double u = fmod(event->t / 4.5 + puff / 6.0, 1.0);
+		filledCircleRGBA(surface, (int)(x + sin(u * 4.0 + puff) * s * 0.01 + u * s * 0.03 * event->direction),
+			(int)(ground - s * 0.03 - u * s * 0.17), (int)(s * (0.006 + 0.014 * u)), 120, 120, 134,
+			weapon_alpha(70.0 * (1.0 - u) * event->fade * build));
+	}
+	// Two figures sit by the fire, facing it.
+	for(int person = 0; person < 2; person++) {
+		double px = x + (person == 0 ? -s * 0.028 : s * 0.034);
+		int facing = px < x ? 1 : -1;
+		filledEllipseRGBA(surface, (int)px, (int)(ground - s * 0.008), (int)(s * 0.01), (int)(s * 0.009),
+			14, 18, 26, alpha);
+		filledCircleRGBA(surface, (int)(px + facing * s * 0.002), (int)(ground - s * 0.024),
+			(int)(s * 0.005) + 1, 14, 18, 26, alpha);
+		filledCircleRGBA(surface, (int)(px + facing * s * 0.005), (int)(ground - s * 0.022), 1,
+			255, 170, 90, weapon_alpha(200.0 * event->fade * build));
+	}
+}
+
+// Glowing plants along the ridge: waves of light pass through them, with a few
+// that are much bigger than the rest.
+static void hill_bloom(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int plants = 34;
+	static const Uint8 colors[3][3] = { { 90, 235, 215 }, { 175, 125, 255 }, { 255, 125, 205 } };
+	for(int i = 0; i < plants; i++) {
+		double r = hill_random(event, i, 1);
+		double x = event->surface->w * (0.02 + 0.96 * (i + 0.5 + (r - 0.5) * 0.6) / plants);
+		double grow = smooth_step(0.0 + i * 0.004, 0.18 + i * 0.004, event->progress)
+			* (1.0 - smooth_step(0.93, 1.0, event->progress));
+		if(grow <= 0.0) continue;
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double tall = event->scale * (0.018 + 0.03 * r * r) * grow;
+		double wave = 0.5 + 0.5 * sin(x * 0.018 * event->direction - event->t * 3.3);
+		double lean = sin(event->t * 0.9 + i) * tall * 0.12;
+		const Uint8 *c = colors[i % 3];
+		int top_x = (int)(x + lean), top_y = (int)(base - tall);
+		filledEllipseRGBA(surface, (int)x, (int)base, (int)(tall * 0.7) + 2, 2, c[0], c[1], c[2],
+			weapon_alpha(40.0 * wave * event->fade * grow));
+		thickLineRGBA(surface, (int)x, (int)base, top_x, top_y, 1, 30, 70, 64, weapon_alpha(220.0 * event->fade));
+		thickLineRGBA(surface, (int)x, (int)(base - tall * 0.4), (int)(x - tall * 0.25), (int)(base - tall * 0.55), 1,
+			30, 70, 64, weapon_alpha(200.0 * event->fade));
+		double bulb = (2.0 + tall * 0.12) * (0.8 + 0.4 * wave);
+		weapon_glow(surface, top_x, top_y, bulb, c, (110.0 + 140.0 * wave) * event->fade * grow);
+		if(r > 0.7) {
+			// The big ones unfold a ring of petals.
+			for(int petal = 0; petal < 6; petal++) {
+				double angle = petal * 1.0472 + event->t * 0.2;
+				lineRGBA(surface, top_x, top_y, (int)(top_x + cos(angle) * bulb * 3.2),
+					(int)(top_y + sin(angle) * bulb * 2.0), c[0], c[1], c[2],
+					weapon_alpha((90.0 + 120.0 * wave) * event->fade * grow));
+			}
+		}
+	}
+}
+
+// A herd of four-legged animals walks along the ridge, a calf at the back.
+static void hill_herd(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int animals = 6;
+	double spacing = event->scale * 0.115;
+	double margin = event->scale * 0.1;
+	double travel = surface->w + 2.0 * margin + animals * spacing;
+	double lead = event->progress * travel - margin;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	for(int animal = 0; animal < animals; animal++) {
+		double progress_x = lead - animal * spacing - hill_random(event, animal, 1) * spacing * 0.4;
+		double x = event->direction > 0 ? progress_x : surface->w - progress_x;
+		if(x < -40 || x > surface->w + 40) continue;
+		double size = event->scale * (animal == animals - 1 ? 0.03 : 0.052);
+		double ground = ground_y(surface, RIDGE_NEAR, x) + 1.0;
+		int d = event->direction;
+		double gait = event->t * 3.4 + animal * 0.9;
+		double bob = fabs(sin(gait)) * size * 0.04;
+		double body_y = ground - size * 0.7 - bob;
+		// Far legs are a shade lighter than the body, so the legs read as separate.
+		for(int leg = 0; leg < 4; leg++) {
+			double hip_x = x + (leg < 2 ? 0.38 : -0.38) * size;
+			double swing = sin(gait + leg * 1.6) * size * 0.2;
+			bool far_leg = leg % 2 == 1;
+			thickLineRGBA(surface, (int)hip_x, (int)body_y, (int)(hip_x + swing * d), (int)ground,
+				far_leg ? 2 : 3, far_leg ? 22 : 12, far_leg ? 26 : 15, far_leg ? 36 : 22, alpha);
+		}
+		filledEllipseRGBA(surface, (int)x, (int)body_y, (int)(size * 0.55), (int)(size * 0.26), 12, 15, 22, alpha);
+		double neck_x = x + d * size * 0.45, neck_y = body_y - size * 0.1;
+		double head_x = x + d * size * 0.78, head_y = body_y - size * 0.5 + sin(gait * 0.5) * size * 0.04;
+		thickLineRGBA(surface, (int)neck_x, (int)neck_y, (int)head_x, (int)head_y, (int)(size * 0.2) + 1,
+			12, 15, 22, alpha);
+		filledEllipseRGBA(surface, (int)(head_x + d * size * 0.08), (int)head_y, (int)(size * 0.13) + 1,
+			(int)(size * 0.08) + 1, 12, 15, 22, alpha);
+		thickLineRGBA(surface, (int)(x - d * size * 0.5), (int)(body_y - size * 0.08),
+			(int)(x - d * size * 0.62), (int)(body_y + size * 0.05), 2, 12, 15, 22, alpha);
+		if(animal % 2 == 0 && animal != animals - 1) {
+			// Antlers: a main beam with two tines.
+			int ax = (int)head_x, ay = (int)(head_y - size * 0.05);
+			int tx = (int)(head_x - d * size * 0.1), ty = (int)(head_y - size * 0.5);
+			thickLineRGBA(surface, ax, ay, tx, ty, 1, 30, 32, 40, alpha);
+			thickLineRGBA(surface, (int)((ax + tx) / 2), (int)((ay + ty) / 2), (int)(tx + d * size * 0.2),
+				(int)(ty + size * 0.1), 1, 30, 32, 40, alpha);
+			thickLineRGBA(surface, tx, ty, (int)(tx + d * size * 0.12), (int)(ty - size * 0.14), 1, 30, 32, 40, alpha);
+		}
+	}
+}
+
+// A volcano on the middle ridge at one edge of the screen. It grows, its crater begins
+// to glow, and it erupts: lava is thrown in arcs, lava runs down the cone and an ash
+// cloud rises and drifts.
+static void hill_volcano(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double x = event->direction > 0 ? surface->w * 0.075 : surface->w * 0.925;
+	double base = ground_y(surface, RIDGE_NEAR, x) + s * 0.012;
+	double rise = smooth_step(0.0, 0.12, event->progress);
+	double erupt = smooth_step(0.14, 0.3, event->progress)
+		* (1.0 - smooth_step(0.86, 0.98, event->progress))
+		* (0.7 + 0.3 * sin(event->t * 0.8));
+	double cone_width = s * 0.24, cone_height = s * 0.1 * rise;
+	double crater_y = base - cone_height;
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	int dir = event->direction;
+	int left = (int)(x - cone_width / 2), right = (int)(x + cone_width / 2);
+	int crater_left = (int)(x - cone_width * 0.07), crater_right = (int)(x + cone_width * 0.07);
+	// The ash cloud goes behind the cone.
+	for(int puff = 0; puff < 14; puff++) {
+		double u = fmod(event->t / 7.0 + puff / 14.0, 1.0);
+		double px = x + sin(u * 3.0 + puff) * s * 0.02 + dir * u * s * 0.14;
+		double py = crater_y - u * surface->h * 0.45;
+		double radius = s * (0.018 + 0.055 * u);
+		double heat = 1.0 - smooth_step(0.0, 0.35, u);
+		filledCircleRGBA(surface, (int)px, (int)py, (int)radius, (Uint8)(44 + 150 * heat), (Uint8)(38 + 50 * heat),
+			(Uint8)(48 + 10 * heat), weapon_alpha(110.0 * (1.0 - u) * erupt * event->fade));
+	}
+	filledTrigonRGBA(surface, left, (int)base + 4, right, (int)base + 4, crater_left, (int)crater_y, 26, 20, 28, alpha);
+	filledTrigonRGBA(surface, crater_left, (int)crater_y, crater_right, (int)crater_y, right, (int)base + 4, 26, 20, 28, alpha);
+	filledTrigonRGBA(surface, crater_left, (int)crater_y, crater_right, (int)crater_y, (int)x, (int)(crater_y + s * 0.012), 255, 120, 50,
+		weapon_alpha(255.0 * erupt * event->fade));
+	filledCircleRGBA(surface, (int)x, (int)crater_y, (int)(s * 0.06 * (0.5 + erupt)), 255, 110, 50,
+		weapon_alpha(34.0 * erupt * event->fade));
+	filledCircleRGBA(surface, (int)x, (int)crater_y, (int)(s * 0.032 * (0.5 + erupt)), 255, 140, 60,
+		weapon_alpha(80.0 * erupt * event->fade));
+	filledCircleRGBA(surface, (int)x, (int)crater_y, (int)(s * 0.013 * (0.5 + erupt)) + 1, 255, 224, 160,
+		weapon_alpha(210.0 * erupt * event->fade));
+	// Lava runs down the cone in glowing streams.
+	for(int stream = 0; stream < 3; stream++) {
+		double side = (stream - 1) * 0.75;
+		double length = (0.4 + 0.2 * stream) * erupt;
+		double sx = x + side * cone_width * 0.04, sy = crater_y;
+		for(int step = 1; step <= 8; step++) {
+			double f = step / 8.0 * length;
+			double nx = x + side * cone_width * (0.04 + 0.4 * f) + sin(step * 1.3 + stream) * s * 0.004;
+			double ny = crater_y + (base - crater_y) * f;
+			thickLineRGBA(surface, (int)sx, (int)sy, (int)nx, (int)ny, 2, 255, (Uint8)(130 + 40 * stream), 50,
+				weapon_alpha(210.0 * (1.0 - f) * event->fade));
+			sx = nx;
+			sy = ny;
+		}
+	}
+	// Lava thrown from the crater in arcs.
+	for(int blob = 0; blob < 24; blob++) {
+		double r = hill_random(event, blob, 1), r2 = hill_random(event, blob, 2);
+		double u = fmod(event->t * 0.55 + blob * 0.0417 + r2, 1.0);
+		double vx = (r - 0.5) * cone_width * 1.3 + dir * cone_width * 0.1;
+		double peak = s * (0.08 + 0.16 * r2);
+		double bx = x + vx * u, by = crater_y - peak * 4.0 * u * (1.0 - u);
+		int radius = 2 + blob % 3;
+		filledCircleRGBA(surface, (int)bx, (int)by, radius + 2, 255, 130, 50,
+			weapon_alpha(50.0 * (1.0 - 0.5 * u) * erupt * event->fade));
+		filledCircleRGBA(surface, (int)bx, (int)by, radius, 255, (Uint8)(215 - 110 * u), 80,
+			weapon_alpha(255.0 * (1.0 - 0.5 * u) * erupt * event->fade));
+	}
+	if(erupt > 0.05) {
+		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 255, 90, 40, weapon_alpha(9.0 * erupt * event->fade));
+	}
+}
+
+// A chain of signal towers on the ridge lights up one after another, each sending
+// a searchlight beam into the sky that sweeps slowly from side to side.
+static void hill_beacons(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int towers = 6;
+	double s = event->scale;
+	for(int i = 0; i < towers; i++) {
+		int order = event->direction > 0 ? i : towers - 1 - i;
+		double x = surface->w * (0.07 + 0.86 * i / (towers - 1.0));
+		double base = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double height = s * 0.058;
+		int top_x = (int)x, top_y = (int)(base - height);
+		double lit = smooth_step(0.08 + order * 0.07, 0.12 + order * 0.07, event->progress)
+			* (1.0 - smooth_step(0.88, 0.97, event->progress));
+		Uint8 alpha = weapon_alpha(235.0 * event->fade);
+		if(lit > 0.0) {
+			double aim = -1.5708 + sin(event->t * 0.5 + i * 0.9) * 0.55;
+			double half = 0.045;
+			double reach = surface->h * 0.95;
+			double ax = top_x + cos(aim - half) * reach, ay = top_y + sin(aim - half) * reach;
+			double bx = top_x + cos(aim + half) * reach, by = top_y + sin(aim + half) * reach;
+			filledTrigonRGBA(surface, top_x, top_y, (int)ax, (int)ay, (int)bx, (int)by,
+				235, 228, 190, weapon_alpha(24.0 * lit * event->fade));
+			filledTrigonRGBA(surface, top_x, top_y, (int)(top_x + cos(aim - half * 0.4) * reach),
+				(int)(top_y + sin(aim - half * 0.4) * reach), (int)(top_x + cos(aim + half * 0.4) * reach),
+				(int)(top_y + sin(aim + half * 0.4) * reach), 255, 250, 220,
+				weapon_alpha(26.0 * lit * event->fade));
+		}
+		filledTrigonRGBA(surface, (int)(x - s * 0.008), (int)base, (int)(x + s * 0.008), (int)base,
+			top_x, top_y, 20, 24, 36, alpha);
+		boxRGBA(surface, top_x - 4, top_y - 3, top_x + 4, top_y, 16, 20, 30, alpha);
+		static const Uint8 flame[3] = { 255, 170, 80 };
+		weapon_glow(surface, top_x, top_y - 5, s * 0.009 * (0.9 + 0.1 * sin(event->t * 12.0 + i)),
+			flame, 235.0 * lit * event->fade);
+	}
+}
+
+// Fireflies drift over the ridge and blink on and off at their own pace.
+static void hill_fireflies(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int flies = 70;
+	static const Uint8 glow[3] = { 200, 255, 120 };
+	double s = event->scale;
+	double build = smooth_step(0.0, 0.12, event->progress)
+		* (1.0 - smooth_step(0.88, 1.0, event->progress));
+	for(int i = 0; i < flies; i++) {
+		double r1 = hill_random(event, i, 1), r2 = hill_random(event, i, 2), r3 = hill_random(event, i, 3);
+		double home_x = surface->w * (0.02 + 0.96 * r1);
+		double home_y = ground_y(surface, RIDGE_NEAR, home_x) - 6.0 - r2 * surface->h * 0.2;
+		double x = home_x + sin(event->t * (0.4 + r3 * 0.5) + i * 1.7) * s * 0.03;
+		double y = home_y + cos(event->t * (0.5 + r2 * 0.4) + i) * s * 0.02;
+		double blink = 0.5 + 0.5 * sin(event->t * (1.2 + r3 * 1.5) + i * 2.3);
+		blink = blink * blink * blink;
+		if(blink < 0.03) continue;
+		weapon_glow(surface, x, y, 1.0 + s * 0.0025, glow, 235.0 * blink * build * event->fade);
+	}
+}
+
+// Kites on strings: small figures stand on the ridge and let kites climb, sway and
+// trail ribbons.
+static void hill_kites(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int kites = 4;
+	double s = event->scale;
+	int d = event->direction;
+	static const Uint8 colors[4][3] = {
+		{ 230, 80, 70 }, { 245, 190, 70 }, { 80, 170, 230 }, { 150, 220, 110 } };
+	static const double shape_x[4] = { 0.0, 0.8, 0.0, -0.8 };
+	static const double shape_y[4] = { -1.2, 0.0, 1.6, 0.0 };
+	for(int i = 0; i < kites; i++) {
+		double anchor_x = surface->w * (0.12 + 0.76 * (i + 0.5) / kites);
+		double ground = ground_y(surface, RIDGE_NEAR, anchor_x) + 1.0;
+		double height = s * 0.034;
+		hill_walker(surface, anchor_x, ground, height, d, 0.0, false, event->fade, event->t, i);
+		double rise = smooth_step(0.04 + i * 0.04, 0.2 + i * 0.04, event->progress);
+		double hand_x = anchor_x + d * height * 0.2, hand_y = ground - height * 0.58;
+		double target_x = anchor_x + d * s * (0.05 + 0.03 * (i % 2)) + sin(event->t * 0.7 + i * 2.0) * s * 0.03;
+		double target_y = ground - surface->h * (0.26 + 0.08 * (i % 3)) + cos(event->t * 0.9 + i) * s * 0.015;
+		double kx = hand_x + (target_x - hand_x) * rise, ky = hand_y + (target_y - hand_y) * rise;
+		Uint8 line_alpha = weapon_alpha(170.0 * event->fade);
+		double last_x = hand_x, last_y = hand_y;
+		for(int k = 1; k <= 10; k++) {
+			double u = k / 10.0;
+			double lx = hand_x + (kx - hand_x) * u;
+			double ly = hand_y + (ky - hand_y) * u + sin(3.14159265 * u) * s * 0.012 * rise;
+			lineRGBA(surface, (int)last_x, (int)last_y, (int)lx, (int)ly, 210, 210, 200, line_alpha);
+			last_x = lx;
+			last_y = ly;
+		}
+		double ksz = s * 0.02;
+		double tilt = sin(event->t * 1.3 + i) * 0.3;
+		double ca = cos(tilt), sa = sin(tilt);
+		int px[4], py[4];
+		for(int p = 0; p < 4; p++) {
+			px[p] = (int)(kx + (shape_x[p] * ca - shape_y[p] * sa) * ksz);
+			py[p] = (int)(ky + (shape_x[p] * sa + shape_y[p] * ca) * ksz);
+		}
+		const Uint8 *c = colors[i % 4];
+		Uint8 alpha = weapon_alpha(235.0 * event->fade * rise);
+		filledTrigonRGBA(surface, px[0], py[0], px[3], py[3], px[2], py[2],
+			(Uint8)(c[0] * 0.7), (Uint8)(c[1] * 0.7), (Uint8)(c[2] * 0.7), alpha);
+		filledTrigonRGBA(surface, px[0], py[0], px[1], py[1], px[2], py[2], c[0], c[1], c[2], alpha);
+		lineRGBA(surface, px[0], py[0], px[2], py[2], 60, 50, 50, alpha);
+		lineRGBA(surface, px[1], py[1], px[3], py[3], 60, 50, 50, alpha);
+		double tail_x = px[2], tail_y = py[2];
+		for(int k = 1; k <= 7; k++) {
+			double bx = px[2] + sin(event->t * 3.0 + k * 0.9 + i) * ksz * 0.35 * (k / 7.0 + 0.3);
+			double by = py[2] + k * ksz * 0.55;
+			lineRGBA(surface, (int)tail_x, (int)tail_y, (int)bx, (int)by, 210, 210, 200, line_alpha);
+			const Uint8 *bow = colors[(i + k) % 4];
+			filledCircleRGBA(surface, (int)bx, (int)by, k % 2 ? 2 : 1, bow[0], bow[1], bow[2], alpha);
+			tail_x = bx;
+			tail_y = by;
+		}
+	}
+}
+
+// Fireworks: shells climb from the ridge, burst into rings of sparks that fall and fade.
+static void hill_fireworks(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int shells = 6;
+	static const Uint8 palette[5][3] = {
+		{ 255, 90, 80 }, { 255, 205, 90 }, { 110, 200, 255 }, { 170, 255, 140 }, { 230, 130, 255 } };
+	double s = event->scale;
+	for(int b = 0; b < shells; b++) {
+		double phase = event->t / 4.6 + b * 0.37;
+		int cycle = (int)floor(phase);
+		double u = phase - cycle;
+		unsigned int h = fx_hash(event->seed + b * 131u, cycle);
+		double bx = surface->w * (0.1 + 0.8 * (h & 255) / 255.0);
+		double top = surface->h * (0.14 + 0.28 * ((h >> 8) & 255) / 255.0);
+		double ground = ground_y(surface, RIDGE_NEAR, bx);
+		const Uint8 *c = palette[(h >> 16) % 5];
+		const double launch = 0.22;
+		if(u < launch) {
+			double k = u / launch;
+			for(int j = 0; j < 6; j++) {
+				double kk = k - j * 0.05;
+				if(kk < 0.0) break;
+				double yy = ground + (top - ground) * (1.0 - (1.0 - kk) * (1.0 - kk));
+				filledCircleRGBA(surface, (int)(bx + sin(kk * 30.0) * 1.5), (int)yy, j == 0 ? 2 : 1,
+					255, 220, 150, weapon_alpha(230.0 * (1.0 - j / 6.0) * event->fade));
+			}
+			continue;
+		}
+		double age = (u - launch) / (1.0 - launch);
+		double radius = s * (0.1 + 0.07 * ((h >> 24) & 255) / 255.0);
+		if(age < 0.1) {
+			static const Uint8 white[3] = { 255, 250, 235 };
+			weapon_glow(surface, bx, top, s * 0.03 * (1.0 - age * 8.0), white, 235.0 * event->fade);
+		}
+		double ease = 1.0 - pow(1.0 - age, 3.0);
+		double ease_back = 1.0 - pow(1.0 - age * 0.93, 3.0);
+		double fall = s * 0.12 * age * age;
+		double fade = pow(1.0 - age, 1.5) * event->fade;
+		const int sparks = 40;
+		for(int j = 0; j < sparks; j++) {
+			if(age > 0.5 && ((int)(event->t * 20.0) + j) % 3 == 0) continue;
+			double a = j * 6.2831853 / sparks + (h & 7);
+			double speed = j % 2 ? 0.7 : 1.0;
+			int sx = (int)(bx + cos(a) * radius * speed * ease);
+			int sy = (int)(top + sin(a) * radius * speed * ease + fall);
+			filledCircleRGBA(surface, sx, sy, age < 0.5 ? 2 : 1, c[0], c[1], c[2], weapon_alpha(255.0 * fade));
+			filledCircleRGBA(surface, (int)(bx + cos(a) * radius * speed * ease_back),
+				(int)(top + sin(a) * radius * speed * ease_back + fall * 0.8), 1, c[0], c[1], c[2],
+				weapon_alpha(110.0 * fade));
+		}
+	}
+}
+
+// A train with lit windows follows the ridge, its engine puffing smoke and shining a
+// headlight ahead.
+static void hill_train(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int cars = 6;
+	double s = event->scale;
+	int d = event->direction;
+	double car_length = s * 0.07, gap = s * 0.008, margin = s * 0.1;
+	double travel = surface->w + 2.0 * margin + (cars + 1) * (car_length + gap);
+	double lead = event->progress * travel - margin;
+	double wheel = s * 0.005;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	for(int car = 0; car <= cars; car++) {
+		bool engine = car == 0;
+		double front_px = lead - car * (car_length + gap);
+		double rear_px = front_px - car_length * (engine ? 0.85 : 1.0);
+		double fx = d > 0 ? front_px : surface->w - front_px;
+		double rx = d > 0 ? rear_px : surface->w - rear_px;
+		if((fx < -30 && rx < -30) || (fx > surface->w + 30 && rx > surface->w + 30)) continue;
+		double fy = ground_y(surface, RIDGE_NEAR, fx) + 1.0;
+		double ry = ground_y(surface, RIDGE_NEAR, rx) + 1.0;
+		double height = s * (engine ? 0.034 : 0.028);
+		int ax = (int)rx, ay = (int)(ry - wheel);
+		int bx = (int)fx, by = (int)(fy - wheel);
+		int cx = bx, cy = (int)(fy - wheel - height);
+		int dx = ax, dy = (int)(ry - wheel - height);
+		Uint8 r = engine ? 20 : 26, g = engine ? 24 : 32, b = engine ? 34 : 46;
+		filledTrigonRGBA(surface, ax, ay, bx, by, cx, cy, r, g, b, alpha);
+		filledTrigonRGBA(surface, ax, ay, cx, cy, dx, dy, r, g, b, alpha);
+		int windows = engine ? 1 : 4;
+		for(int k = 0; k < windows; k++) {
+			double u = engine ? 0.3 : (k + 0.5) / 4.0;
+			int wx = (int)(rx + (fx - rx) * u);
+			int wy = (int)(ry + (fy - ry) * u - wheel - height * 0.6);
+			double flicker = 0.9 + 0.1 * sin(event->t * 5.0 + car * 2.0 + k);
+			boxRGBA(surface, wx - 2, wy - 2, wx + 2, wy + 1, 255, 214, 130,
+				weapon_alpha(240.0 * flicker * event->fade));
+		}
+		for(int k = 0; k < 3; k++) {
+			double u = 0.15 + 0.35 * k;
+			filledCircleRGBA(surface, (int)(rx + (fx - rx) * u), (int)(ry + (fy - ry) * u - wheel * 0.6),
+				(int)(wheel * 0.8) + 1, 8, 10, 16, alpha);
+		}
+		if(engine) {
+			double chx = rx + (fx - rx) * 0.75, chy = ry + (fy - ry) * 0.75 - wheel - height;
+			boxRGBA(surface, (int)chx - 2, (int)(chy - height * 0.4), (int)chx + 2, (int)chy, 14, 18, 26, alpha);
+			for(int puff = 0; puff < 8; puff++) {
+				double age = fmod(event->t / 1.6 + puff / 8.0, 1.0);
+				filledCircleRGBA(surface, (int)(chx - d * age * s * 0.12 + sin(age * 6.0 + puff) * 2.0),
+					(int)(chy - height * 0.4 - age * s * 0.07), (int)(2.0 + age * 5.0), 150, 152, 162,
+					weapon_alpha(105.0 * (1.0 - age) * event->fade));
+			}
+			static const Uint8 lamp[3] = { 255, 235, 170 };
+			double lx = fx + d * 3.0, ly = fy - wheel - height * 0.5;
+			filledTrigonRGBA(surface, (int)lx, (int)ly, (int)(lx + d * s * 0.16), (int)(ly - s * 0.02),
+				(int)(lx + d * s * 0.16), (int)(ly + s * 0.025), 255, 235, 170, weapon_alpha(26.0 * event->fade));
+			weapon_glow(surface, lx, ly, s * 0.006, lamp, 235.0 * event->fade);
+		}
+	}
+}
+
+// A rocket on a gantry vents steam, ignites and climbs out of the top of the screen
+// on a column of smoke.
+static void hill_rocket(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double x = surface->w * (d > 0 ? 0.2 : 0.8);
+	double ground = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+	double rocket_h = s * 0.075, rocket_w = s * 0.011;
+	const double liftoff = 0.34;
+	double flight = (event->progress - liftoff) / 0.4;
+	if(flight < 0.0) flight = 0.0;
+	if(flight > 1.0) flight = 1.0;
+	double climb = surface->h + rocket_h * 2.0;
+	double alt = flight * flight * climb;
+	double drift = flight * flight * s * 0.05 * d;
+	double ignite = smooth_step(liftoff - 0.08, liftoff, event->progress)
+		* (1.0 - smooth_step(liftoff + 0.2, liftoff + 0.34, event->progress));
+	double dissipate = 1.0 - smooth_step(0.74, 0.95, event->progress);
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	// The gantry and pad, with a blinking light on top.
+	double tower_x = x - d * rocket_w * 3.0;
+	boxRGBA(surface, (int)(tower_x - 2), (int)(ground - rocket_h * 0.95), (int)(tower_x + 2), (int)ground,
+		18, 22, 32, alpha);
+	for(int arm = 0; arm < 3; arm++) {
+		double ay = ground - rocket_h * (0.3 + 0.25 * arm);
+		thickLineRGBA(surface, (int)tower_x, (int)ay, (int)(x - d * rocket_w * 0.6), (int)ay, 1, 18, 22, 32,
+			event->progress < liftoff ? alpha : (Uint8)0);
+	}
+	boxRGBA(surface, (int)(x - rocket_w * 2.5), (int)(ground - 2), (int)(x + rocket_w * 2.5), (int)(ground + 1),
+		30, 34, 46, alpha);
+	if(fmod(event->t, 1.2) < 0.4) {
+		static const Uint8 red[3] = { 255, 60, 50 };
+		weapon_glow(surface, tower_x, ground - rocket_h * 0.95 - 3.0, 2.5, red, 235.0 * event->fade);
+	}
+	// Steam and fire flare at the pad.
+	filledEllipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.07), (int)(s * 0.012),
+		255, 150, 60, weapon_alpha(50.0 * ignite * event->fade));
+	for(int puff = 0; puff < 12; puff++) {
+		double u = fmod(event->t / 2.5 + puff / 12.0, 1.0);
+		double side = (puff % 2 ? 1.0 : -1.0) * u * s * 0.1;
+		filledCircleRGBA(surface, (int)(x + side), (int)(ground - u * s * 0.015), (int)(s * (0.008 + 0.02 * u)),
+			225, 230, 240, weapon_alpha(90.0 * (1.0 - u) * ignite * event->fade));
+	}
+	// The smoke column hangs where the rocket has been.
+	const int trail = 24;
+	for(int k = 0; k < trail && flight > 0.0; k++) {
+		double past = flight - k * 0.018;
+		if(past <= 0.0) break;
+		double px = x + past * past * s * 0.05 * d + sin(k * 1.7) * 3.0;
+		double py = ground - past * past * climb;
+		filledCircleRGBA(surface, (int)px, (int)py, (int)(s * (0.008 + 0.018 * k / trail)), 190, 190, 200,
+			weapon_alpha(120.0 * (1.0 - (double)k / trail) * dissipate * event->fade));
+	}
+	if(flight >= 1.0) return;
+	// The rocket.
+	double rx = x + drift, base = ground - alt - 2.0;
+	int top_y = (int)(base - rocket_h * 0.78);
+	boxRGBA(surface, (int)(rx - rocket_w / 2), top_y, (int)(rx + rocket_w / 2), (int)base, 205, 210, 220, alpha);
+	boxRGBA(surface, (int)(rx - rocket_w / 2), (int)(base - rocket_h * 0.5), (int)(rx + rocket_w / 2),
+		(int)(base - rocket_h * 0.42), 200, 60, 55, alpha);
+	filledTrigonRGBA(surface, (int)(rx - rocket_w / 2), top_y, (int)(rx + rocket_w / 2), top_y,
+		(int)rx, (int)(base - rocket_h), 200, 60, 55, alpha);
+	filledTrigonRGBA(surface, (int)(rx - rocket_w / 2), (int)base, (int)(rx - rocket_w * 1.1), (int)(base + 2),
+		(int)(rx - rocket_w / 2), (int)(base - rocket_h * 0.28), 150, 45, 42, alpha);
+	filledTrigonRGBA(surface, (int)(rx + rocket_w / 2), (int)base, (int)(rx + rocket_w * 1.1), (int)(base + 2),
+		(int)(rx + rocket_w / 2), (int)(base - rocket_h * 0.28), 150, 45, 42, alpha);
+	filledCircleRGBA(surface, (int)rx, (int)(base - rocket_h * 0.62), (int)(rocket_w * 0.22) + 1, 90, 160, 210, alpha);
+	double flame = smooth_step(liftoff - 0.05, liftoff + 0.02, event->progress);
+	if(flame > 0.0) {
+		double flicker = 0.75 + 0.25 * sin(event->t * 40.0);
+		double length = rocket_h * (0.25 + 0.5 * flight) * flame * flicker;
+		filledTrigonRGBA(surface, (int)(rx - rocket_w * 0.45), (int)base, (int)(rx + rocket_w * 0.45), (int)base,
+			(int)rx, (int)(base + length), 255, 140, 40, weapon_alpha(225.0 * event->fade));
+		filledTrigonRGBA(surface, (int)(rx - rocket_w * 0.25), (int)base, (int)(rx + rocket_w * 0.25), (int)base,
+			(int)rx, (int)(base + length * 0.65), 255, 225, 140, weapon_alpha(235.0 * event->fade));
+		static const Uint8 hot[3] = { 255, 170, 80 };
+		weapon_glow(surface, rx, base + 2.0, rocket_w * 1.4 * flame, hot, 200.0 * event->fade);
+	}
+}
+
+// A flying saucer glides in, hovers and beams up a cow, then leaves.
+static void hill_abduction(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double target_x = surface->w * (0.3 + 0.4 * hill_random(event, 1, 1));
+	double ground = ground_y(surface, RIDGE_NEAR, target_x) + 2.0;
+	double arrive = smooth_step(0.0, 0.16, event->progress);
+	double leave = smooth_step(0.84, 1.0, event->progress);
+	double saucer_x = target_x - d * surface->w * 0.6 * (1.0 - arrive) + d * surface->w * 0.7 * leave * leave;
+	double saucer_y = surface->h * 0.3 + sin(event->t * 1.1) * s * 0.006 - leave * surface->h * 0.2;
+	double a = s * 0.05, b = s * 0.012;
+	double beam = smooth_step(0.2, 0.26, event->progress) * (1.0 - smooth_step(0.74, 0.8, event->progress));
+	double bottom = saucer_y + b;
+	double pulse = 0.8 + 0.2 * sin(event->t * 9.0);
+	if(beam > 0.0) {
+		double near_w = s * 0.012, far_w = s * 0.055;
+		filledTrigonRGBA(surface, (int)(saucer_x - near_w), (int)bottom, (int)(saucer_x + near_w), (int)bottom,
+			(int)(saucer_x - far_w), (int)ground, 170, 255, 190, weapon_alpha(34.0 * beam * pulse * event->fade));
+		filledTrigonRGBA(surface, (int)(saucer_x + near_w), (int)bottom, (int)(saucer_x + far_w), (int)ground,
+			(int)(saucer_x - far_w), (int)ground, 170, 255, 190, weapon_alpha(34.0 * beam * pulse * event->fade));
+		for(int k = 0; k < 5; k++) {
+			double u = fmod(event->t * 0.6 + k * 0.2, 1.0);
+			double ring_w = far_w + (near_w - far_w) * u;
+			ellipseRGBA(surface, (int)saucer_x, (int)(ground + (bottom - ground) * u), (int)ring_w,
+				(int)(ring_w * 0.15) + 1, 200, 255, 210, weapon_alpha(110.0 * beam * (1.0 - u) * event->fade));
+		}
+	}
+	// The cow stands on the ground, then rises in the beam and shrinks.
+	double lift = smooth_step(0.32, 0.72, event->progress);
+	if(lift < 0.97) {
+		double size = s * 0.04 * (1.0 - 0.5 * lift);
+		double cow_x = target_x + sin(event->t * 2.0) * s * 0.004 * lift;
+		double cow_y = ground - size * 0.7 - lift * (ground - bottom - size);
+		double shade = lift * lift;
+		Uint8 cr = (Uint8)(14 + 150 * shade), cg = (Uint8)(18 + 190 * shade), cb = (Uint8)(26 + 150 * shade);
+		Uint8 alpha = weapon_alpha(238.0 * event->fade);
+		for(int leg = 0; leg < 4; leg++) {
+			double hip_x = cow_x + (leg < 2 ? 0.3 : -0.3) * size;
+			double sway = sin(event->t * 3.0 + leg) * size * 0.12 * lift;
+			thickLineRGBA(surface, (int)hip_x, (int)cow_y, (int)(hip_x + sway), (int)(cow_y + size * 0.6), 2,
+				cr, cg, cb, alpha);
+		}
+		filledEllipseRGBA(surface, (int)cow_x, (int)cow_y, (int)(size * 0.5), (int)(size * 0.25), cr, cg, cb, alpha);
+		filledEllipseRGBA(surface, (int)(cow_x + d * size * 0.58), (int)(cow_y - size * 0.1), (int)(size * 0.15),
+			(int)(size * 0.11), cr, cg, cb, alpha);
+	}
+	// The saucer.
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	filledEllipseRGBA(surface, (int)saucer_x, (int)(saucer_y - b * 0.7), (int)(a * 0.4), (int)(b * 1.5),
+		150, 215, 230, weapon_alpha(210.0 * event->fade));
+	filledEllipseRGBA(surface, (int)saucer_x, (int)saucer_y, (int)a, (int)b, 120, 132, 150, alpha);
+	filledEllipseRGBA(surface, (int)saucer_x, (int)(saucer_y + b * 0.4), (int)(a * 0.7), (int)(b * 0.5),
+		84, 94, 112, alpha);
+	static const Uint8 light[3] = { 255, 240, 160 };
+	for(int j = 0; j < 7; j++) {
+		double angle = 0.4 + j * (3.14159265 - 0.8) / 6.0;
+		if(((int)(event->t * 6.0) + j) % 3 == 0) {
+			weapon_glow(surface, saucer_x + cos(angle) * a * 0.85 * (d > 0 ? 1 : -1),
+				saucer_y + sin(angle) * b * 0.55, 2.0, light, 235.0 * event->fade);
+		}
+	}
+}
+
+// Geysers erupt one after another: a water column, arcing drops and steam.
+static void hill_geysers(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int geysers = 4;
+	double s = event->scale;
+	for(int i = 0; i < geysers; i++) {
+		double x = surface->w * (0.14 + 0.72 * (i + 0.5 * hill_random(event, i, 1)) / geysers);
+		double ground = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double period = 6.0 + 2.0 * hill_random(event, i, 2);
+		double local = fmod(event->t / period + hill_random(event, i, 3), 1.0);
+		double erupt = smooth_step(0.0, 0.04, local) * (1.0 - smooth_step(0.22, 0.3, local));
+		double height = s * (0.1 + 0.07 * hill_random(event, i, 4)) * erupt;
+		filledEllipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.03), (int)(s * 0.006), 70, 60, 64,
+			weapon_alpha(235.0 * event->fade));
+		filledEllipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.018), (int)(s * 0.003), 110, 190, 210,
+			weapon_alpha(220.0 * event->fade));
+		if(erupt > 0.02) {
+			double wobble = sin(event->t * 14.0 + i) * s * 0.002;
+			thickLineRGBA(surface, (int)x, (int)ground, (int)(x + wobble), (int)(ground - height * 0.85), 3,
+				200, 235, 250, weapon_alpha(170.0 * erupt * event->fade));
+			for(int j = 0; j < 22; j++) {
+				double r = hill_random(event, i * 40 + j, 5), r2 = hill_random(event, i * 40 + j, 6);
+				double u = fmod(event->t * 1.3 + j / 22.0, 1.0);
+				double dx = (r - 0.5) * s * 0.07 * u;
+				double dy = height * 4.0 * u * (1.0 - u) * (0.6 + 0.4 * r2);
+				filledCircleRGBA(surface, (int)(x + dx), (int)(ground - dy), 1 + j % 2, 200, 235, 250,
+					weapon_alpha(230.0 * erupt * event->fade));
+			}
+		}
+		for(int puff = 0; puff < 8; puff++) {
+			double u = fmod(event->t / 3.5 + puff / 8.0 + i * 0.2, 1.0);
+			double px = x + event->direction * u * s * 0.05 + sin(u * 5.0 + puff) * s * 0.01;
+			double py = ground - height * 0.5 - u * s * 0.12;
+			filledCircleRGBA(surface, (int)px, (int)py, (int)(s * (0.008 + 0.02 * u)), 225, 230, 240,
+				weapon_alpha(80.0 * (1.0 - u) * (0.3 + 0.7 * erupt) * event->fade));
+		}
+	}
+}
+
+// A circle of standing stones: runes wake up on them one by one, then a pillar of
+// light rises from the middle with motes spiralling up it.
+static void hill_stones(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int stones = 7;
+	double s = event->scale;
+	double span = s * 0.5;
+	double center_x = surface->w * 0.5;
+	double center_ground = ground_y(surface, RIDGE_NEAR, center_x) + 2.0;
+	static const Uint8 rune[3] = { 110, 230, 255 };
+	double pillar = smooth_step(0.5, 0.62, event->progress) * (1.0 - smooth_step(0.84, 0.94, event->progress));
+	if(pillar > 0.0) {
+		double width = s * 0.03 * (0.8 + 0.2 * sin(event->t * 3.0));
+		boxRGBA(surface, (int)(center_x - width), 0, (int)(center_x + width), (int)center_ground,
+			rune[0], rune[1], rune[2], weapon_alpha(24.0 * pillar * event->fade));
+		boxRGBA(surface, (int)(center_x - width * 0.4), 0, (int)(center_x + width * 0.4), (int)center_ground,
+			220, 250, 255, weapon_alpha(46.0 * pillar * event->fade));
+		for(int j = 0; j < 18; j++) {
+			double u = fmod(event->t * 0.25 + j / 18.0, 1.0);
+			double angle = u * 12.0 + j;
+			filledCircleRGBA(surface, (int)(center_x + cos(angle) * width * 0.9),
+				(int)(center_ground - u * surface->h * 0.8), 2, rune[0], rune[1], rune[2],
+				weapon_alpha(220.0 * pillar * (1.0 - u * 0.5) * event->fade));
+		}
+	}
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	for(int i = 0; i < stones; i++) {
+		double x = center_x - span / 2.0 + span * i / (stones - 1.0);
+		double ground = ground_y(surface, RIDGE_NEAR, x) + 2.0;
+		double height = s * (0.045 + 0.015 * hill_random(event, i, 1));
+		double width = height * 0.35;
+		int order = event->direction > 0 ? i : stones - 1 - i;
+		filledTrigonRGBA(surface, (int)(x - width / 2), (int)ground, (int)(x + width / 2), (int)ground,
+			(int)(x + width * 0.4), (int)(ground - height), 30, 34, 46, alpha);
+		filledTrigonRGBA(surface, (int)(x - width / 2), (int)ground, (int)(x + width * 0.4), (int)(ground - height),
+			(int)(x - width * 0.4), (int)(ground - height), 30, 34, 46, alpha);
+		double wake = smooth_step(0.1 + order * 0.06, 0.16 + order * 0.06, event->progress)
+			* (1.0 - smooth_step(0.9, 0.98, event->progress));
+		if(wake <= 0.0) continue;
+		double glow = wake * (0.8 + 0.2 * sin(event->t * 4.0 + i));
+		double mid = ground - height * 0.55;
+		lineRGBA(surface, (int)(x - width * 0.2), (int)(mid - height * 0.15), (int)(x + width * 0.2),
+			(int)(mid - height * 0.15), rune[0], rune[1], rune[2], weapon_alpha(235.0 * glow * event->fade));
+		lineRGBA(surface, (int)x, (int)(mid - height * 0.15), (int)x, (int)(mid + height * 0.15),
+			rune[0], rune[1], rune[2], weapon_alpha(235.0 * glow * event->fade));
+		circleRGBA(surface, (int)x, (int)(mid + height * 0.05), (int)(width * 0.18) + 1,
+			rune[0], rune[1], rune[2], weapon_alpha(235.0 * glow * event->fade));
+		weapon_glow(surface, x, mid, height * 0.12, rune, 150.0 * glow * event->fade);
+		if(pillar > 0.0) {
+			lineRGBA(surface, (int)x, (int)(ground - height), (int)center_x, (int)(center_ground - 2.0),
+				rune[0], rune[1], rune[2], weapon_alpha(90.0 * pillar * event->fade));
+		}
+	}
+}
+
+#define SCENE_PI 3.14159265359
+#define SCENE_TAU 6.28318530718
+
+// Screen row of the near ridge under pixel column x, for things standing on it.
+static double hill_ground(const HillEvent *event, double x) {
+	return ground_y(event->surface, RIDGE_NEAR, x) + 2.0;
+}
+
+// A column near one side of the screen (so it is not hidden by the cards): `fraction` of the
+// width from the side things come from.
+static double hill_side(const HillEvent *event, double fraction) {
+	return event->surface->w * (event->direction > 0 ? fraction : 1.0 - fraction);
+}
+
+// A lit Ferris wheel rises on the ridge and turns, its gondolas and rim lights blinking.
+static void hill_ferris(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = hill_side(event, 0.1);
+	double ground = hill_ground(event, cx);
+	double radius = s * 0.12 * smooth_step(0.0, 0.12, event->progress);
+	if(radius < 3.0) return;
+	double hub_y = ground - radius - s * 0.012;
+	double lit = smooth_step(0.1, 0.2, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
+	Uint8 alpha = weapon_alpha(235.0 * event->fade);
+	static const Uint8 colors[4][3] = {
+		{ 255, 120, 110 }, { 120, 220, 255 }, { 255, 220, 110 }, { 160, 255, 150 } };
+	thickLineRGBA(surface, (int)cx, (int)hub_y, (int)(cx - radius * 0.6), (int)ground, 3, 18, 22, 32, alpha);
+	thickLineRGBA(surface, (int)cx, (int)hub_y, (int)(cx + radius * 0.6), (int)ground, 3, 18, 22, 32, alpha);
+	const int spokes = 12;
+	double spin = event->t * 0.22 * event->direction;
+	int gondola = (int)(s * 0.007) + 2;
+	for(int k = 0; k < spokes; k++) {
+		double angle = spin + k * SCENE_TAU / spokes;
+		double tip_x = cx + cos(angle) * radius, tip_y = hub_y + sin(angle) * radius;
+		double next_x = cx + cos(angle + SCENE_TAU / spokes) * radius;
+		double next_y = hub_y + sin(angle + SCENE_TAU / spokes) * radius;
+		thickLineRGBA(surface, (int)cx, (int)hub_y, (int)tip_x, (int)tip_y, 1, 40, 46, 64, alpha);
+		thickLineRGBA(surface, (int)tip_x, (int)tip_y, (int)next_x, (int)next_y, 2, 34, 40, 58, alpha);
+		boxRGBA(surface, (int)tip_x - gondola, (int)tip_y, (int)tip_x + gondola, (int)tip_y + gondola * 2,
+			26, 30, 44, alpha);
+		boxRGBA(surface, (int)tip_x - 1, (int)tip_y + 1, (int)tip_x + 1, (int)tip_y + gondola + 1,
+			255, 214, 130, weapon_alpha(230.0 * lit * event->fade));
+		double blink = 0.55 + 0.45 * sin(event->t * 5.0 + k * 1.7);
+		weapon_glow(surface, tip_x, tip_y - 1.0, 2.2, colors[k % 4], 230.0 * lit * blink * event->fade);
+	}
+	filledCircleRGBA(surface, (int)cx, (int)hub_y, 4, 44, 50, 70, alpha);
+	boxRGBA(surface, (int)(cx - radius * 0.7), (int)(ground - 2), (int)(cx + radius * 0.7), (int)(ground + 2),
+		22, 26, 38, alpha);
+}
+
+// A small observatory: the dome slit opens and a laser guide star beam climbs into the sky.
+static void hill_observatory(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = hill_side(event, 0.13);
+	double ground = hill_ground(event, cx);
+	double r = s * 0.05, wall = s * 0.035;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	double open = smooth_step(0.06, 0.14, event->progress) * (1.0 - smooth_step(0.9, 0.96, event->progress));
+	double dome_y = ground - wall;
+	boxRGBA(surface, (int)(cx - r), (int)dome_y, (int)(cx + r), (int)ground, 22, 26, 38, alpha);
+	for(int k = 0; k < 3; k++) {
+		int wx = (int)(cx - r * 0.6 + k * r * 0.6);
+		boxRGBA(surface, wx - 1, (int)(dome_y + wall * 0.3), wx + 1, (int)(dome_y + wall * 0.3) + 5,
+			255, 214, 130, weapon_alpha(220.0 * open * event->fade));
+	}
+	filledPieRGBA(surface, (int)cx, (int)dome_y, (int)r, 180, 360, 34, 40, 58, alpha);
+	double top = dome_y - r;
+	double slit = r * 0.24 * open;
+	if(slit > 0.5) {
+		boxRGBA(surface, (int)(cx - slit), (int)top, (int)(cx + slit), (int)(top + r * 0.55), 8, 10, 16, alpha);
+	}
+	if(open <= 0.3) return;
+	static const Uint8 green[3] = { 120, 255, 170 };
+	double tilt = event->direction * (0.12 + 0.18 * sin(event->t * 0.25));
+	double length = s * 1.3;
+	double ex = cx + sin(tilt) * length, ey = top - cos(tilt) * length;
+	double flicker = (0.85 + 0.15 * sin(event->t * 13.0)) * open * event->fade;
+	thickLineRGBA(surface, (int)cx, (int)top, (int)ex, (int)ey, 7, green[0], green[1], green[2],
+		weapon_alpha(16.0 * flicker));
+	thickLineRGBA(surface, (int)cx, (int)top, (int)ex, (int)ey, 3, green[0], green[1], green[2],
+		weapon_alpha(50.0 * flicker));
+	thickLineRGBA(surface, (int)cx, (int)top, (int)ex, (int)ey, 1, 220, 255, 235, weapon_alpha(200.0 * flicker));
+	weapon_glow(surface, cx, top, 4.0, green, 200.0 * open * event->fade);
+	double star_x = cx + sin(tilt) * s * 0.7, star_y = top - cos(tilt) * s * 0.7;
+	double twinkle = 3.0 + 1.5 * sin(event->t * 3.0);
+	weapon_glow(surface, star_x, star_y, twinkle, green, 220.0 * open * event->fade);
+	lineRGBA(surface, (int)(star_x - twinkle * 3.0), (int)star_y, (int)(star_x + twinkle * 3.0), (int)star_y,
+		220, 255, 235, weapon_alpha(150.0 * open * event->fade));
+	lineRGBA(surface, (int)star_x, (int)(star_y - twinkle * 3.0), (int)star_x, (int)(star_y + twinkle * 3.0),
+		220, 255, 235, weapon_alpha(150.0 * open * event->fade));
+}
+
+// Old windmills grow on the ridge and their lattice sails start to turn.
+static void hill_windmills(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int mills = 3;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	double lit = smooth_step(0.15, 0.25, event->progress) * (1.0 - smooth_step(0.9, 0.97, event->progress));
+	for(int i = 0; i < mills; i++) {
+		double x = surface->w * (0.08 + 0.84 * i / (mills - 1.0));
+		double rise = smooth_step(0.02 + i * 0.05, 0.12 + i * 0.05, event->progress);
+		if(rise <= 0.0) continue;
+		double base = hill_ground(event, x);
+		double height = s * (0.09 + 0.015 * (i % 2)) * rise;
+		double wide = height * 0.2, narrow = height * 0.11;
+		double top = base - height;
+		filledTrigonRGBA(surface, (int)(x - wide), (int)base, (int)(x + wide), (int)base,
+			(int)(x - narrow), (int)top, 24, 28, 40, alpha);
+		filledTrigonRGBA(surface, (int)(x + wide), (int)base, (int)(x + narrow), (int)top,
+			(int)(x - narrow), (int)top, 24, 28, 40, alpha);
+		filledTrigonRGBA(surface, (int)(x - narrow - 2), (int)top, (int)(x + narrow + 2), (int)top,
+			(int)x, (int)(top - height * 0.18), 14, 16, 26, alpha);
+		filledCircleRGBA(surface, (int)x, (int)(base - height * 0.22), 6, 255, 190, 100,
+			weapon_alpha(30.0 * lit * event->fade));
+		boxRGBA(surface, (int)x - 2, (int)(base - height * 0.28), (int)x + 2, (int)(base - height * 0.16),
+			255, 214, 130, weapon_alpha(235.0 * lit * event->fade));
+		double hub_x = x, hub_y = top - height * 0.02;
+		double spin = event->t * (0.45 + 0.1 * i) * rise + i * 1.1;
+		double arm = height * 0.75;
+		for(int k = 0; k < 4; k++) {
+			double a = spin + k * SCENE_PI / 2.0;
+			double ux = cos(a), uy = sin(a);
+			double tip_x = hub_x + ux * arm, tip_y = hub_y + uy * arm;
+			double px = -uy, py = ux, wd = arm * 0.2;
+			double ax = hub_x + ux * arm * 0.3, ay = hub_y + uy * arm * 0.3;
+			filledTrigonRGBA(surface, (int)ax, (int)ay, (int)tip_x, (int)tip_y,
+				(int)(tip_x + px * wd), (int)(tip_y + py * wd), 62, 68, 90, weapon_alpha(190.0 * event->fade));
+			filledTrigonRGBA(surface, (int)ax, (int)ay, (int)(ax + px * wd), (int)(ay + py * wd),
+				(int)(tip_x + px * wd), (int)(tip_y + py * wd), 62, 68, 90, weapon_alpha(190.0 * event->fade));
+			thickLineRGBA(surface, (int)hub_x, (int)hub_y, (int)tip_x, (int)tip_y, 2, 20, 24, 36, alpha);
+		}
+		filledCircleRGBA(surface, (int)hub_x, (int)hub_y, 3, 44, 50, 70, alpha);
+	}
+}
+
+typedef struct {
+	const HillEvent *event;
+	double grow;       // 0..1 how much of the tree exists
+	double lit;        // 0..1 how bright its lights are
+	int max_depth;
+	int salt;
+} HillTree;
+
+static void hill_tree_branch(const HillTree *tree, double x, double y, double angle, double length,
+	int depth, int id) {
+	const HillEvent *event = tree->event;
+	double reveal = tree->grow * (tree->max_depth + 1) - depth;
+	if(reveal <= 0.0) return;
+	if(reveal > 1.0) reveal = 1.0;
+	double a = angle + sin(event->t * 0.7 + depth * 0.5 + id * 0.37) * 0.018 * (depth + 1);
+	double x1 = x + sin(a) * length * reveal, y1 = y - cos(a) * length * reveal;
+	int width = tree->max_depth - depth + 1;
+	if(width > 7) width = 7;
+	thickLineRGBA(event->surface, (int)x, (int)y, (int)x1, (int)y1, width, 28, 22, 30,
+		weapon_alpha(238.0 * event->fade));
+	if(depth >= tree->max_depth - 1 && tree->lit > 0.0) {
+		static const Uint8 tint[3][3] = { { 255, 200, 110 }, { 255, 150, 170 }, { 150, 220, 255 } };
+		double twinkle = 0.6 + 0.4 * sin(event->t * 2.5 + id * 1.9);
+		weapon_glow(event->surface, x1, y1, depth == tree->max_depth ? 3.0 : 2.0, tint[id % 3],
+			230.0 * tree->lit * twinkle * reveal * event->fade);
+	}
+	if(reveal < 1.0 || depth >= tree->max_depth) return;
+	double r1 = hill_random(event, id + tree->salt, 1), r2 = hill_random(event, id + tree->salt, 2);
+	hill_tree_branch(tree, x1, y1, a - 0.35 - 0.3 * r1, length * (0.72 + 0.08 * r2), depth + 1, id * 2);
+	hill_tree_branch(tree, x1, y1, a + 0.35 + 0.3 * r2, length * (0.72 + 0.08 * r1), depth + 1, id * 2 + 1);
+}
+
+// Two bare trees at the sides of the screen grow branch by branch and then light up with coloured lamps.
+static void hill_lighttree(const HillEvent *event) {
+	for(int i = 0; i < 2; i++) {
+		double x = event->surface->w * (i ? 0.92 : 0.08);
+		double ground = hill_ground(event, x);
+		HillTree tree;
+		tree.event = event;
+		tree.grow = smooth_step(0.02 + i * 0.06, 0.4 + i * 0.06, event->progress);
+		tree.lit = smooth_step(0.35, 0.55, event->progress) * (1.0 - smooth_step(0.9, 0.97, event->progress));
+		tree.max_depth = 6;
+		tree.salt = i * 1000;
+		if(tree.lit > 0.0) {
+			ellipseRGBA(event->surface, (int)x, (int)ground, (int)(event->scale * 0.05),
+				(int)(event->scale * 0.008), 255, 200, 110, weapon_alpha(70.0 * tree.lit * event->fade));
+		}
+		hill_tree_branch(&tree, x, ground, 0.0, event->scale * 0.075, 0, 1);
+	}
+}
+
+// One meteorite hitting the near ridge: streak, flash, shock ring, debris, dust and a crater that cools.
+static void hill_impact(const HillEvent *event, int id, double start, double x, int from) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double duration = event->progress > 0.001 ? event->t / event->progress : 47.0;
+	double age = (event->progress - start) * duration;
+	if(age < 0.0) return;
+	double ground = hill_ground(event, x);
+	const double flight = 1.5;
+	static const Uint8 hot[3] = { 255, 170, 90 };
+	if(age < flight) {
+		double u = age / flight;
+		double sx = x - from * s * 0.5, sy = ground - s * 0.8;
+		double hx = sx + (x - sx) * u, hy = sy + (ground - sy) * u;
+		double tx = hx - (x - sx) * 0.22, ty = hy - (ground - sy) * 0.22;
+		thickLineRGBA(surface, (int)tx, (int)ty, (int)hx, (int)hy, 5, 255, 150, 70, weapon_alpha(40.0 * event->fade));
+		thickLineRGBA(surface, (int)tx, (int)ty, (int)hx, (int)hy, 3, 255, 180, 100, weapon_alpha(120.0 * event->fade));
+		thickLineRGBA(surface, (int)tx, (int)ty, (int)hx, (int)hy, 1, 255, 250, 235, weapon_alpha(230.0 * event->fade));
+		weapon_glow(surface, hx, hy, 4.0 + u * 3.0, hot, 235.0 * event->fade);
+		return;
+	}
+	double q = age - flight;
+	double glow = exp(-q / 6.0);
+	filledEllipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.03), (int)(s * 0.007), 10, 8, 10,
+		weapon_alpha(230.0 * event->fade));
+	filledEllipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.022), (int)(s * 0.005), 255, 110, 50,
+		weapon_alpha(200.0 * glow * event->fade));
+	if(q < 1.4) {
+		double flash = 1.0 - q / 1.4;
+		weapon_glow(surface, x, ground - s * 0.01, s * 0.05 * flash + 2.0, hot, 240.0 * flash * event->fade);
+	}
+	if(q < 3.5) {
+		double w = q / 3.5;
+		for(int ring = 0; ring < 2; ring++) {
+			double rw = w - ring * 0.1;
+			if(rw <= 0.0) continue;
+			ellipseRGBA(surface, (int)x, (int)ground, (int)(s * 0.02 + rw * s * 0.22),
+				(int)(s * 0.004 + rw * s * 0.03), 255, 220, 170, weapon_alpha(160.0 * (1.0 - rw) * event->fade));
+		}
+	}
+	for(int puff = 0; puff < 7; puff++) {
+		double u = q / 8.0 - puff * 0.05;
+		if(u <= 0.0 || u >= 1.0) continue;
+		double px = x + sin(puff * 2.3) * s * 0.03 * u + from * u * s * 0.03;
+		double py = ground - u * s * 0.14 - (puff % 3) * s * 0.01;
+		filledCircleRGBA(surface, (int)px, (int)py, (int)(s * (0.012 + 0.03 * u)), 120, 105, 95,
+			weapon_alpha(90.0 * (1.0 - u) * event->fade));
+	}
+	const double gravity = s * 1.2;
+	for(int j = 0; j < 10; j++) {
+		double r1 = hill_random(event, id * 20 + j, 1), r2 = hill_random(event, id * 20 + j, 2);
+		double vx = (r1 - 0.5) * s * 0.5, vy = s * (0.25 + 0.35 * r2);
+		double land = 2.0 * vy / gravity;
+		double tt = q < land ? q : land;
+		double px = x + vx * tt, py = ground - (vy * tt - 0.5 * gravity * tt * tt);
+		if(q < land) {
+			filledCircleRGBA(surface, (int)px, (int)py, 1 + j % 2, 255, 150 + j * 5, 80,
+				weapon_alpha(235.0 * event->fade));
+		} else {
+			filledCircleRGBA(surface, (int)px, (int)py, 1 + j % 2, 50, 42, 44, weapon_alpha(230.0 * event->fade));
+			filledCircleRGBA(surface, (int)px, (int)py, 2 + j % 2, 255, 120, 50,
+				weapon_alpha(70.0 * glow * event->fade));
+		}
+	}
+}
+
+// Three meteorites crash into the ridge one after another.
+static void hill_meteorite(const HillEvent *event) {
+	hill_impact(event, 1, 0.1, event->surface->w * 0.12, 1);
+	hill_impact(event, 2, 0.4, event->surface->w * 0.88, -1);
+	hill_impact(event, 3, 0.68, event->surface->w * 0.22, 1);
+}
+
+// Dust devils: whirling funnels of sand wander along the ridge.
+static void hill_dustdevils(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int devils = 3, slices = 16;
+	for(int i = 0; i < devils; i++) {
+		double u = fmod(event->progress * 1.3 + i / (double)devils, 1.0);
+		double edge = smooth_step(0.0, 0.08, u) * (1.0 - smooth_step(0.92, 1.0, u));
+		double x = surface->w * (0.05 + 0.9 * (event->direction > 0 ? u : 1.0 - u));
+		double base = hill_ground(event, x);
+		double height = s * (0.1 + 0.04 * (i % 2));
+		for(int k = 0; k < slices; k++) {
+			double v = (k + 0.5) / slices;
+			double width = s * (0.005 + 0.04 * v);
+			double sway = sin(event->t * 2.5 - v * 5.0 + i) * s * 0.012 * v;
+			double shade = 0.6 + 0.4 * cos(k * 1.7 - event->t * 10.0);
+			filledEllipseRGBA(surface, (int)(x + sway), (int)(base - v * height), (int)width,
+				(int)(width * 0.25) + 1, 190, 168, 135, weapon_alpha(150.0 * (1.0 - 0.4 * v) * shade * edge * event->fade));
+		}
+		for(int j = 0; j < 10; j++) {
+			double v = fmod(event->t * 0.15 + j / 10.0 + i * 0.3, 1.0);
+			double angle = event->t * (6.0 + i) + j * 2.1;
+			double width = s * (0.005 + 0.04 * v);
+			double sway = sin(event->t * 2.5 - v * 5.0 + i) * s * 0.012 * v;
+			double bx = x + sway + cos(angle) * width * 1.1;
+			double by = base - v * height + sin(angle) * width * 0.25;
+			lineRGBA(surface, (int)bx, (int)by, (int)(bx - sin(angle) * 4.0), (int)(by + cos(angle)), 60, 50, 44,
+				weapon_alpha(200.0 * edge * event->fade));
+		}
+		ellipseRGBA(surface, (int)x, (int)base, (int)(s * 0.03), (int)(s * 0.004), 170, 150, 120,
+			weapon_alpha(60.0 * edge * event->fade));
+	}
+}
+
+// A laser show: emitters along the ridge sweep fans of coloured beams across the sky.
+static void hill_lasers(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	static const Uint8 colors[4][3] = {
+		{ 255, 70, 200 }, { 70, 230, 255 }, { 120, 255, 120 }, { 255, 200, 70 } };
+	const int emitters = 5;
+	double show = smooth_step(0.06, 0.12, event->progress) * (1.0 - smooth_step(0.9, 0.96, event->progress));
+	for(int i = 0; i < emitters; i++) {
+		double x = surface->w * (0.08 + 0.84 * i / (emitters - 1.0));
+		double ground = hill_ground(event, x);
+		boxRGBA(surface, (int)x - 3, (int)ground - 4, (int)x + 3, (int)ground + 1, 20, 24, 36,
+			weapon_alpha(238.0 * event->fade));
+		if(show <= 0.0) continue;
+		const Uint8 *c = colors[i % 4];
+		for(int b = 0; b < 3; b++) {
+			double angle = (b - 1) * 0.5 + sin(event->t * (0.5 + 0.17 * i) + i * 1.3 + b) * 0.35;
+			double length = s * 1.1;
+			double ex = x + sin(angle) * length, ey = ground - cos(angle) * length;
+			double flicker = (0.85 + 0.15 * sin(event->t * 17.0 + i * 3.0 + b)) * show * event->fade;
+			thickLineRGBA(surface, (int)x, (int)ground, (int)ex, (int)ey, 7, c[0], c[1], c[2],
+				weapon_alpha(14.0 * flicker));
+			thickLineRGBA(surface, (int)x, (int)ground, (int)ex, (int)ey, 3, c[0], c[1], c[2],
+				weapon_alpha(45.0 * flicker));
+			thickLineRGBA(surface, (int)x, (int)ground, (int)ex, (int)ey, 1, 255, 255, 255,
+				weapon_alpha(150.0 * flicker));
+		}
+		weapon_glow(surface, x, ground - 4.0, 4.0, c, 200.0 * show * event->fade);
+	}
+}
+
+// A jagged arc of lightning between two points, drawn as a glow and a white core.
+static void hill_arc(SDL_Surface *surface, double x0, double y0, double x1, double y1, int segments,
+	double jitter, unsigned int seed, const Uint8 *color, double alpha) {
+	double px = x0, py = y0;
+	for(int k = 1; k <= segments; k++) {
+		double u = (double)k / segments;
+		double nx = x0 + (x1 - x0) * u, ny = y0 + (y1 - y0) * u;
+		if(k < segments) {
+			nx += ((fx_hash(seed, k) % 2001) / 1000.0 - 1.0) * jitter;
+			ny += ((fx_hash(seed, k + 64) % 2001) / 1000.0 - 1.0) * jitter;
+		}
+		thickLineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, 3, color[0], color[1], color[2],
+			weapon_alpha(alpha * 0.25));
+		thickLineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, 1, 235, 240, 255, weapon_alpha(alpha));
+		px = nx;
+		py = ny;
+	}
+}
+
+// Tesla towers charge up and throw lightning between their spheres and down to the ground.
+static void hill_tesla(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int towers = 4;
+	static const Uint8 blue[3] = { 140, 180, 255 };
+	double tx[4], ty[4], rise[4];
+	double charge = smooth_step(0.1, 0.2, event->progress) * (1.0 - smooth_step(0.9, 0.96, event->progress));
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	for(int i = 0; i < towers; i++) {
+		double x = surface->w * (0.07 + 0.86 * i / (towers - 1.0));
+		rise[i] = smooth_step(0.0 + i * 0.02, 0.1 + i * 0.02, event->progress);
+		double base = hill_ground(event, x);
+		double height = s * (0.12 + 0.02 * (i % 2)) * rise[i];
+		double top = base - height;
+		double sphere = s * 0.014;
+		double wide = s * 0.012;
+		tx[i] = x;
+		ty[i] = top - sphere;
+		if(rise[i] <= 0.0) continue;
+		filledTrigonRGBA(surface, (int)(x - wide), (int)base, (int)(x + wide), (int)base, (int)x, (int)top,
+			20, 24, 36, alpha);
+		for(int bar = 1; bar < 4; bar++) {
+			double f = bar / 4.0;
+			lineRGBA(surface, (int)(x - wide * (1.0 - f)), (int)(base - height * f), (int)(x + wide * (1.0 - f)),
+				(int)(base - height * f), 60, 68, 92, alpha);
+		}
+		filledCircleRGBA(surface, (int)x, (int)ty[i], (int)sphere, 70, 78, 100, alpha);
+		weapon_glow(surface, x, ty[i], sphere * 0.9, blue,
+			200.0 * charge * (0.7 + 0.3 * sin(event->t * 9.0 + i)) * event->fade);
+	}
+	if(charge <= 0.1) return;
+	unsigned int burst = (unsigned int)(event->t * 1.5);
+	unsigned int tick = (unsigned int)(event->t * 14.0);
+	for(int i = 0; i < towers; i++) {
+		if(rise[i] < 0.95) continue;
+		if(i < towers - 1 && rise[i + 1] >= 0.95 && fx_hash(event->seed, burst * 8 + i) % 3 != 0) {
+			hill_arc(surface, tx[i], ty[i], tx[i + 1], ty[i + 1], 9, s * 0.012,
+				fx_hash(event->seed, tick * 8 + i), blue, 230.0 * charge * event->fade);
+		}
+		if(fx_hash(event->seed, burst * 8 + 4 + i) % 4 == 0) {
+			double ex = tx[i] + (hill_random(event, i, 9) - 0.5) * s * 0.2;
+			hill_arc(surface, tx[i], ty[i], ex, hill_ground(event, ex), 8, s * 0.01,
+				fx_hash(event->seed, tick * 8 + 4 + i), blue, 200.0 * charge * event->fade);
+		}
+	}
+}
+
+// Hot air balloons are inflated on the ridge, their burners roar and they lift off one by one.
+static void hill_balloons(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	static const Uint8 palette[4][2][3] = {
+		{ { 150, 70, 70 }, { 225, 195, 150 } }, { { 60, 110, 150 }, { 215, 215, 195 } },
+		{ { 90, 130, 80 }, { 225, 185, 110 } }, { { 130, 90, 150 }, { 215, 205, 175 } } };
+	const int count = 4;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	for(int i = 0; i < count; i++) {
+		double x0 = hill_side(event, 0.07 + 0.08 * i);
+		double ground = hill_ground(event, x0);
+		double inflate = smooth_step(0.02 + 0.03 * i, 0.14 + 0.03 * i, event->progress);
+		if(inflate <= 0.0) continue;
+		double launch = 0.3 + 0.1 * i;
+		double rise = smooth_step(launch, launch + 0.4, event->progress);
+		double bx = x0 + event->direction * rise * rise * surface->w * 0.2
+			+ sin(event->t * 0.6 + i * 1.7) * s * 0.01 * rise;
+		double by = ground - rise * s * 0.95;
+		double r = s * (0.042 + 0.006 * (i % 2)) * inflate;
+		double rope = s * 0.03 * inflate;
+		double ex = bx + sin(event->t * 0.5 + i) * r * 0.05, ey = by - rope - r * 1.15;
+		lineRGBA(surface, (int)bx - 3, (int)by, (int)(ex - r * 0.45), (int)(ey + r), 30, 26, 24, alpha);
+		lineRGBA(surface, (int)bx + 3, (int)by, (int)(ex + r * 0.45), (int)(ey + r), 30, 26, 24, alpha);
+		filledEllipseRGBA(surface, (int)ex, (int)ey, (int)(r * 0.88) + 1, (int)(r * 1.18) + 1, 20, 22, 30, alpha);
+		const Uint8 *a = palette[i % 4][0], *b = palette[i % 4][1];
+		filledEllipseRGBA(surface, (int)ex, (int)ey, (int)(r * 0.85), (int)(r * 1.15), a[0], a[1], a[2], alpha);
+		filledEllipseRGBA(surface, (int)ex, (int)ey, (int)(r * 0.55), (int)(r * 1.15), b[0], b[1], b[2], alpha);
+		filledEllipseRGBA(surface, (int)ex, (int)ey, (int)(r * 0.25), (int)(r * 1.15), a[0], a[1], a[2], alpha);
+		boxRGBA(surface, (int)bx - 4, (int)by, (int)bx + 4, (int)by + 5, 70, 50, 40, alpha);
+		double flare = fmod(event->t + i * 0.8, 2.6);
+		if(flare < 0.6 && inflate > 0.5) {
+			static const Uint8 warm[3] = { 255, 190, 110 };
+			double f = 1.0 - flare / 0.6;
+			filledTrigonRGBA(surface, (int)bx - 2, (int)(by - rope * 0.9), (int)bx + 2, (int)(by - rope * 0.9),
+				(int)bx, (int)(by - rope * 0.9 - r * 0.5 * f), 255, 160, 70, weapon_alpha(220.0 * f * event->fade));
+			filledEllipseRGBA(surface, (int)ex, (int)ey, (int)(r * 0.6), (int)(r * 0.9), 255, 190, 110,
+				weapon_alpha(45.0 * f * event->fade));
+			weapon_glow(surface, bx, by - rope * 0.95, r * 0.12, warm, 230.0 * f * event->fade);
+		}
+	}
+}
+
+// A giant walking figure strides slowly along the middle ridge, its eye and chest glowing.
+static void hill_giant(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double H = s * 0.26;
+	double margin = H * 0.5;
+	double span = surface->w + 2.0 * margin;
+	double x = d > 0 ? -margin + event->progress * span : surface->w + margin - event->progress * span;
+	double ground = ground_y(surface, RIDGE_MIDDLE, x) + 2.0;
+	double gait = event->t * SCENE_TAU * 0.2;
+	double thigh = H * 0.24, shin = H * 0.24, swing = H * 0.17;
+	double hip_y = ground - (thigh + shin) * 0.93 - fabs(cos(gait)) * H * 0.015;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	filledEllipseRGBA(surface, (int)x, (int)ground, (int)(H * 0.3), (int)(H * 0.03), 8, 10, 16,
+		weapon_alpha(110.0 * event->fade));
+	for(int leg = 0; leg < 2; leg++) {
+		double ph = gait + leg * SCENE_PI;
+		double foot_x = x + sin(ph) * swing, foot_y = ground - fmax(0.0, cos(ph)) * H * 0.05;
+		double knee_x = (x + foot_x) / 2.0 + d * H * 0.05, knee_y = (hip_y + foot_y) / 2.0 - H * 0.01;
+		Uint8 shade = leg ? 44 : 32;
+		thickLineRGBA(surface, (int)x, (int)hip_y, (int)knee_x, (int)knee_y, 9, shade, shade + 4, shade + 14, alpha);
+		thickLineRGBA(surface, (int)knee_x, (int)knee_y, (int)foot_x, (int)foot_y, 7, shade, shade + 4, shade + 14, alpha);
+		thickLineRGBA(surface, (int)foot_x, (int)foot_y, (int)(foot_x + d * H * 0.07), (int)foot_y, 5,
+			shade, shade + 4, shade + 14, alpha);
+	}
+	double shoulder_x = x + d * H * 0.03, shoulder_y = hip_y - H * 0.33;
+	thickLineRGBA(surface, (int)x, (int)hip_y, (int)shoulder_x, (int)shoulder_y, 16, 40, 46, 62, alpha);
+	thickLineRGBA(surface, (int)(x + d * 4), (int)hip_y, (int)(shoulder_x + d * 4), (int)shoulder_y, 2,
+		60, 70, 92, weapon_alpha(200.0 * event->fade));
+	for(int arm = 0; arm < 2; arm++) {
+		double ph = gait + arm * SCENE_PI + SCENE_PI;
+		double hand_x = shoulder_x + sin(ph) * H * 0.13, hand_y = shoulder_y + H * 0.3 - fmax(0.0, cos(ph)) * H * 0.03;
+		thickLineRGBA(surface, (int)shoulder_x, (int)shoulder_y, (int)hand_x, (int)hand_y, 6,
+			arm ? 48 : 34, arm ? 54 : 40, arm ? 72 : 56, alpha);
+	}
+	double head_x = shoulder_x + d * H * 0.03, head_y = shoulder_y - H * 0.09;
+	filledCircleRGBA(surface, (int)head_x, (int)head_y, (int)(H * 0.065), 42, 48, 66, alpha);
+	static const Uint8 eye[3] = { 255, 130, 70 }, core[3] = { 110, 220, 255 };
+	weapon_glow(surface, head_x + d * H * 0.03, head_y, 2.5, eye, 230.0 * event->fade);
+	weapon_glow(surface, x + d * H * 0.02, (hip_y + shoulder_y) / 2.0, H * 0.025, core,
+		200.0 * event->fade * (0.7 + 0.3 * sin(event->t * 2.0)));
+}
+
+// A clock tower rises and its lit face spins fast; every few seconds the bell sends out rings.
+static void hill_clocktower(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = hill_side(event, 0.1);
+	double ground = hill_ground(event, cx);
+	double w = s * 0.035, h = s * 0.22 * smooth_step(0.0, 0.1, event->progress);
+	if(h < 4.0) return;
+	double top = ground - h;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	double lit = smooth_step(0.1, 0.18, event->progress) * (1.0 - smooth_step(0.92, 0.97, event->progress));
+	boxRGBA(surface, (int)(cx - w), (int)top, (int)(cx + w), (int)ground, 26, 30, 44, alpha);
+	boxRGBA(surface, (int)(cx - w), (int)top, (int)(cx - w * 0.6), (int)ground, 40, 46, 64, alpha);
+	filledTrigonRGBA(surface, (int)(cx - w - 3), (int)top, (int)(cx + w + 3), (int)top, (int)cx,
+		(int)(top - w * 1.7), 16, 18, 28, alpha);
+	double face_y = top + w * 1.15, face_r = w * 0.78;
+	filledCircleRGBA(surface, (int)cx, (int)face_y, (int)face_r + 2, 40, 46, 64, alpha);
+	filledCircleRGBA(surface, (int)cx, (int)face_y, (int)face_r, (Uint8)(30 + 225 * lit), (Uint8)(34 + 198 * lit),
+		(Uint8)(46 + 124 * lit), alpha);
+	for(int tick = 0; tick < 12; tick++) {
+		double a = tick * SCENE_TAU / 12.0;
+		lineRGBA(surface, (int)(cx + cos(a) * face_r * 0.8), (int)(face_y + sin(a) * face_r * 0.8),
+			(int)(cx + cos(a) * face_r * 0.95), (int)(face_y + sin(a) * face_r * 0.95), 40, 32, 28, alpha);
+	}
+	double minute = event->t * 0.6 - SCENE_PI / 2.0, hour = event->t * 0.05 - SCENE_PI / 2.0;
+	thickLineRGBA(surface, (int)cx, (int)face_y, (int)(cx + cos(minute) * face_r * 0.82),
+		(int)(face_y + sin(minute) * face_r * 0.82), 1, 30, 24, 22, alpha);
+	thickLineRGBA(surface, (int)cx, (int)face_y, (int)(cx + cos(hour) * face_r * 0.5),
+		(int)(face_y + sin(hour) * face_r * 0.5), 2, 30, 24, 22, alpha);
+	for(int k = 0; k < 3; k++) {
+		double wy = face_y + face_r + w * (0.7 + 0.7 * k);
+		if(wy + 6 > ground) break;
+		boxRGBA(surface, (int)cx - 2, (int)wy, (int)cx + 2, (int)wy + 7, 255, 214, 130,
+			weapon_alpha(220.0 * lit * event->fade));
+	}
+	double local = fmod(event->t, 8.0);
+	for(int ring = 0; ring < 3; ring++) {
+		double age = local - ring * 0.8;
+		if(age <= 0.0 || age >= 2.2) continue;
+		double u = age / 2.2;
+		int radius = (int)(face_r + u * s * 0.12);
+		Uint8 a = weapon_alpha(150.0 * (1.0 - u) * lit * event->fade);
+		circleRGBA(surface, (int)cx, (int)face_y, radius, 255, 220, 150, a);
+		circleRGBA(surface, (int)cx, (int)face_y, radius + 1, 255, 220, 150, a);
+	}
+}
+
+// Point `u` (0..1) of a drone formation shape, in -1..1 units.
+static void drone_shape(int shape, double u, double *px, double *py) {
+	switch(shape) {
+		case 0:
+			*px = cos(u * SCENE_TAU);
+			*py = sin(u * SCENE_TAU);
+			break;
+		case 1: {
+			double f = u * 10.0;
+			int k = (int)f % 10;
+			double frac = f - floor(f);
+			double a0 = -SCENE_PI / 2.0 + k * SCENE_PI / 5.0, a1 = a0 + SCENE_PI / 5.0;
+			double r0 = k % 2 == 0 ? 1.0 : 0.42, r1 = k % 2 == 0 ? 0.42 : 1.0;
+			*px = cos(a0) * r0 * (1.0 - frac) + cos(a1) * r1 * frac;
+			*py = sin(a0) * r0 * (1.0 - frac) + sin(a1) * r1 * frac;
 			break;
 		}
 		case 2: {
-			// A meteor: one continuous tapered streak that burns out, rather
-			// than a stack of segments that would read as dashes.
-			int length = size * 6;
-			double burn = sin(progress * 3.14159265359);
-			int head_x = x + direction * (int)(progress * length);
-			int head_y = y + (int)(progress * length * 9 / 16);
-			thickLineRGBA(surface, head_x - direction * length,
-				head_y - length * 9 / 16, head_x, head_y, 3,
-				198, 212, 238, (Uint8)(alpha * 0.16 * burn));
-			thickLineRGBA(surface, head_x - direction * length / 2,
-				head_y - length * 9 / 32, head_x, head_y, 2,
-				216, 228, 248, (Uint8)(alpha * 0.34 * burn));
-			thickLineRGBA(surface, head_x - direction * length / 4,
-				head_y - length * 9 / 64, head_x, head_y, 1,
-				238, 244, 255, (Uint8)(alpha * 0.60 * burn));
-			soft_glow(surface, head_x, head_y, size * 2, 228, 236, 252,
-				(int)(alpha * 0.40 * burn));
+			double a = u * SCENE_TAU;
+			*px = 16.0 * pow(sin(a), 3.0) / 17.0;
+			*py = -(13.0 * cos(a) - 5.0 * cos(2.0 * a) - 2.0 * cos(3.0 * a) - cos(4.0 * a)) / 17.0;
 			break;
 		}
-		default: {
-			// A wisp of high cloud drifting across, lit from one side. Soft
-			// edges only, so it never reads as a shape.
-			for(int puff = 0; puff < 5; puff++) {
-				int px = x - direction * puff * size * 3;
-				int py = y + (int)(sin(puff * 1.7 + ticks / 5200.0) * size);
-				soft_glow(surface, px, py, size * (4 + puff % 2),
-					186, 196, 216, (int)(alpha * 0.26));
-				soft_glow(surface, px + size, py - size / 2,
-					size * (2 + puff % 2), 202, 210, 228,
-					(int)(alpha * 0.18));
+		default:
+			*px = -1.0 + 2.0 * u;
+			*py = 0.35 * sin(u * SCENE_TAU * 2.0);
+			break;
+	}
+}
+
+// A swarm of drone lights lifts off the ridge and forms a ring, a star, a heart and a wave.
+static void hill_drones(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	const int drones = 48;
+	static const Uint8 palette[4][3] = {
+		{ 255, 200, 110 }, { 120, 220, 255 }, { 255, 120, 160 }, { 150, 255, 160 } };
+	double cx = surface->w * (0.5 + 0.3 * sin(event->progress * SCENE_TAU * 0.8));
+	double cy = surface->h * 0.1, radius = event->scale * 0.075;
+	double st = event->t / 6.5;
+	int a = (int)st % 4, b = (a + 1) % 4;
+	double blend = smooth_step(0.75, 1.0, st - floor(st));
+	const Uint8 *color = palette[blend > 0.5 ? b : a];
+	for(int i = 0; i < drones; i++) {
+		double u = (double)i / drones;
+		double ax, ay, bx, by;
+		drone_shape(a, u, &ax, &ay);
+		drone_shape(b, u, &bx, &by);
+		double target_x = cx + (ax + (bx - ax) * blend) * radius;
+		double target_y = cy + (ay + (by - ay) * blend) * radius;
+		double r = hill_random(event, i, 1);
+		double gx = surface->w * (0.08 + 0.84 * (i + 0.5) / drones);
+		double gy = ground_y(surface, RIDGE_NEAR, gx);
+		double up = smooth_step(0.02 + 0.08 * r, 0.16 + 0.08 * r, event->progress)
+			* (1.0 - smooth_step(0.84 + 0.08 * r, 0.94 + 0.05 * r, event->progress));
+		if(up <= 0.0) continue;
+		weapon_glow(surface, gx + (target_x - gx) * up, gy + (target_y - gy) * up, 2.2, color,
+			235.0 * event->fade * (0.75 + 0.25 * sin(event->t * 3.0 + i)));
+	}
+}
+
+// A cave mouth in a mound: a stream of bats pours out and fans over the sky.
+static void hill_bats(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = hill_side(event, 0.12);
+	double ground = hill_ground(event, cx);
+	double mound_w = s * 0.07, mound_h = s * 0.045;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	filledEllipseRGBA(surface, (int)cx, (int)(ground + 2), (int)mound_w, (int)mound_h, 18, 22, 32, alpha);
+	filledEllipseRGBA(surface, (int)(cx + d * mound_w * 0.2), (int)(ground - mound_h * 0.1), (int)(mound_w * 0.28),
+		(int)(mound_h * 0.5), 4, 5, 8, alpha);
+	const int bats = 44;
+	double active = smooth_step(0.05, 0.25, event->progress);
+	double away = 1.0 - smooth_step(0.85, 0.95, event->progress);
+	for(int i = 0; i < bats; i++) {
+		if(i / (double)bats > active) continue;
+		double r1 = hill_random(event, i, 1), r2 = hill_random(event, i, 2), r3 = hill_random(event, i, 3);
+		double u = fmod(event->t * (0.08 + 0.04 * r3) + r1, 1.0);
+		double bx = cx + d * (mound_w * 0.1 + u * s * (0.35 + 0.6 * r2)) + sin(u * 9.0 + i) * s * 0.02 * u;
+		double by = ground - mound_h * 0.3 - u * s * (0.25 + 0.5 * r1) + sin(u * 13.0 + i * 2.1) * s * 0.012;
+		double vis = smooth_step(0.0, 0.05, u) * (1.0 - smooth_step(0.7, 1.0, u)) * away * event->fade;
+		double size = s * (0.011 + 0.006 * r3) * (0.5 + 0.9 * u);
+		double flap = sin(event->t * 13.0 + i * 1.7);
+		Uint8 a = weapon_alpha(240.0 * vis);
+		for(int side = -1; side <= 1; side += 2) {
+			double wx = bx + side * size * 1.4, wy = by - flap * size * 0.9;
+			thickLineRGBA(surface, (int)bx, (int)by, (int)wx, (int)wy, 2, 8, 10, 16, a);
+			thickLineRGBA(surface, (int)wx, (int)wy, (int)(bx + side * size * 2.0), (int)(by - flap * size * 0.5 + size * 0.3),
+				1, 8, 10, 16, a);
+		}
+		filledCircleRGBA(surface, (int)bx, (int)by, (int)(size * 0.35) + 1, 8, 10, 16, a);
+	}
+}
+
+// A stone gate wakes: the arch fills with a swirling light and travellers step out of it.
+static void hill_gate(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = hill_side(event, 0.12);
+	double ground = hill_ground(event, cx);
+	double height = s * 0.12, half = s * 0.045, post = s * 0.015;
+	double open = smooth_step(0.06, 0.16, event->progress) * (1.0 - smooth_step(0.9, 0.96, event->progress));
+	double mid_y = ground - height * 0.5;
+	static const Uint8 layers[5][3] = {
+		{ 80, 50, 190 }, { 110, 90, 230 }, { 120, 150, 250 }, { 170, 210, 255 }, { 240, 250, 255 } };
+	if(open > 0.0) {
+		for(int k = 0; k < 5; k++) {
+			double f = 1.0 - k * 0.17;
+			filledEllipseRGBA(surface, (int)cx, (int)mid_y, (int)(half * f), (int)(height * 0.5 * f),
+				layers[k][0], layers[k][1], layers[k][2], weapon_alpha(120.0 * open * event->fade));
+		}
+		for(int j = 0; j < 8; j++) {
+			double a = event->t * 1.6 + j * 0.78;
+			double rad = 0.15 + 0.85 * fmod(j * 0.37 + event->t * 0.2, 1.0);
+			weapon_glow(surface, cx + cos(a) * half * 0.9 * rad, mid_y + sin(a) * height * 0.45 * rad, 1.5,
+				layers[3], 200.0 * open * event->fade);
+		}
+	}
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	boxRGBA(surface, (int)(cx - half - post), (int)(ground - height), (int)(cx - half), (int)ground, 28, 32, 44, alpha);
+	boxRGBA(surface, (int)(cx + half), (int)(ground - height), (int)(cx + half + post), (int)ground, 28, 32, 44, alpha);
+	boxRGBA(surface, (int)(cx - half - post * 1.3), (int)(ground - height - post), (int)(cx + half + post * 1.3),
+		(int)(ground - height), 34, 38, 52, alpha);
+	weapon_glow(surface, cx, ground - height - post * 0.5, 2.0, layers[3], 200.0 * open * event->fade);
+	for(int k = 0; k < 5; k++) {
+		double u = (event->progress - (0.2 + 0.12 * k)) / 0.4;
+		if(u <= 0.0 || u >= 1.0) continue;
+		double x = cx + d * (half * 0.2 + u * s * 0.7);
+		double vis = smooth_step(0.0, 0.08, u) * (1.0 - smooth_step(0.85, 1.0, u));
+		hill_walker(surface, x, hill_ground(event, x), s * 0.036, d, event->t * 5.0 + k * 2.0, k % 2 == 0,
+			event->fade * vis, event->t, k);
+	}
+}
+
+// A striped lighthouse rises on the ridge; its lamp turns, sweeping two beams across the sky.
+static void hill_lighthouse(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = hill_side(event, 0.1);
+	double ground = hill_ground(event, cx);
+	double h = s * 0.16 * smooth_step(0.0, 0.1, event->progress), w = s * 0.022;
+	if(h < 4.0) return;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	double lit = smooth_step(0.1, 0.18, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
+	double lamp_y = ground - h - w * 0.5;
+	static const Uint8 warm[3] = { 255, 235, 170 };
+	double a = event->t * 1.1;
+	for(int band = 0; band < 6; band++) {
+		double y0 = ground - h * band / 6.0, y1 = ground - h * (band + 1) / 6.0;
+		double w0 = w * (1.0 - 0.45 * band / 6.0), w1 = w * (1.0 - 0.45 * (band + 1) / 6.0);
+		Uint8 r = band % 2 ? 150 : 120, g = band % 2 ? 156 : 48, b = band % 2 ? 172 : 52;
+		filledTrigonRGBA(surface, (int)(cx - w0), (int)y0, (int)(cx + w0), (int)y0, (int)(cx - w1), (int)y1, r, g, b, alpha);
+		filledTrigonRGBA(surface, (int)(cx + w0), (int)y0, (int)(cx + w1), (int)y1, (int)(cx - w1), (int)y1, r, g, b, alpha);
+	}
+	boxRGBA(surface, (int)(cx - w * 0.75), (int)(lamp_y - w * 0.2), (int)(cx + w * 0.75), (int)(lamp_y + w * 0.5), 30, 34, 48, alpha);
+	filledTrigonRGBA(surface, (int)(cx - w * 0.9), (int)(lamp_y - w * 0.2), (int)(cx + w * 0.9), (int)(lamp_y - w * 0.2),
+		(int)cx, (int)(lamp_y - w * 1.0), 120, 48, 52, alpha);
+	if(lit <= 0.0) return;
+	double sweep = cos(a), reach = s * 0.9 * fabs(sweep);
+	for(int side = -1; side <= 1; side += 2) {
+		double ex = cx + side * (sweep >= 0.0 ? 1 : -1) * reach;
+		filledTrigonRGBA(surface, (int)cx, (int)lamp_y, (int)ex, (int)(lamp_y - s * 0.02), (int)ex, (int)(lamp_y + s * 0.02),
+			255, 245, 200, weapon_alpha(40.0 * lit * fabs(sweep) * event->fade));
+	}
+	weapon_glow(surface, cx, lamp_y + w * 0.15, w * (0.4 + 0.8 * pow(fabs(sin(a)), 6.0)), warm, 235.0 * lit * event->fade);
+}
+
+// A cherry tree grows and comes into blossom, then lets its petals fall in a slow drift.
+static void hill_cherry(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = hill_side(event, 0.13);
+	double ground = hill_ground(event, cx);
+	double grow = smooth_step(0.0, 0.18, event->progress);
+	double bloom = smooth_step(0.12, 0.4, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
+	double trunk = s * 0.075 * grow;
+	if(trunk < 3.0) return;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	double top_x = cx + d * s * 0.01, top_y = ground - trunk;
+	thickLineRGBA(surface, (int)cx, (int)ground, (int)top_x, (int)top_y, 5, 52, 38, 40, alpha);
+	for(int b = -1; b <= 1; b += 2) {
+		thickLineRGBA(surface, (int)top_x, (int)(top_y + trunk * 0.25), (int)(top_x + b * s * 0.04),
+			(int)(top_y - trunk * 0.1), 3, 52, 38, 40, alpha);
+	}
+	for(int blob = 0; blob < 11; blob++) {
+		double ang = blob * 0.57, rad = s * (0.018 + 0.02 * ((blob * 7) % 5) / 5.0);
+		double bx = top_x + cos(ang * 2.1) * s * 0.045, by = top_y - trunk * 0.1 + sin(ang * 1.3) * s * 0.025;
+		filledCircleRGBA(surface, (int)bx, (int)by, (int)(rad * bloom) + 1, (Uint8)(214 + blob % 3 * 12), (Uint8)(130 + blob % 4 * 14),
+			(Uint8)(165 + blob % 3 * 10), weapon_alpha(200.0 * bloom * event->fade));
+	}
+	for(int petal = 0; petal < 34; petal++) {
+		double r = hill_random(event, petal, 1), r2 = hill_random(event, petal, 2);
+		double u = fmod(event->t * (0.07 + 0.05 * r2) + r, 1.0);
+		double px = top_x + (r2 - 0.5) * s * 0.12 + u * d * s * (0.1 + 0.1 * r) + sin(event->t * 1.4 + petal) * s * 0.012;
+		double py = top_y - s * 0.02 + u * (ground - top_y + s * 0.02);
+		double vis = smooth_step(0.0, 0.1, u) * (1.0 - smooth_step(0.85, 1.0, u)) * bloom * event->fade;
+		filledEllipseRGBA(surface, (int)px, (int)py, 2, 1, 255, 190, 214, weapon_alpha(230.0 * vis));
+	}
+}
+
+// A wolf on a rock howls at a rising moon; rings of sound spread from its muzzle.
+static void hill_wolf(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = hill_side(event, 0.14);
+	double ground = hill_ground(event, cx);
+	double rise = smooth_step(0.0, 0.3, event->progress);
+	double moon_x = cx + d * s * 0.16, moon_y = ground - s * 0.1 - rise * s * 0.22, moon_r = s * 0.05;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	filledCircleRGBA(surface, (int)moon_x, (int)moon_y, (int)(moon_r * 1.7), 190, 205, 235, weapon_alpha(26.0 * event->fade));
+	filledCircleRGBA(surface, (int)moon_x, (int)moon_y, (int)moon_r, 226, 232, 240, weapon_alpha(215.0 * event->fade));
+	filledCircleRGBA(surface, (int)(moon_x - moon_r * 0.3), (int)(moon_y + moon_r * 0.1), (int)(moon_r * 0.22), 196, 204, 216,
+		weapon_alpha(200.0 * event->fade));
+	double wy = ground - s * 0.03;
+	filledEllipseRGBA(surface, (int)cx, (int)ground, (int)(s * 0.05), (int)(s * 0.035), 18, 22, 32, alpha);
+	double howl = smooth_step(0.0, 0.3, fmod(event->t, 6.0)) * (1.0 - smooth_step(3.6, 4.2, fmod(event->t, 6.0)));
+	double neck_x = cx + d * s * 0.016, neck_y = wy - s * 0.016;
+	double head_x = neck_x + d * s * (0.012 + 0.012 * howl), head_y = neck_y - s * (0.012 + 0.016 * howl);
+	double nose_x = head_x + d * s * (0.014 - 0.002 * howl), nose_y = head_y - s * (0.004 + 0.012 * howl);
+	filledEllipseRGBA(surface, (int)cx, (int)(wy - s * 0.008), (int)(s * 0.022), (int)(s * 0.01), 8, 10, 16, alpha);
+	for(int leg = -1; leg <= 1; leg += 2) {
+		thickLineRGBA(surface, (int)(cx + leg * s * 0.014), (int)(wy - s * 0.004), (int)(cx + leg * s * 0.016), (int)(wy + s * 0.012), 2, 8, 10, 16, alpha);
+	}
+	thickLineRGBA(surface, (int)(cx - d * s * 0.02), (int)(wy - s * 0.01), (int)(cx - d * s * 0.036), (int)(wy + s * 0.006), 3, 8, 10, 16, alpha);
+	thickLineRGBA(surface, (int)(cx + d * s * 0.012), (int)(wy - s * 0.008), (int)head_x, (int)head_y, 5, 8, 10, 16, alpha);
+	thickLineRGBA(surface, (int)head_x, (int)head_y, (int)nose_x, (int)nose_y, 4, 8, 10, 16, alpha);
+	filledTrigonRGBA(surface, (int)head_x, (int)(head_y - s * 0.002), (int)(head_x - d * s * 0.004), (int)(head_y - s * 0.012),
+		(int)(head_x + d * s * 0.002), (int)(head_y - s * 0.002), 8, 10, 16, alpha);
+	for(int ring = 0; ring < 3; ring++) {
+		double age = fmod(event->t, 6.0) - 0.4 - ring * 0.6;
+		if(age <= 0.0 || age >= 2.2) continue;
+		double u = age / 2.2;
+		ellipseRGBA(surface, (int)nose_x, (int)nose_y, (int)(s * 0.01 + u * s * 0.07), (int)(s * 0.007 + u * s * 0.05),
+			200, 215, 240, weapon_alpha(110.0 * (1.0 - u) * howl * event->fade));
+	}
+}
+
+// A pumpkin patch: round pumpkins swell out of the ground and their carved faces light up.
+static void hill_pumpkins(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int count = 9;
+	for(int i = 0; i < count; i++) {
+		double r = hill_random(event, i, 1);
+		double x = surface->w * (0.06 + 0.88 * (i + 0.5 + (r - 0.5) * 0.5) / count);
+		double grow = smooth_step(0.02 + i * 0.03, 0.14 + i * 0.03, event->progress);
+		if(grow <= 0.0) continue;
+		double ground = hill_ground(event, x);
+		double rad = s * (0.017 + 0.012 * r) * grow;
+		double lit = smooth_step(0.2 + i * 0.03, 0.28 + i * 0.03, event->progress) * (1.0 - smooth_step(0.9, 0.97, event->progress));
+		double flicker = 0.8 + 0.2 * sin(event->t * 9.0 + i * 2.3);
+		int cy = (int)(ground - rad * 0.8);
+		Uint8 alpha = weapon_alpha(238.0 * event->fade);
+		filledEllipseRGBA(surface, (int)x, cy, (int)rad + 1, (int)(rad * 0.82) + 1, 118, 54, 20, alpha);
+		filledEllipseRGBA(surface, (int)(x - rad * 0.5), cy, (int)(rad * 0.5) + 1, (int)(rad * 0.8) + 1, 138, 66, 24, alpha);
+		filledEllipseRGBA(surface, (int)(x + rad * 0.5), cy, (int)(rad * 0.5) + 1, (int)(rad * 0.8) + 1, 108, 48, 18, alpha);
+		thickLineRGBA(surface, (int)x, (int)(cy - rad * 0.8), (int)(x + rad * 0.15), (int)(cy - rad * 1.2), 2, 52, 62, 30, alpha);
+		if(lit <= 0.0 || rad < 5.0) continue;
+		Uint8 glow = weapon_alpha(235.0 * lit * flicker * event->fade);
+		filledCircleRGBA(surface, (int)x, cy, (int)(rad * 1.8), 255, 150, 50, weapon_alpha(26.0 * lit * flicker * event->fade));
+		filledTrigonRGBA(surface, (int)(x - rad * 0.55), (int)(cy - rad * 0.1), (int)(x - rad * 0.15), (int)(cy - rad * 0.1),
+			(int)(x - rad * 0.35), (int)(cy - rad * 0.4), 255, 205, 90, glow);
+		filledTrigonRGBA(surface, (int)(x + rad * 0.15), (int)(cy - rad * 0.1), (int)(x + rad * 0.55), (int)(cy - rad * 0.1),
+			(int)(x + rad * 0.35), (int)(cy - rad * 0.4), 255, 205, 90, glow);
+		lineRGBA(surface, (int)(x - rad * 0.5), (int)(cy + rad * 0.25), (int)(x - rad * 0.2), (int)(cy + rad * 0.4), 255, 205, 90, glow);
+		lineRGBA(surface, (int)(x - rad * 0.2), (int)(cy + rad * 0.4), (int)(x + rad * 0.2), (int)(cy + rad * 0.4), 255, 205, 90, glow);
+		lineRGBA(surface, (int)(x + rad * 0.2), (int)(cy + rad * 0.4), (int)(x + rad * 0.5), (int)(cy + rad * 0.25), 255, 205, 90, glow);
+	}
+}
+
+// A small castle with crenellated towers, lit windows, flickering gate torches and waving flags.
+static void hill_castle(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = hill_side(event, 0.14);
+	double ground = hill_ground(event, cx) + 2.0;
+	double build = smooth_step(0.0, 0.14, event->progress);
+	double lit = smooth_step(0.14, 0.24, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
+	if(build < 0.05) return;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	double keep_w = s * 0.05, keep_h = s * 0.09 * build, tower_w = s * 0.026, tower_h = s * 0.12 * build;
+	boxRGBA(surface, (int)(cx - keep_w), (int)(ground - keep_h), (int)(cx + keep_w), (int)ground, 26, 30, 44, alpha);
+	for(int side = -1; side <= 1; side += 2) {
+		double tx = cx + side * (keep_w + tower_w * 0.6);
+		boxRGBA(surface, (int)(tx - tower_w), (int)(ground - tower_h), (int)(tx + tower_w), (int)ground, 32, 36, 52, alpha);
+		filledTrigonRGBA(surface, (int)(tx - tower_w * 1.2), (int)(ground - tower_h), (int)(tx + tower_w * 1.2), (int)(ground - tower_h),
+			(int)tx, (int)(ground - tower_h - tower_w * 2.2), 70, 34, 44, alpha);
+		double flag_top = ground - tower_h - tower_w * 2.2;
+		thickLineRGBA(surface, (int)tx, (int)flag_top, (int)tx, (int)(flag_top - s * 0.02), 1, 20, 22, 30, alpha);
+		double wave = sin(event->t * 4.0 + side) * s * 0.004;
+		filledTrigonRGBA(surface, (int)tx, (int)(flag_top - s * 0.02), (int)tx, (int)(flag_top - s * 0.008),
+			(int)(tx + d * s * 0.016), (int)(flag_top - s * 0.014 + wave), 200, 60, 70, alpha);
+		boxRGBA(surface, (int)(tx - 2), (int)(ground - tower_h * 0.6), (int)(tx + 2), (int)(ground - tower_h * 0.6 + 6), 255, 214, 130,
+			weapon_alpha(235.0 * lit * event->fade));
+	}
+	for(int m = 0; m < 6; m++) {
+		double mx = cx - keep_w + (2.0 * keep_w) * (m + 0.5) / 6.0;
+		boxRGBA(surface, (int)(mx - 3), (int)(ground - keep_h - 4), (int)(mx + 3), (int)(ground - keep_h), 26, 30, 44, alpha);
+	}
+	filledEllipseRGBA(surface, (int)cx, (int)ground, (int)(keep_w * 0.22), (int)(keep_h * 0.3), 6, 8, 14, alpha);
+	for(int win = 0; win < 3; win++) {
+		boxRGBA(surface, (int)(cx - keep_w * 0.7 + win * keep_w * 0.7) - 1, (int)(ground - keep_h * 0.7), (int)(cx - keep_w * 0.7 + win * keep_w * 0.7) + 2,
+			(int)(ground - keep_h * 0.7) + 6, 255, 214, 130, weapon_alpha(235.0 * lit * (0.85 + 0.15 * sin(event->t * 6.0 + win)) * event->fade));
+	}
+	for(int side = -1; side <= 1; side += 2) {
+		double fx = cx + side * keep_w * 0.45, fy = ground - keep_h * 0.28;
+		double flame = 0.8 + 0.2 * sin(event->t * 12.0 + side * 3.0);
+		thickLineRGBA(surface, (int)fx, (int)(fy + 4), (int)fx, (int)(fy + 10), 2, 40, 30, 28, alpha);
+		filledTrigonRGBA(surface, (int)(fx - 3), (int)(fy + 4), (int)(fx + 3), (int)(fy + 4), (int)fx, (int)(fy - 5 * flame), 255, 150, 50,
+			weapon_alpha(230.0 * lit * event->fade));
+		filledCircleRGBA(surface, (int)fx, (int)fy, 10, 255, 150, 60, weapon_alpha(26.0 * lit * flame * event->fade));
+	}
+}
+
+// A space elevator: a thin cable climbs from a base station to the top of the sky, with lit climbers running along it.
+static void hill_spaceelevator(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = hill_side(event, 0.17);
+	double ground = hill_ground(event, cx);
+	double reach = smooth_step(0.02, 0.2, event->progress);
+	double top = ground - (ground + s * 0.05) * reach;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	static const Uint8 cyan[3] = { 150, 235, 255 };
+	thickLineRGBA(surface, (int)cx, (int)ground, (int)cx, (int)top, 3, 120, 200, 230, weapon_alpha(24.0 * event->fade));
+	lineRGBA(surface, (int)cx, (int)ground, (int)cx, (int)top, 215, 240, 255, weapon_alpha(200.0 * event->fade));
+	filledTrigonRGBA(surface, (int)(cx - s * 0.03), (int)(ground + 2), (int)(cx + s * 0.03), (int)(ground + 2),
+		(int)cx, (int)(ground - s * 0.025), 28, 34, 48, alpha);
+	boxRGBA(surface, (int)(cx - s * 0.04), (int)(ground - 2), (int)(cx + s * 0.04), (int)(ground + 3), 22, 26, 38, alpha);
+	if(fmod(event->t, 1.4) < 0.4) {
+		static const Uint8 red[3] = { 255, 70, 60 };
+		weapon_glow(surface, cx, ground - s * 0.028, 2.5, red, 235.0 * event->fade);
+	}
+	for(int car = 0; car < 4; car++) {
+		double u = fmod(event->t * (0.045 + 0.012 * car) + car * 0.27, 1.0);
+		if(car % 2) u = 1.0 - u;
+		double y = ground - 8.0 - u * (ground - top - 16.0);
+		if(reach < 0.98 && y < top) continue;
+		boxRGBA(surface, (int)(cx - 3), (int)(y - 6), (int)(cx + 3), (int)(y + 6), 58, 66, 90, alpha);
+		boxRGBA(surface, (int)(cx - 1), (int)(y - 4), (int)(cx + 1), (int)(y - 1), 255, 224, 150, alpha);
+		weapon_glow(surface, cx, y + 7.0, 2.0, cyan, 200.0 * event->fade);
+	}
+}
+
+// NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
+
+static void (*const hill_event_kinds[])(const HillEvent *) = {
+	hill_village, hill_caravan, hill_turbines, hill_lanterns, hill_campfire,
+	hill_bloom, hill_herd, hill_volcano, hill_beacons,
+	hill_fireflies, hill_kites, hill_fireworks, hill_train, hill_rocket,
+	hill_abduction, hill_geysers, hill_stones,
+	hill_ferris, hill_observatory, hill_windmills, hill_lighttree, hill_meteorite,
+	hill_dustdevils, hill_lasers, hill_tesla, hill_balloons, hill_giant,
+	hill_clocktower, hill_drones, hill_bats, hill_gate,
+	hill_lighthouse,
+	hill_cherry,
+	hill_wolf,
+	hill_pumpkins,
+	hill_castle,
+	hill_spaceelevator,
+	// NEW_HILL_KINDS_ABOVE
+};
+static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
+	"HILL_EVENT_KINDS does not match hill_event_kinds[]");
+
+static void render_hill_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_HILL_EVENT, ticks, &window)) return;
+	HillEvent event;
+	event.surface = surface;
+	event.ticks = ticks;
+	event.scale = scale;
+	event.seed = window.seed;
+	event.t = window.phase / 1000.0;
+	event.progress = window.progress;
+	event.fade = window.fade;
+	event.direction = (window.seed >> 6) & 1 ? 1 : -1;
+	int kind = effect_kind(&EFFECT_HILL_EVENT, (window.seed >> 10) % HILL_EVENT_KINDS);
+	hill_event_kinds[kind](&event);
+}
+
+/*
+ * Rare sky events
+ *
+ * Every rare sky event is a small function taking a SkyEvent: an object that
+ * crosses the sky (x, y) in `direction`, `size` pixels big, with `alpha`
+ * already faded for fade-in/out. progress/phase say how far along it is.
+ * To add one: write sky_event_NN(), append it to sky_event_kinds[] below and
+ * bump RARE_SKY_KINDS.
+ */
+typedef struct {
+	SDL_Surface *surface;
+	Uint32 ticks;
+	int scale;             // shorter screen side
+	Uint32 seed;
+	Uint32 phase;          // ms since the event started
+	double progress;       // 0..1 through the event
+	double fade;           // 0..1 fade in/out
+	int direction;         // 1: moves left to right, -1: right to left
+	int x, y;              // current position of the object
+	int size;
+	Uint8 alpha;           // 150 * fade
+} SkyEvent;
+
+#define SKY_EVENT_UNPACK(e) \
+	SDL_Surface *surface = (e)->surface; \
+	Uint32 ticks = (e)->ticks; \
+	int scale = (e)->scale; \
+	Uint32 seed = (e)->seed; \
+	Uint32 phase = (e)->phase; \
+	double progress = (e)->progress; \
+	double fade = (e)->fade; \
+	int direction = (e)->direction; \
+	int x = (e)->x, y = (e)->y; \
+	int center_x = x, center_y = y; \
+	int size = (e)->size; \
+	Uint8 alpha = (e)->alpha; \
+	(void)surface; (void)ticks; (void)scale; (void)seed; (void)phase; \
+	(void)progress; (void)fade; (void)direction; (void)x; (void)y; \
+	(void)center_x; (void)center_y; (void)size; (void)alpha
+
+static void sky_event_23(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int ground_x = center_x < 0 ? 0 : center_x;
+			if(ground_x >= surface->w) ground_x = surface->w - 1;
+			double nx = (double)ground_x / surface->w;
+			double ridge = ridge_height(RIDGE_NEAR, nx);
+			int ground_y = (int)(surface->h * ridge);
+			Uint8 pulse = (Uint8)(alpha * (0.45 + 0.55 * (0.5 + 0.5 * sin(progress * 18.0))));
+			boxRGBA(surface, center_x - size, ground_y - size / 2,
+				center_x + size, ground_y + size / 2, 35, 38, 42, alpha);
+			filledCircleRGBA(surface, center_x - size / 2, ground_y - size / 2,
+				2, 83, 123, 77, alpha);
+			filledCircleRGBA(surface, center_x - size, ground_y - size,
+				size / 2, 83, 56, 55, pulse);
+			filledCircleRGBA(surface, center_x + size, ground_y - size,
+				size / 2, 54, 75, 120, pulse);
+}
+
+static void sky_event_24(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int fold_size = size * 3;
+			int unfold = (int)(fold_size * (0.35 + 0.65 * sin(progress * 3.14159265359)));
+			filledTrigonRGBA(surface, center_x, center_y - fold_size,
+				center_x - unfold, center_y + fold_size / 2,
+				center_x, center_y, 167, 193, 205, alpha);
+			filledTrigonRGBA(surface, center_x, center_y - fold_size,
+				center_x, center_y, center_x + unfold, center_y + fold_size / 2,
+				211, 177, 137, alpha);
+			filledTrigonRGBA(surface, center_x, center_y - fold_size,
+				center_x - fold_size / 3, center_y + fold_size,
+				center_x + fold_size / 3, center_y + fold_size, 120, 151, 169, alpha);
+			thickLineRGBA(surface, center_x, center_y - fold_size,
+				center_x, center_y + fold_size, 1, 244, 227, 198, alpha);
+			for(int crease = 1; crease <= 4; crease++) {
+				int crease_x = center_x + (crease % 2 ? unfold : -unfold) * crease / 4;
+				thickLineRGBA(surface, center_x, center_y - fold_size + crease * fold_size / 2,
+					crease_x, center_y + fold_size / 2, 1, 235, 220, 193, alpha);
+			}
+}
+
+static void sky_event_25(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int wheel_radius = scale / 180;
+			if(wheel_radius < 3) wheel_radius = 3;
+			int wheelbase = scale / 18;
+			if(wheelbase < 34) wheelbase = 34;
+			int rear_x = direction > 0
+				? -wheelbase + (int)(progress * (surface->w + 2.0 * wheelbase))
+				: surface->w + wheelbase - (int)(progress * (surface->w + 2.0 * wheelbase));
+			int front_x = rear_x + direction * wheelbase;
+			int ridge_x = rear_x + direction * wheelbase / 2;
+			if(ridge_x < 0) ridge_x = 0;
+			if(ridge_x >= surface->w) ridge_x = surface->w - 1;
+			double nx = (double)ridge_x / surface->w;
+			double ridge = ridge_height(RIDGE_NEAR, nx);
+			int wheel_y = (int)(surface->h * ridge) - wheel_radius;
+			int seat_x = rear_x + direction * wheelbase * 38 / 100;
+			int crank_x = rear_x + direction * wheelbase * 64 / 100;
+			int seat_y = wheel_y - wheel_radius * 3;
+			circleRGBA(surface, rear_x, wheel_y, wheel_radius, 26, 30, 36, alpha);
+			circleRGBA(surface, front_x, wheel_y, wheel_radius, 26, 30, 36, alpha);
+			for(int spoke = 0; spoke < 6; spoke++) {
+				double spoke_angle = progress * 6.28318530718 + spoke * 1.0471975512;
+				int spoke_dx = (int)(cos(spoke_angle) * wheel_radius);
+				int spoke_dy = (int)(sin(spoke_angle) * wheel_radius);
+				thickLineRGBA(surface, rear_x, wheel_y, rear_x + spoke_dx,
+					wheel_y + spoke_dy, 1, 119, 130, 137, alpha);
+				thickLineRGBA(surface, front_x, wheel_y, front_x + spoke_dx,
+					wheel_y + spoke_dy, 1, 119, 130, 137, alpha);
+			}
+			thickLineRGBA(surface, rear_x, wheel_y, seat_x, seat_y, 2, 205, 120, 74, alpha);
+			thickLineRGBA(surface, seat_x, seat_y, crank_x, wheel_y, 2, 205, 120, 74, alpha);
+			thickLineRGBA(surface, crank_x, wheel_y, rear_x, wheel_y, 2, 205, 120, 74, alpha);
+			thickLineRGBA(surface, seat_x, seat_y, front_x, wheel_y, 2, 205, 120, 74, alpha);
+			thickLineRGBA(surface, seat_x, seat_y - wheel_radius * 2,
+				crank_x, wheel_y - wheel_radius * 4, 3, 54, 65, 77, alpha);
+			double pedal_angle = progress * 12.56637061436;
+			int pedal_x = crank_x + (int)(cos(pedal_angle) * wheel_radius * 2);
+			int pedal_y = wheel_y + (int)(sin(pedal_angle) * wheel_radius * 2);
+			int handlebar_x = front_x - direction * wheelbase / 8;
+			int handlebar_y = wheel_y - wheel_radius * 3;
+			thickLineRGBA(surface, seat_x, seat_y - wheel_radius * 2,
+				handlebar_x, handlebar_y, 2, 54, 65, 77, alpha);
+			thickLineRGBA(surface, seat_x, seat_y - wheel_radius * 2,
+				pedal_x, pedal_y, 2, 54, 65, 77, alpha);
+			thickLineRGBA(surface, pedal_x, pedal_y, crank_x, wheel_y,
+				1, 205, 120, 74, alpha);
+			filledCircleRGBA(surface, crank_x, wheel_y - wheel_radius * 6,
+				wheel_radius / 2 + 1, 224, 194, 151, alpha);
+}
+
+static void sky_event_26(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			for(int creature = 0; creature < 5; creature++) {
+				int creature_x = center_x + (creature - 2) * size * 2;
+				int creature_y = center_y + (int)(sin(progress * 6.28 + creature) * size * 2);
+				thickLineRGBA(surface, creature_x - size / 2, creature_y,
+					creature_x, creature_y - size / 2, 1, 25, 30, 36, alpha);
+				thickLineRGBA(surface, creature_x, creature_y - size / 2,
+					creature_x + size / 2, creature_y, 1, 25, 30, 36, alpha);
+			}
+			int fish_y = surface->h * 61 / 100
+				- (int)(sin(progress * 3.14159265359) * scale * 0.14);
+			filledTrigonRGBA(surface, center_x + size * 2, fish_y,
+				center_x - size, fish_y - size, center_x - size, fish_y + size,
+				105, 187, 203, alpha);
+			filledTrigonRGBA(surface, center_x - size, fish_y - size,
+				center_x - size * 2, fish_y, center_x - size, fish_y + size,
+				84, 157, 176, alpha);
+}
+
+static void sky_event_27(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			for(int cube = 0; cube < 4; cube++) {
+				int cube_x = center_x + (cube - 2) * size * 2;
+				int cube_y = center_y + (int)(sin(progress * 6.28 + cube) * size * 2);
+				int half = size / 2 + 2;
+				double rotation = progress * 6.28318530718 + cube * 0.9;
+				int offset_x = (int)(cos(rotation) * half);
+				int offset_y = (int)(sin(rotation) * half);
+				int top_x = cube_x + offset_x;
+				int top_y = cube_y - offset_y;
+				int right_x = cube_x + offset_y;
+				int right_y = cube_y + offset_x;
+				int bottom_x = cube_x - offset_x;
+				int bottom_y = cube_y + offset_y;
+				int left_x = cube_x - offset_y;
+				int left_y = cube_y - offset_x;
+				filledTrigonRGBA(surface, top_x, top_y,
+					right_x, right_y, bottom_x, bottom_y,
+					155, 214, 237, (Uint8)(alpha * 0.38));
+				filledTrigonRGBA(surface, top_x, top_y,
+					left_x, left_y, bottom_x, bottom_y,
+					200, 230, 241, (Uint8)(alpha * 0.28));
+				thickLineRGBA(surface, top_x, top_y, bottom_x, bottom_y,
+					1, 224, 245, 251, alpha);
+				filledCircleRGBA(surface, top_x, top_y, 1, 255, 255, 255, alpha);
+			}
+}
+
+static void sky_event_28(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			for(int card = 0; card < 3; card++) {
+				int card_x = center_x + (card - 1)
+					* (int)(size * (2.0 + 0.3 * sin(progress * 6.28318530718 + card)));
+				int card_y = center_y - abs(card - 1) * size / 2
+					+ (int)(cos(progress * 6.28318530718 + card) * size / 3);
+				int card_half_width = (int)(size * (0.18
+					+ 0.32 * fabs(cos(progress * 6.28318530718 + card))));
+				if(card_half_width < 2) card_half_width = 2;
+				boxRGBA(surface, card_x - card_half_width, card_y - size,
+					card_x + card_half_width, card_y + size, 225, 220, 203, alpha);
+				thickLineRGBA(surface, card_x, card_y - size / 2,
+					card_x, card_y + size / 2, 1, 163, 57, 64, alpha);
+			}
+			int coin_radius = size / 2 + 2;
+			int coin_x = center_x + (int)(sin(progress * 12.56) * size * 4);
+			int coin_y = center_y - size * 2 - (int)(fabs(sin(progress * 12.56)) * size * 3);
+			filledCircleRGBA(surface, coin_x, coin_y, coin_radius, 205, 161, 83, alpha);
+			circleRGBA(surface, coin_x, coin_y, coin_radius - 1, 255, 226, 159, alpha);
+}
+
+static void sky_event_29(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				82, 17, 29, (Uint8)(15 * fade));
+			unsigned int bolt_seed = seed;
+			int bolt_x = center_x;
+			int bolt_y = surface->h * 12 / 100;
+			for(int bolt = 0; bolt < 8; bolt++) {
+				bolt_seed = bolt_seed * 1664525u + 1013904223u;
+				int next_x = bolt_x + (int)(bolt_seed % (scale / 12 + 1)) - scale / 24;
+				int next_y = bolt_y + scale / 15;
+				thickLineRGBA(surface, bolt_x, bolt_y, next_x, next_y,
+					2, 232, 67, 83, alpha);
+				bolt_x = next_x;
+				bolt_y = next_y;
+			}
+}
+
+static void sky_event_30(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			for(int cup = 0; cup < 3; cup++) {
+				int cup_x = center_x + (cup - 1) * size * 3;
+				int cup_y = center_y + abs(cup - 1) * size / 3;
+				boxRGBA(surface, cup_x - size, cup_y - size,
+					cup_x + size, cup_y + size, 211, 204, 190, alpha);
+				filledCircleRGBA(surface, cup_x, cup_y - size, size / 2,
+					(Uint8)(105 + cup * 33), (Uint8)(59 + cup * 21),
+					(Uint8)(36 + cup * 19), alpha);
+				circleRGBA(surface, cup_x + size, cup_y, size / 2,
+					211, 204, 190, alpha);
+				for(int steam = 0; steam < 3; steam++) {
+					int steam_x = cup_x - size / 2 + steam * size / 2;
+					int steam_y = cup_y - size * 2
+						- (int)(fabs(sin(progress * 8.0 + steam)) * size);
+					thickLineRGBA(surface, steam_x, steam_y + size,
+						steam_x + size / 4, steam_y, 1, 206, 206, 198,
+						(Uint8)(alpha * 0.65));
+				}
+			}
+}
+
+static void sky_event_31(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			for(int sprig = 0; sprig < 5; sprig++) {
+				int stem_x = center_x + (sprig - 2) * size;
+				int stem_y = center_y + size * 2;
+				int tip_y = stem_y - size * (3 + sprig % 3);
+				int sway = (int)(sin(ticks / 330.0 + sprig * 1.4) * size / 5);
+				thickLineRGBA(surface, stem_x, stem_y, stem_x + sway, tip_y,
+					2, 92, 130, 73, alpha);
+				for(int leaf = 1; leaf <= 4; leaf++) {
+					int leaf_y = stem_y - leaf * size * 3 / 4;
+					int leaf_direction = leaf % 2 ? -1 : 1;
+					int leaf_x = stem_x + sway * leaf / 4;
+					int leaf_tip_x = leaf_x + leaf_direction * size;
+					filledTrigonRGBA(surface, leaf_x, leaf_y,
+						leaf_tip_x, leaf_y - size / 3,
+						leaf_tip_x, leaf_y + size / 3,
+						(Uint8)(74 + sprig * 6), (Uint8)(126 + leaf * 9), 71, alpha);
+				}
+			}
+}
+
+static void sky_event_32(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			for(int light = 0; light < 18; light++) {
+				int light_x = (seed + light * surface->w / 18) % surface->w;
+				int light_y = surface->h * (14 + (light * 17 + seed) % 62) / 100;
+				Uint8 pulse = (Uint8)(alpha * (0.35 + 0.65
+					* (0.5 + 0.5 * sin(progress * 18.0 + light))));
+				filledCircleRGBA(surface, light_x, light_y, 2 + light % 3,
+					(Uint8)(90 + light * 7), (Uint8)(129 + light * 5),
+					(Uint8)(176 + light * 3), pulse);
+			}
+}
+
+static void sky_event_33(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int burner_y = surface->h * 78 / 100;
+			filledTrigonRGBA(surface, center_x, burner_y - size,
+				center_x - size, burner_y + size / 2,
+				center_x + size, burner_y + size / 2, 104, 87, 67, alpha);
+			for(int curl = 0; curl < 4; curl++) {
+				int smoke_x = center_x + (int)(sin(progress * 7.0 + curl) * size * 2);
+				int smoke_y = burner_y - size * (2 + curl)
+					- (int)(progress * size * (curl + 1));
+				filledCircleRGBA(surface, smoke_x, smoke_y, size / 3 + 1,
+					(Uint8)(151 + curl * 12), (Uint8)(159 + curl * 10),
+					(Uint8)(166 + curl * 8), (Uint8)(alpha * (0.45 - curl * 0.07)));
+			}
+}
+
+static void sky_event_34(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			for(int wisp = 0; wisp < 7; wisp++) {
+				int smoke_x = center_x + (int)(sin(progress * 5.0 + wisp) * size * (2 + wisp));
+				int smoke_y = center_y - wisp * size / 2;
+				filledCircleRGBA(surface, smoke_x, smoke_y, size / 2 + 1,
+					(Uint8)(143 + wisp * 9), (Uint8)(150 + wisp * 8),
+					(Uint8)(162 + wisp * 7), (Uint8)(alpha * 0.42));
+			}
+}
+
+static void sky_event_35(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int temple_y = surface->h * 71 / 100;
+			for(int step = 0; step < 5; step++) {
+				int half_width = size * (5 - step);
+				int top_y = temple_y - step * size / 2;
+				boxRGBA(surface, center_x - half_width, top_y - size / 2,
+					center_x + half_width, top_y + size / 2,
+					(Uint8)(116 + step * 12), (Uint8)(102 + step * 8), 83, alpha);
+			}
+			for(int ray = 0; ray < 12; ray++) {
+				double angle = ray * 0.52359877559 + progress;
+				int end_x = center_x + (int)(cos(angle) * size * 5);
+				int end_y = surface->h * 32 / 100 + (int)(sin(angle) * size * 3);
+				thickLineRGBA(surface, center_x, surface->h * 32 / 100,
+					end_x, end_y, 1, 218, 183, 120, (Uint8)(alpha * 0.45));
+			}
+}
+
+static void sky_event_36(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+				24, 12, 39, (Uint8)(20 * fade));
+			int eye_x = center_x;
+			int eye_y = surface->h * 36 / 100;
+			int eye_radius = size * 2;
+			filledCircleRGBA(surface, eye_x, eye_y, eye_radius, 5, 4, 14, alpha);
+			circleRGBA(surface, eye_x, eye_y, eye_radius + size,
+				117, 89, 161, (Uint8)(alpha * 0.8));
+			for(int tendril = 0; tendril < 8; tendril++) {
+				double angle = tendril * 0.78539816339 + progress * direction;
+				int previous_x = eye_x + (int)(cos(angle) * eye_radius);
+				int previous_y = eye_y + (int)(sin(angle) * eye_radius);
+				for(int segment = 1; segment <= 5; segment++) {
+					int next_x = eye_x + (int)(cos(angle) * (eye_radius + segment * size));
+					int next_y = eye_y + (int)(sin(angle) * (eye_radius + segment * size)
+						+ sin(progress * 10.0 + segment + tendril) * size / 2);
+					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
+						2, 83, 68, 127, (Uint8)(alpha * 0.72));
+					previous_x = next_x;
+					previous_y = next_y;
+				}
+			}
+}
+
+static void sky_event_37(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int mirror_x = surface->w * (30 + (seed >> 8) % 40) / 100;
+			int mirror_y = surface->h * 43 / 100;
+			int mirror_width = size * 6;
+			int mirror_height = size * 10;
+			boxRGBA(surface, mirror_x - mirror_width / 2, mirror_y - mirror_height / 2,
+				mirror_x + mirror_width / 2, mirror_y + mirror_height / 2,
+				37, 55, 76, (Uint8)(alpha * 0.45));
+			thickLineRGBA(surface, mirror_x - mirror_width / 2, mirror_y - mirror_height / 2,
+				mirror_x + mirror_width / 2, mirror_y - mirror_height / 2,
+				2, 205, 221, 231, alpha);
+			thickLineRGBA(surface, mirror_x - mirror_width / 2, mirror_y + mirror_height / 2,
+				mirror_x + mirror_width / 2, mirror_y + mirror_height / 2,
+				2, 205, 221, 231, alpha);
+			for(int reflection = 0; reflection < 8; reflection++) {
+				int line_y = mirror_y - mirror_height / 2 + reflection * mirror_height / 7;
+				int ripple = (int)(sin(progress * 12.0 + reflection) * size / 2);
+				thickLineRGBA(surface, mirror_x - mirror_width / 2 + size / 3 + ripple,
+					line_y, mirror_x + mirror_width / 2 - size / 3 - ripple,
+					line_y + size / 4, 1, 150, 196, 218,
+					(Uint8)(alpha * (0.45 + reflection * 0.04)));
+			}
+			int reflected_sun_y = mirror_y + mirror_height / 3
+				+ (int)(sin(progress * 8.0) * size / 2);
+			filledCircleRGBA(surface, mirror_x, reflected_sun_y, size / 2,
+				226, 218, 188, (Uint8)(alpha * 0.72));
+}
+
+static void sky_event_38(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int water_y = surface->h * 77 / 100;
+			for(int wave = 0; wave < 9; wave++) {
+				int previous_x = 0;
+				int previous_y = water_y + wave * size / 2;
+				for(int segment = 1; segment <= 16; segment++) {
+					int next_x = surface->w * segment / 16;
+					int next_y = water_y + wave * size / 2
+						+ (int)(sin(segment * 0.75 + progress * 10.0 + wave) * size / 3);
+					thickLineRGBA(surface, previous_x, previous_y, next_x, next_y,
+						1, 101, 156, 190, (Uint8)(alpha * 0.55));
+					previous_x = next_x;
+					previous_y = next_y;
+				}
+			}
+			for(int glint = 0; glint < 14; glint++) {
+				int glint_x = (seed + glint * surface->w / 14) % surface->w;
+				int glint_y = water_y + (int)(sin(progress * 8.0 + glint) * size * 2);
+				thickLineRGBA(surface, glint_x - size / 3, glint_y,
+					glint_x + size / 3, glint_y, 1,
+					192, 222, 231, (Uint8)(alpha * 0.65));
+			}
+}
+
+static void sky_event_39(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int orbit_x = center_x;
+			int orbit_y = center_y;
+			int orbit_radius = size * 5;
+			ellipseRGBA(surface, orbit_x, orbit_y, orbit_radius,
+				orbit_radius / 2, 137, 172, 201, (Uint8)(alpha * 0.6));
+			for(int satellite = 0; satellite < 5; satellite++) {
+				double angle = progress * 12.56637061436 + satellite * 1.25663706144;
+				int satellite_x = orbit_x + (int)(cos(angle) * orbit_radius);
+				int satellite_y = orbit_y + (int)(sin(angle) * orbit_radius / 2);
+				filledCircleRGBA(surface, satellite_x, satellite_y,
+					2 + satellite % 3, 180, 204, 221, alpha);
+			}
+			filledCircleRGBA(surface, orbit_x, orbit_y, size,
+				(Uint8)(180 + (int)(35 * sin(progress * 12.56))), 141, 215, alpha);
+}
+
+static void sky_event_40(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int plane_y = center_y + (int)(sin(progress * 6.28318530718) * size * 2);
+			int nose_x = center_x + direction * size * 3;
+			int tail_x = center_x - direction * size * 3;
+			thickLineRGBA(surface, tail_x, plane_y, nose_x, plane_y,
+				3, 140, 153, 164, alpha);
+			thickLineRGBA(surface, center_x - direction * size,
+				plane_y - size / 5, center_x + direction * size,
+				plane_y + size / 5, 2, 170, 182, 191, alpha);
+			filledTrigonRGBA(surface, tail_x + direction * size,
+				plane_y, tail_x - direction * size, plane_y - size,
+				tail_x - direction * size, plane_y + size,
+				126, 141, 154, alpha);
+			if((phase / 240) % 2 == 0) {
+				filledCircleRGBA(surface, center_x - size * 2, plane_y,
+					2, 255, 54, 45, alpha);
+				filledCircleRGBA(surface, center_x + size * 2, plane_y,
+					2, 255, 54, 45, alpha);
+			}
+}
+
+static void sky_event_41(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int planet_x = surface->w / 2;
+			int planet_y = surface->h * 66 / 100;
+			int satellite_x = planet_x + (int)(cos(progress * 6.28318530718) * scale * 0.22);
+			int satellite_y = planet_y + (int)(sin(progress * 6.28318530718) * scale * 0.11);
+			filledCircleRGBA(surface, planet_x, planet_y, scale / 12,
+				32, 46, 65, (Uint8)(alpha * 0.6));
+			int panel_width = size * 2;
+			boxRGBA(surface, satellite_x - panel_width * 2, satellite_y - size / 3,
+				satellite_x - size, satellite_y + size / 3,
+				79, 133, 163, alpha);
+			boxRGBA(surface, satellite_x + size, satellite_y - size / 3,
+				satellite_x + panel_width * 2, satellite_y + size / 3,
+				79, 133, 163, alpha);
+			boxRGBA(surface, satellite_x - size, satellite_y - size / 2,
+				satellite_x + size, satellite_y + size / 2,
+				151, 164, 170, alpha);
+			if((phase / 300) % 2 == 0) {
+				filledCircleRGBA(surface, satellite_x, satellite_y,
+					2, 255, 48, 41, alpha);
+			}
+}
+
+static void sky_event_42(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+			int blimp_y = center_y + (int)(sin(progress * 6.28318530718) * size);
+			int blimp_length = size * 5;
+			for(int section = -2; section <= 2; section++) {
+				int section_radius = size * (3 - abs(section)) / 2;
+				if(section_radius < 2) section_radius = 2;
+				filledCircleRGBA(surface, center_x + section * size,
+					blimp_y, section_radius, 165, 169, 158, alpha);
+			}
+			thickLineRGBA(surface, center_x - blimp_length / 3,
+				blimp_y + size / 2, center_x + blimp_length / 3,
+				blimp_y + size / 2, 2, 100, 103, 99, alpha);
+			filledTrigonRGBA(surface, center_x + direction * blimp_length / 2,
+				blimp_y, center_x + direction * blimp_length / 2 - direction * size,
+				blimp_y - size, center_x + direction * blimp_length / 2 - direction * size,
+				blimp_y + size, 127, 137, 133, alpha);
+			if((phase / 360) % 2 == 0) {
+				filledCircleRGBA(surface, center_x, blimp_y,
+					2, 255, 48, 41, alpha);
+			}
+}
+
+// Three hot air balloons drift by, bobbing, their burners flaring now and then.
+static void sky_event_43(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 colors[3][3] = { { 214, 92, 76 }, { 231, 184, 86 }, { 92, 147, 201 } };
+	for(int balloon = 0; balloon < 3; balloon++) {
+		const Uint8 *c = colors[balloon];
+		int radius = (int)(size * (1.3 - 0.2 * balloon));
+		int bx = center_x - direction * balloon * size * 5;
+		int by = center_y + (int)(sin(progress * 9.4 + balloon * 1.7) * size) + balloon * size * 2;
+		filledCircleRGBA(surface, bx, by, radius, c[0], c[1], c[2], alpha);
+		filledTrigonRGBA(surface, bx - radius * 6 / 10, by + radius * 7 / 10, bx + radius * 6 / 10,
+			by + radius * 7 / 10, bx, by + radius * 16 / 10, (Uint8)(c[0] * 0.8), (Uint8)(c[1] * 0.8),
+			(Uint8)(c[2] * 0.8), alpha);
+		ellipseRGBA(surface, bx, by, radius / 2, radius, 245, 235, 215, (Uint8)(alpha * 0.6));
+		lineRGBA(surface, bx - radius / 2, by + radius * 11 / 10, bx - radius / 5, by + radius * 2, 90, 72, 60, alpha);
+		lineRGBA(surface, bx + radius / 2, by + radius * 11 / 10, bx + radius / 5, by + radius * 2, 90, 72, 60, alpha);
+		boxRGBA(surface, bx - radius / 5, by + radius * 2, bx + radius / 5, by + radius * 2 + radius / 4,
+			105, 80, 60, alpha);
+		if((phase / 140 + balloon) % 7 < 2) {
+			filledCircleRGBA(surface, bx, by + radius * 3 / 2, 2, 255, 190, 90, alpha);
+		}
+	}
+}
+
+// A V of geese flaps past.
+static void sky_event_44(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int goose = -3; goose <= 3; goose++) {
+		int row = abs(goose);
+		int gx = center_x - direction * row * size * 2;
+		int gy = center_y + goose * size;
+		double flap = sin(phase / 150.0 + row * 0.7 + (goose < 0 ? 1.0 : 0.0));
+		int wing = size * 4 / 5;
+		int tip_y = gy - (int)(flap * wing * 0.7);
+		thickLineRGBA(surface, gx, gy, gx - wing, tip_y, 2, 60, 70, 85, alpha);
+		thickLineRGBA(surface, gx, gy, gx + wing, tip_y, 2, 60, 70, 85, alpha);
+		filledCircleRGBA(surface, gx + direction * size / 4, gy, 2, 60, 70, 85, alpha);
+	}
+}
+
+// A small meteor shower: streaks cross the sky one after another.
+static void sky_event_45(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int meteor = 0; meteor < 7; meteor++) {
+		double begin = meteor * 0.11;
+		double u = (progress - begin) / 0.25;
+		if(u < 0.0 || u > 1.0) continue;
+		unsigned int h = fx_hash(seed + meteor * 977u, 7);
+		double sx = surface->w * (0.1 + 0.8 * (h & 255) / 255.0);
+		double sy = surface->h * (0.03 + 0.2 * ((h >> 8) & 255) / 255.0);
+		double reach = scale * 0.5;
+		double hx = sx + direction * reach * u, hy = sy + reach * 0.45 * u;
+		double tail = size * 5.0;
+		Uint8 a = weapon_alpha(alpha * 1.4 * sin(3.14159265 * u));
+		thickLineRGBA(surface, (int)hx, (int)hy, (int)(hx - direction * tail), (int)(hy - tail * 0.45), 2,
+			205, 220, 240, (Uint8)(a * 0.5));
+		thickLineRGBA(surface, (int)hx, (int)hy, (int)(hx - direction * tail * 0.5), (int)(hy - tail * 0.22), 1,
+			255, 250, 235, a);
+		filledCircleRGBA(surface, (int)hx, (int)hy, 2, 255, 250, 235, a);
+	}
+}
+
+// Three lights in a triangle hang in the sky, turn slowly and dart sideways.
+static void sky_event_46(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 white[3] = { 255, 240, 200 };
+	double base_x = surface->w * (0.2 + 0.4 * ((seed >> 5) % 100) / 100.0);
+	double dart = smooth_step(0.45, 0.5, progress) * surface->w * 0.12
+		+ smooth_step(0.75, 0.78, progress) * surface->w * 0.3;
+	double cx = base_x + direction * dart;
+	double cy = center_y + sin(progress * 8.0) * size * 0.3;
+	double radius = size * 1.4;
+	int px[3], py[3];
+	for(int k = 0; k < 3; k++) {
+		double angle = progress * 2.0 + k * 2.0944;
+		px[k] = (int)(cx + cos(angle) * radius);
+		py[k] = (int)(cy + sin(angle) * radius * 0.6);
+	}
+	filledTrigonRGBA(surface, px[0], py[0], px[1], py[1], px[2], py[2], 20, 24, 34, (Uint8)(alpha * 0.4));
+	for(int k = 0; k < 3; k++) {
+		weapon_glow(surface, px[k], py[k], 2.5, white, alpha * 1.4);
+	}
+	if((phase / 400) % 2 == 0) {
+		filledCircleRGBA(surface, (int)cx, (int)cy, 2, 255, 60, 50, alpha);
+	}
+}
+
+// A small plane writes a loop in the sky with a white trail.
+static void sky_event_47(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double radius = size * 4.0;
+	double span = surface->w * 1.2;
+	double start_x = direction > 0 ? -surface->w * 0.1 : surface->w * 1.1;
+	double base_y = surface->h * 0.3 + (seed >> 12) % 100 * surface->h * 0.001;
+	const int samples = 70;
+	double last_x = 0.0, last_y = 0.0;
+	bool have_last = false;
+	for(int k = 0; k <= samples; k++) {
+		double s = progress - 0.25 * (samples - k) / samples;
+		if(s < 0.0) continue;
+		double a = 6.2831853 * smooth_step(0.4, 0.6, s);
+		double px = start_x + direction * (s * span - radius * sin(a));
+		double py = base_y - radius * (1.0 - cos(a));
+		if(have_last) {
+			double recent = (double)k / samples;
+			thickLineRGBA(surface, (int)last_x, (int)last_y, (int)px, (int)py, 3, 240, 244, 250,
+				(Uint8)(alpha * 0.55 * recent));
+		}
+		last_x = px;
+		last_y = py;
+		have_last = true;
+		if(k == samples) {
+			double ahead = progress - 0.004;
+			double a2 = 6.2831853 * smooth_step(0.4, 0.6, ahead);
+			double qx = start_x + direction * (ahead * span - radius * sin(a2));
+			double qy = base_y - radius * (1.0 - cos(a2));
+			double dx = px - qx, dy = py - qy;
+			double len = sqrt(dx * dx + dy * dy);
+			if(len < 0.001) { dx = direction; dy = 0.0; len = 1.0; }
+			dx /= len;
+			dy /= len;
+			thickLineRGBA(surface, (int)(px - dx * size), (int)(py - dy * size), (int)(px + dx * size),
+				(int)(py + dy * size), 3, 230, 232, 238, alpha);
+			thickLineRGBA(surface, (int)(px - dy * size * 0.9), (int)(py + dx * size * 0.9),
+				(int)(px + dy * size * 0.9), (int)(py - dx * size * 0.9), 2, 200, 205, 215, alpha);
+		}
+	}
+}
+
+// A huge whale made of faint dusk colours glides through the sky, its belly dotted with lights.
+static void sky_event_48(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const double profile[7] = { 1.0, 1.5, 1.6, 1.4, 1.0, 0.7, 0.45 };
+	int whale_x[7], whale_y[7];
+	for(int i = 6; i >= 0; i--) {
+		whale_x[i] = center_x - direction * i * size * 8 / 5;
+		whale_y[i] = center_y + (int)(sin(phase / 700.0 - i * 0.7) * size * 0.5);
+		filledCircleRGBA(surface, whale_x[i], whale_y[i], (int)(size * profile[i]), 70, 85, 120,
+			(Uint8)(alpha * 0.8));
+	}
+	for(int i = 1; i < 6; i++) {
+		filledCircleRGBA(surface, whale_x[i], whale_y[i] + (int)(size * profile[i] * 0.55), 2,
+			150, 220, 230, (Uint8)(alpha * (0.6 + 0.4 * sin(phase / 300.0 + i))));
+	}
+	int tail_x = whale_x[6] - direction * size / 2, tail_y = whale_y[6];
+	double wave = sin(phase / 700.0 - 6 * 0.7 - 0.5);
+	filledTrigonRGBA(surface, tail_x, tail_y, tail_x - direction * size, tail_y - size + (int)(wave * size / 2),
+		tail_x - direction * size / 3, tail_y, 70, 85, 120, (Uint8)(alpha * 0.8));
+	filledTrigonRGBA(surface, tail_x, tail_y, tail_x - direction * size, tail_y + size + (int)(wave * size / 2),
+		tail_x - direction * size / 3, tail_y, 70, 85, 120, (Uint8)(alpha * 0.8));
+	filledTrigonRGBA(surface, whale_x[2], whale_y[2] + size, whale_x[2] - direction * size,
+		whale_y[2] + size * 2, whale_x[2] + direction * size / 4, whale_y[2] + size * 3 / 2, 55, 68, 100,
+		(Uint8)(alpha * 0.8));
+	filledCircleRGBA(surface, whale_x[0] + direction * size / 3, whale_y[0] - size / 4, 2, 230, 240, 250, alpha);
+}
+
+// A distant storm cell: a dark anvil cloud with rain below and sudden lightning bolts.
+static void sky_event_49(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	bool flash = fx_hash(seed, phase / 170) % 7 == 0;
+	unsigned int bolt_seed = fx_hash(seed, phase / 170 + 11);
+	int r = size * 3 / 2;
+	Uint8 cr = flash ? 200 : 66, cg = flash ? 210 : 72, cb = flash ? 250 : 92;
+	for(int puff = 0; puff < 5; puff++) {
+		filledCircleRGBA(surface, center_x + (puff - 2) * r * 7 / 10, center_y - (puff % 2) * r / 3,
+			r * (puff == 2 ? 12 : 9) / 10, cr, cg, cb, (Uint8)(alpha * 0.85));
+	}
+	boxRGBA(surface, center_x - r * 2, center_y + r / 2, center_x + r * 2, center_y + r * 3 / 5,
+		55, 60, 78, (Uint8)(alpha * 0.8));
+	for(int drop = 0; drop < 14; drop++) {
+		int rx = center_x - r * 3 / 2 + (drop * r * 3 / 13);
+		int ry = center_y + r * 3 / 5 + ((phase / 40 + drop * 5) % 10) * size / 5;
+		lineRGBA(surface, rx, ry, rx - 2, ry + size / 3, 140, 155, 185, (Uint8)(alpha * 0.45));
+	}
+	if(flash) {
+		int bx = center_x + (int)(bolt_seed % 5) * r / 3 - r;
+		int by = center_y + r / 2;
+		for(int segment = 0; segment < 6; segment++) {
+			int nx = bx + (int)((bolt_seed >> (segment * 3)) % 7) * size / 5 - size * 3 / 5;
+			int ny = by + size * 4 / 5;
+			thickLineRGBA(surface, bx, by, nx, ny, 3, 190, 205, 255, (Uint8)(alpha * 0.4));
+			thickLineRGBA(surface, bx, by, nx, ny, 1, 255, 255, 255, alpha);
+			bx = nx;
+			by = ny;
+		}
+	}
+}
+
+// A total solar eclipse: a dark moon slides over the sun, a corona blooms at totality and
+// a bright glint flares on the edge as it ends.
+static void sky_event_50(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double cx = surface->w * (0.3 + 0.4 * ((seed >> 4) % 100) / 100.0);
+	double radius = size * 1.6;
+	double offset = (progress - 0.5) * radius * 5.0 * direction;
+	double cover = 1.0 - smooth_step(0.0, radius * 1.2, fabs(offset));
+	Uint8 solid = (Uint8)(fade * 235);
+	filledCircleRGBA(surface, (int)cx, center_y, (int)radius, 255, 236, 170, solid);
+	if(cover > 0.0) {
+		for(int ray = 0; ray < 16; ray++) {
+			double angle = ray * 0.3927 + progress * 0.5;
+			double length = radius * (1.6 + 0.6 * sin(ray * 2.1 + phase / 500.0)) * cover;
+			thickLineRGBA(surface, (int)(cx + cos(angle) * radius), (int)(center_y + sin(angle) * radius),
+				(int)(cx + cos(angle) * (radius + length)), (int)(center_y + sin(angle) * (radius + length)), 1,
+				235, 240, 255, (Uint8)(alpha * 0.8 * cover));
+		}
+		circleRGBA(surface, (int)cx, center_y, (int)(radius * 1.15), 255, 245, 215, (Uint8)(alpha * cover));
+	}
+	filledCircleRGBA(surface, (int)(cx + offset), center_y, (int)radius, 12, 14, 24, solid);
+	if(fabs(offset) > radius * 0.03 && fabs(offset) < radius * 0.35) {
+		static const Uint8 glint[3] = { 255, 245, 220 };
+		weapon_glow(surface, cx - (offset > 0 ? 1 : -1) * radius * 0.95, center_y, radius * 0.3, glint, alpha * 1.6);
+	}
+}
+
+// A long jade dragon undulates across the sky, with a mane of fins and whiskers streaming behind its snout.
+static void sky_event_51(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	const int segments = 16;
+	double wave = phase / 260.0;
+	int px[segments + 1], py[segments + 1];
+	for(int i = 0; i <= segments; i++) {
+		px[i] = x - direction * i * size * 11 / 10;
+		py[i] = y + (int)(sin(wave - i * 0.55) * size * (0.6 + 0.08 * i));
+	}
+	for(int i = segments; i >= 0; i--) {
+		int r = (int)(size * (0.2 + 0.55 * (1.0 - (double)i / segments)));
+		if(i == 0) r = size * 3 / 4;
+		if(r < 2) r = 2;
+		filledCircleRGBA(surface, px[i], py[i], r, 96, 170, 128, (Uint8)(alpha * 0.9));
+		filledCircleRGBA(surface, px[i], py[i] + r / 3, r * 2 / 3, 200, 215, 150, (Uint8)(alpha * 0.45));
+		if(i % 3 == 1) {
+			filledTrigonRGBA(surface, px[i] - 2, py[i] - r, px[i] + 2, py[i] - r,
+				px[i] - direction, py[i] - r - size / 2, 220, 160, 90, (Uint8)(alpha * 0.9));
+		}
+		if(i == 4 || i == 10) {
+			thickLineRGBA(surface, px[i], py[i] + r, px[i] + direction * size / 3, py[i] + r + size / 2, 2,
+				80, 140, 106, alpha);
+		}
+	}
+	filledTrigonRGBA(surface, x + direction * size / 3, y - size / 3, x + direction * size / 3, y + size / 3,
+		x + direction * size * 13 / 10, y + size / 10, 96, 170, 128, alpha);
+	thickLineRGBA(surface, x - direction * size / 10, y - size * 7 / 10, x - direction * size * 6 / 5,
+		y - size * 3 / 2, 2, 220, 180, 100, alpha);
+	for(int whisker = -1; whisker <= 1; whisker += 2) {
+		thickLineRGBA(surface, x + direction * size * 12 / 10, y + size / 10,
+			x + direction * size * 2 + direction * size / 2, y + size / 3 + whisker * (int)(sin(wave * 2.0) * size * 0.5)
+			+ whisker * size / 3, 1, 230, 220, 170, (Uint8)(alpha * 0.8));
+	}
+	filledCircleRGBA(surface, x + direction * size / 5, y - size / 5, 2, 255, 220, 120, alpha);
+	filledTrigonRGBA(surface, px[segments], py[segments] - 2, px[segments], py[segments] + 2,
+		px[segments] - direction * size, py[segments], 220, 160, 90, (Uint8)(alpha * 0.9));
+}
+
+// A small drift of jellyfish pulses through the sky, their tentacles trailing.
+static void sky_event_52(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int j = 0; j < 5; j++) {
+		int jx = x - direction * j * size * 2 + (j % 2) * size;
+		int jy = y + (int)(sin(phase / 700.0 + j * 1.3) * size * 1.5) + (j % 3) * size;
+		double pulse = 0.5 + 0.5 * sin(phase / 380.0 + j);
+		int r = (int)(size * (0.9 + 0.15 * pulse));
+		Uint8 cr = j % 2 ? 140 : 220, cg = j % 2 ? 210 : 150, cb = j % 2 ? 230 : 200;
+		filledPieRGBA(surface, jx, jy, r, 180, 360, cr, cg, cb, (Uint8)(alpha * 0.55));
+		ellipseRGBA(surface, jx, jy, r, r / 4 + 1, cr, cg, cb, (Uint8)(alpha * 0.8));
+		filledCircleRGBA(surface, jx, jy - r / 3, r / 4 + 1, 255, 255, 255, (Uint8)(alpha * 0.35));
+		for(int k = 0; k < 6; k++) {
+			int tx = jx + (int)((k - 2.5) * r * 0.35), ty = jy;
+			for(int seg = 1; seg <= 4; seg++) {
+				int nx = tx + (int)(sin(phase / 300.0 - seg * 0.8 + k) * size * 0.25 * seg) / 2;
+				int ny = ty + size / 2;
+				lineRGBA(surface, tx, ty, nx, ny, cr, cg, cb, (Uint8)(alpha * (0.55 - 0.1 * seg)));
+				tx = nx;
+				ty = ny;
+			}
+		}
+	}
+}
+
+// A train of satellites crosses the sky in a line, glints running along it.
+static void sky_event_53(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 white[3] = { 240, 244, 255 };
+	const int count = 14;
+	int spacing = size * 6 / 5;
+	for(int i = 0; i < count; i++) {
+		double glint = 0.5 + 0.5 * sin(phase / 250.0 - i * 0.7);
+		int sx = x - direction * i * spacing, sy = y + i * spacing / 8;
+		double fade_tail = 1.0 - (double)i / (count * 1.4);
+		filledCircleRGBA(surface, sx, sy, glint > 0.85 ? 2 : 1, white[0], white[1], white[2],
+			weapon_alpha(alpha * (0.5 + 0.5 * glint) * fade_tail * 1.4));
+		if(glint > 0.8) weapon_glow(surface, sx, sy, 2.0, white, alpha * glint * fade_tail);
+	}
+}
+
+// A star explodes: it flares with spikes, then a coloured shock shell expands and thins out.
+static void sky_event_54(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 white[3] = { 235, 240, 255 };
+	double cx = surface->w * (0.2 + 0.6 * ((seed >> 5) % 100) / 100.0);
+	double flare = smooth_step(0.1, 0.28, progress) * (1.0 - smooth_step(0.35, 0.7, progress));
+	double glow = size * 0.2 + size * 2.2 * flare;
+	weapon_glow(surface, cx, center_y, glow, white, 235.0 * fade * (0.25 + 0.75 * flare));
+	double spike = size * (1.0 + 8.0 * flare);
+	for(int k = 0; k < 4; k++) {
+		double a = k * SCENE_PI / 4.0, len = k % 2 ? spike * 0.5 : spike;
+		thickLineRGBA(surface, (int)(cx - cos(a) * len), (int)(center_y - sin(a) * len),
+			(int)(cx + cos(a) * len), (int)(center_y + sin(a) * len), 1, 235, 240, 255,
+			weapon_alpha(200.0 * flare * fade));
+	}
+	double shock = smooth_step(0.28, 1.0, progress);
+	if(shock > 0.0) {
+		double radius = shock * scale * 0.2;
+		for(int k = 0; k < 3; k++) {
+			Uint8 a = weapon_alpha(160.0 * (1.0 - shock) * fade * (1.0 - k * 0.25));
+			circleRGBA(surface, (int)cx, center_y, (int)(radius * (1.0 - k * 0.12)),
+				k == 1 ? 255 : 180, k == 1 ? 150 : 150, k == 1 ? 170 : 255, a);
+		}
+		filledCircleRGBA(surface, (int)cx, center_y, (int)(radius * 0.95), 180, 150, 255,
+			weapon_alpha(10.0 * (1.0 - shock) * fade));
+	}
+}
+
+// Dandelion seeds drift past on their little parachutes.
+static void sky_event_55(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int i = 0; i < 9; i++) {
+		int sx = x - direction * i * size * 9 / 5;
+		int sy = y + (int)(sin(phase / 900.0 + i * 1.9) * size * 2.0) + (i % 3) * size * 6 / 5;
+		double tilt = sin(phase / 700.0 + i) * 0.4;
+		int stem_x = sx - (int)(sin(tilt) * size * 0.8), stem_y = sy + (int)(cos(tilt) * size * 0.8);
+		lineRGBA(surface, sx, sy, stem_x, stem_y, 235, 235, 225, (Uint8)(alpha * 0.8));
+		filledCircleRGBA(surface, stem_x, stem_y, 1, 200, 180, 140, alpha);
+		for(int ray = 0; ray < 7; ray++) {
+			double a = -SCENE_PI * (0.1 + 0.8 * ray / 6.0) + tilt;
+			lineRGBA(surface, sx, sy, sx + (int)(cos(a) * size * 0.6), sy + (int)(sin(a) * size * 0.6),
+				235, 235, 225, (Uint8)(alpha * 0.9));
+		}
+	}
+}
+
+// A double rainbow sweeps in across the sky and fades.
+static void sky_event_56(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 band[7][3] = {
+		{ 220, 70, 70 }, { 235, 150, 60 }, { 235, 215, 80 }, { 90, 190, 100 },
+		{ 70, 140, 225 }, { 80, 90, 190 }, { 140, 90, 190 } };
+	double cx = surface->w * (0.25 + 0.5 * ((seed >> 5) % 100) / 100.0);
+	double base_y = surface->h * 0.58, radius = scale * 0.55;
+	double reveal = smooth_step(0.0, 0.35, progress);
+	int thick = scale / 120;
+	if(thick < 3) thick = 3;
+	const int segments = 40;
+	for(int pass = 0; pass < 2; pass++) {
+		for(int b = 0; b < 7; b++) {
+			double r = pass == 0 ? radius - b * thick : radius * 1.25 + b * thick * 0.8;
+			const Uint8 *c = band[pass == 0 ? b : 6 - b];
+			double px = 0.0, py = 0.0;
+			for(int k = 0; k <= segments; k++) {
+				double u = reveal * k / segments;
+				double a = SCENE_PI + u * SCENE_PI;
+				double nx = cx + cos(a) * r, ny = base_y + sin(a) * r * 0.9;
+				if(k > 0) {
+					thickLineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, thick, c[0], c[1], c[2],
+						(Uint8)(alpha * (pass == 0 ? 0.42 : 0.18)));
+				}
+				px = nx;
+				py = ny;
+			}
+		}
+	}
+}
+
+// A sun halo: a pale ring with two bright sundogs on either side and a faint light pillar.
+static void sky_event_57(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 warm[3] = { 255, 240, 200 };
+	double cx = surface->w * (0.3 + 0.4 * ((seed >> 5) % 100) / 100.0);
+	double R = scale * 0.2;
+	double shimmer = 0.85 + 0.15 * sin(phase / 400.0);
+	weapon_glow(surface, cx, center_y, size * 0.8, warm, 235.0 * fade);
+	for(int k = 0; k < 3; k++) {
+		circleRGBA(surface, (int)cx, center_y, (int)R + k, 255, 250, 225, weapon_alpha(70.0 * fade * shimmer - k * 18));
+	}
+	circleRGBA(surface, (int)cx, center_y, (int)R - 2, 255, 190, 170, weapon_alpha(40.0 * fade * shimmer));
+	thickLineRGBA(surface, (int)cx, (int)(center_y - R * 1.4), (int)cx, (int)(center_y + R * 1.4), 2, 255, 245, 220,
+		weapon_alpha(30.0 * fade));
+	for(int side = -1; side <= 1; side += 2) {
+		double dx = cx + side * R * 1.02;
+		weapon_glow(surface, dx, center_y, size * 0.5, warm, 200.0 * fade * shimmer);
+		for(int q = 0; q < 6; q++) {
+			double f = q / 5.0;
+			Uint8 cr = (Uint8)(255 - 85 * f), cg = (Uint8)(150 + 50 * f), cb = (Uint8)(120 + 135 * f);
+			thickLineRGBA(surface, (int)(dx + side * q * size * 0.5), center_y,
+				(int)(dx + side * (q + 1) * size * 0.5), center_y, 2, cr, cg, cb,
+				weapon_alpha(110.0 * fade * (1.0 - f * 0.8)));
+		}
+	}
+}
+
+static double sky_track_x(const SkyEvent *event, double progress) {
+	double margin = event->scale / 12.0;
+	double span = event->surface->w + 2.0 * margin;
+	return event->direction > 0 ? -margin + progress * span : event->surface->w + margin - progress * span;
+}
+
+// A small plane flies over and skydivers drop out, free-fall and open their canopies.
+static void sky_event_58(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 canopy[4][3] = { { 190, 80, 70 }, { 80, 130, 190 }, { 220, 200, 90 }, { 110, 170, 110 } };
+	filledEllipseRGBA(surface, x, y, size * 7 / 5, size * 7 / 20 + 1, 30, 34, 44, alpha);
+	thickLineRGBA(surface, x - direction * size / 5, y, x + direction * size / 5, y - size / 2, 2, 30, 34, 44, alpha);
+	filledTrigonRGBA(surface, x - direction * size, y, x - direction * size * 3 / 2, y - size / 2,
+		x - direction * size * 6 / 5, y, 30, 34, 44, alpha);
+	thickLineRGBA(surface, x + direction * size * 3 / 2, y - size / 3, x + direction * size * 3 / 2, y + size / 3, 1,
+		190, 200, 210, (Uint8)(alpha * 0.6));
+	for(int j = 0; j < 5; j++) {
+		double drop = 0.2 + 0.07 * j;
+		double dp = progress - drop;
+		if(dp < 0.0) continue;
+		double jx = sky_track_x(event, drop) + direction * scale * 0.05 * (1.0 - exp(-dp * 12.0));
+		double fall = dp < 0.1 ? dp * dp * scale * 10.0 : 0.1 * 0.1 * scale * 10.0 + (dp - 0.1) * scale * 0.35;
+		double jy = y + size / 3 + fall;
+		if(dp < 0.1) {
+			thickLineRGBA(surface, (int)jx, (int)jy, (int)(jx + direction * size / 2), (int)(jy + size / 5), 2,
+				30, 34, 44, alpha);
+			filledCircleRGBA(surface, (int)jx, (int)jy, 2, 30, 34, 44, alpha);
+		} else {
+			jx += sin(dp * 10.0 + j) * size * 0.3;
+			const Uint8 *c = canopy[j % 4];
+			int cr = size * 4 / 5 + 2;
+			double open = smooth_step(0.1, 0.13, dp);
+			int radius = (int)(cr * open) + 1;
+			filledPieRGBA(surface, (int)jx, (int)jy - cr * 2, radius, 180, 360, c[0], c[1], c[2], alpha);
+			lineRGBA(surface, (int)jx - radius, (int)jy - cr * 2, (int)jx, (int)jy, 30, 34, 44, (Uint8)(alpha * 0.7));
+			lineRGBA(surface, (int)jx + radius, (int)jy - cr * 2, (int)jx, (int)jy, 30, 34, 44, (Uint8)(alpha * 0.7));
+			filledCircleRGBA(surface, (int)jx, (int)jy, 2, 30, 34, 44, alpha);
+		}
+	}
+}
+
+// A flying carpet glides by with a turbaned rider and a trail of golden sparkles.
+static void sky_event_59(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 gold[3] = { 255, 230, 150 };
+	const int seg = 10;
+	double half = size * 2.2, wave = phase / 220.0;
+	int prev_x = 0, prev_y = 0, rider_x = x, rider_y = y;
+	for(int i = 0; i <= seg; i++) {
+		double u = (double)i / seg;
+		int px = x + (int)(direction * (u - 0.5) * 2.0 * half);
+		int py = y + (int)(sin(wave - u * 5.0) * size * 0.35);
+		int thickness = size * 7 / 20 + 2;
+		if(i > 0) {
+			Uint8 cr = i % 2 ? 140 : 110, cg = i % 2 ? 50 : 40, cb = i % 2 ? 60 : 70;
+			filledTrigonRGBA(surface, prev_x, prev_y, px, py, prev_x, prev_y + thickness, cr, cg, cb, alpha);
+			filledTrigonRGBA(surface, px, py, px, py + thickness, prev_x, prev_y + thickness, cr, cg, cb, alpha);
+			lineRGBA(surface, prev_x, prev_y, px, py, 210, 170, 90, alpha);
+			lineRGBA(surface, prev_x, prev_y + thickness, px, py + thickness, 210, 170, 90, alpha);
+		}
+		if(i == 4) { rider_x = px; rider_y = py; }
+		prev_x = px;
+		prev_y = py;
+	}
+	for(int fringe = 0; fringe < 4; fringe++) {
+		int fy = prev_y + fringe * size / 8;
+		lineRGBA(surface, prev_x, fy, prev_x + direction * size / 4, fy + size / 8, 210, 170, 90, alpha);
+	}
+	filledCircleRGBA(surface, rider_x, rider_y - size * 7 / 10, size / 5 + 1, 30, 24, 30, alpha);
+	filledCircleRGBA(surface, rider_x, rider_y - size * 4 / 5, size / 4, 220, 215, 200, alpha);
+	filledTrigonRGBA(surface, rider_x - size / 4, rider_y, rider_x + size / 4, rider_y,
+		rider_x, rider_y - size * 6 / 10, 40, 36, 50, alpha);
+	for(int k = 0; k < 12; k++) {
+		double age = k / 12.0;
+		double tx = x - direction * (half + age * size * 7.0), ty = y + sin(wave * 0.8 + k) * size * 0.5 + age * size;
+		weapon_glow(surface, tx, ty, 1.6, gold, alpha * (1.0 - age) * 1.4);
+	}
+}
+
+// A glowing double helix of DNA turns as it flies across the sky.
+static void sky_event_60(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	const int pairs = 22;
+	double spin = phase / 380.0;
+	int prev_a = 0, prev_b = 0, prev_x = 0;
+	for(int i = 0; i < pairs; i++) {
+		int ax = x - direction * i * size * 11 / 20;
+		double s_ = sin(spin + i * 0.5), c_ = cos(spin + i * 0.5);
+		int ya = y + (int)(s_ * size * 1.1), yb = y - (int)(s_ * size * 1.1);
+		double tail = 1.0 - 0.6 * i / pairs;
+		lineRGBA(surface, ax, ya, ax, yb, 200, 210, 240, (Uint8)(alpha * 0.35 * tail));
+		if(i > 0) {
+			lineRGBA(surface, prev_x, prev_a, ax, ya, 255, 140, 170, (Uint8)(alpha * 0.7 * tail));
+			lineRGBA(surface, prev_x, prev_b, ax, yb, 130, 220, 255, (Uint8)(alpha * 0.7 * tail));
+		}
+		filledCircleRGBA(surface, ax, ya, c_ > 0 ? 3 : 2, 255, 140, 170, (Uint8)(alpha * tail));
+		filledCircleRGBA(surface, ax, yb, c_ < 0 ? 3 : 2, 130, 220, 255, (Uint8)(alpha * tail));
+		prev_x = ax;
+		prev_a = ya;
+		prev_b = yb;
+	}
+}
+
+// A single huge snowflake spins slowly as it sails down across the sky.
+static void sky_event_61(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 ice[3] = { 215, 238, 255 };
+	double R = size * 2.6;
+	double fy = y + progress * scale * 0.15;
+	double rot = phase / 2600.0 * direction;
+	for(int arm = 0; arm < 6; arm++) {
+		double a = rot + arm * SCENE_PI / 3.0;
+		double ux = cos(a), uy = sin(a);
+		thickLineRGBA(surface, x, (int)fy, (int)(x + ux * R), (int)(fy + uy * R), 2, ice[0], ice[1], ice[2], alpha);
+		for(int b = 0; b < 2; b++) {
+			double at = b == 0 ? 0.45 : 0.75, len = R * (b == 0 ? 0.3 : 0.2);
+			double bx = x + ux * R * at, by = fy + uy * R * at;
+			for(int side = -1; side <= 1; side += 2) {
+				double ba = a + side * 0.8;
+				lineRGBA(surface, (int)bx, (int)by, (int)(bx + cos(ba) * len), (int)(by + sin(ba) * len),
+					ice[0], ice[1], ice[2], alpha);
+			}
+		}
+	}
+	weapon_glow(surface, x, fy, size * 0.35, ice, alpha * 1.3);
+	int sparkle = (int)(phase / 300) % 6;
+	double sa = rot + sparkle * SCENE_PI / 3.0;
+	weapon_glow(surface, x + cos(sa) * R, fy + sin(sa) * R, 2.0, ice, alpha * (0.5 + 0.5 * sin(phase / 90.0)));
+}
+
+// A pulsar: a small star whose twin beams sweep round like a lighthouse, with pulse rings.
+static void sky_event_62(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 blue[3] = { 150, 200, 255 };
+	double cx = surface->w * (0.2 + 0.6 * ((seed >> 5) % 100) / 100.0);
+	double length = scale * 0.35, spin = phase / 420.0;
+	for(int beam = 0; beam < 2; beam++) {
+		double a = spin + beam * SCENE_PI;
+		double ex = cx + cos(a) * length, ey = center_y + sin(a) * length;
+		double wx = -sin(a) * size * 0.35, wy = cos(a) * size * 0.35;
+		filledTrigonRGBA(surface, (int)cx, center_y, (int)(ex + wx), (int)(ey + wy), (int)(ex - wx), (int)(ey - wy),
+			blue[0], blue[1], blue[2], (Uint8)(alpha * 0.18));
+		lineRGBA(surface, (int)cx, center_y, (int)ex, (int)ey, 220, 235, 255, (Uint8)(alpha * 0.5));
+	}
+	double pulse = 0.5 + 0.5 * sin(spin * 3.0);
+	weapon_glow(surface, cx, center_y, size * 0.45 * (1.0 + 0.2 * pulse), blue, 235.0 * fade);
+	double ring = (phase % 1500) / 1500.0;
+	circleRGBA(surface, (int)cx, center_y, (int)(ring * size * 3.0), blue[0], blue[1], blue[2],
+		weapon_alpha(alpha * (1.0 - ring)));
+}
+
+// A swirling portal opens in the sky, throws sparks and shoots out a bright streak before it closes.
+static void sky_event_63(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 swirl[4][3] = { { 150, 90, 255 }, { 120, 140, 255 }, { 100, 200, 255 }, { 190, 230, 255 } };
+	double cx = surface->w * (0.2 + 0.6 * ((seed >> 5) % 100) / 100.0);
+	double open = smooth_step(0.0, 0.2, progress) * (1.0 - smooth_step(0.8, 1.0, progress));
+	double R = size * 2.4 * open;
+	if(R < 2.0) return;
+	double spin = phase / 500.0;
+	filledEllipseRGBA(surface, (int)cx, center_y, (int)(R * 0.8), (int)R, 8, 6, 22, weapon_alpha(alpha * 1.3));
+	for(int k = 0; k < 4; k++) {
+		double r = R * (1.0 - 0.16 * k);
+		double dir = k % 2 ? 1.0 : -1.0;
+		for(int seg = 0; seg < 16; seg++) {
+			double a0 = dir * spin * (1.0 + 0.3 * k) + seg * SCENE_TAU / 16.0, a1 = a0 + SCENE_TAU / 16.0 * 0.6;
+			thickLineRGBA(surface, (int)(cx + cos(a0) * r * 0.8), (int)(center_y + sin(a0) * r),
+				(int)(cx + cos(a1) * r * 0.8), (int)(center_y + sin(a1) * r), 2,
+				swirl[k][0], swirl[k][1], swirl[k][2], weapon_alpha(alpha * 1.3));
+		}
+	}
+	ellipseRGBA(surface, (int)cx, center_y, (int)(R * 0.85), (int)(R * 1.05), 170, 120, 255, weapon_alpha(alpha * 0.8));
+	for(int j = 0; j < 10; j++) {
+		double u = fmod(phase / 1800.0 + j / 10.0, 1.0), a = j * 2.4;
+		weapon_glow(surface, cx + cos(a) * R * 0.8 * (0.5 + u * 1.1), center_y + sin(a) * R * (0.5 + u * 1.1), 1.6,
+			swirl[3], alpha * (1.0 - u) * open);
+	}
+	double shot = (progress - 0.45) / 0.2;
+	if(shot > 0.0 && shot < 1.0) {
+		double sx = cx + direction * shot * scale * 0.6, sy = center_y - shot * scale * 0.05;
+		thickLineRGBA(surface, (int)(sx - direction * size * 3), (int)(sy + size * 0.3), (int)sx, (int)sy, 2,
+			200, 230, 255, weapon_alpha(alpha * (1.0 - shot)));
+		weapon_glow(surface, sx, sy, 2.5, swirl[3], 235.0 * fade * (1.0 - shot));
+	}
+}
+
+// A ghostly sailing ship, half transparent, crosses the sky with its mist wake and a green lantern.
+static void sky_event_64(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 lantern[3] = { 150, 255, 200 };
+	double flicker = 0.8 + 0.2 * sin(phase / 170.0);
+	Uint8 a = weapon_alpha(alpha * 0.8 * flicker);
+	int by = y + (int)(sin(phase / 900.0) * size * 0.25);
+	// Hull and masts are placed in units of `size` along the heading.
+	#define GHOST_X(u) (x + direction * (int)((u) * size))
+	#define GHOST_Y(v) (by + (int)((v) * size))
+	filledTrigonRGBA(surface, GHOST_X(-3.4), GHOST_Y(-0.6), GHOST_X(3.4), GHOST_Y(-0.3), GHOST_X(2.4), GHOST_Y(1.0),
+		110, 140, 160, a);
+	filledTrigonRGBA(surface, GHOST_X(-3.4), GHOST_Y(-0.6), GHOST_X(2.4), GHOST_Y(1.0), GHOST_X(-2.4), GHOST_Y(1.0),
+		110, 140, 160, a);
+	lineRGBA(surface, GHOST_X(-3.4), GHOST_Y(-0.6), GHOST_X(3.4), GHOST_Y(-0.3), 190, 215, 225, a);
+	thickLineRGBA(surface, GHOST_X(3.4), GHOST_Y(-0.3), GHOST_X(4.8), GHOST_Y(-1.0), 1, 190, 215, 225, a);
+	for(int p = 0; p < 4; p++) {
+		filledCircleRGBA(surface, GHOST_X(-1.6 + p * 1.1), GHOST_Y(0.2), 1, 170, 255, 220, a);
+	}
+	static const double mast_u[3] = { -1.8, 0.2, 2.0 };
+	static const double mast_h[3] = { 3.4, 4.4, 3.4 };
+	for(int m = 0; m < 3; m++) {
+		thickLineRGBA(surface, GHOST_X(mast_u[m]), GHOST_Y(-0.4), GHOST_X(mast_u[m]), GHOST_Y(-mast_h[m]), 1,
+			190, 215, 225, a);
+		for(int sail = 0; sail < 2; sail++) {
+			double top = -mast_h[m] + 0.3 + sail * mast_h[m] * 0.45, bottom = top + mast_h[m] * 0.4;
+			Uint8 sa = weapon_alpha(alpha * 0.4 * flicker);
+			filledTrigonRGBA(surface, GHOST_X(mast_u[m]), GHOST_Y(top), GHOST_X(mast_u[m]), GHOST_Y(bottom),
+				GHOST_X(mast_u[m] + 1.3), GHOST_Y((top + bottom) / 2.0), 200, 215, 230, sa);
+		}
+	}
+	weapon_glow(surface, GHOST_X(-3.2), GHOST_Y(-0.9), 2.0, lantern, alpha * 1.5 * flicker);
+	for(int puff = 0; puff < 6; puff++) {
+		double age = fmod(phase / 2200.0 + puff / 6.0, 1.0);
+		filledCircleRGBA(surface, GHOST_X(-3.4 - age * 4.0), GHOST_Y(0.6 - age * 0.6), (int)(size * (0.2 + 0.4 * age)),
+			200, 215, 225, weapon_alpha(alpha * 0.35 * (1.0 - age)));
+	}
+	#undef GHOST_X
+	#undef GHOST_Y
+}
+
+// Paper airplanes glide across the sky in a loose group, banking as they go.
+static void sky_event_65(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int plane = 0; plane < 5; plane++) {
+		double bank = sin(phase / 700.0 + plane * 1.3);
+		int px = x - direction * (plane * size * 3 + (plane % 2) * size);
+		int py = y + (int)(sin(phase / 900.0 + plane * 2.1) * size * 1.5) + plane * size;
+		int nose_x = px + direction * size, tail_x = px - direction * size;
+		int wing = (int)(size * (0.5 + 0.35 * fabs(bank)));
+		int fold = (int)(bank * size * 0.25);
+		filledTrigonRGBA(surface, nose_x, py, tail_x, py - wing, tail_x, py + fold, 238, 240, 244, alpha);
+		filledTrigonRGBA(surface, nose_x, py, tail_x, py + wing, tail_x, py + fold, 188, 196, 212, alpha);
+		lineRGBA(surface, nose_x, py, tail_x, py + fold, 110, 120, 140, alpha);
+		for(int dot = 1; dot <= 5; dot++) {
+			pixelRGBA(surface, tail_x - direction * dot * size / 2, py + fold, 220, 228, 240,
+				(Uint8)(alpha * (1.0 - dot / 6.0)));
+		}
+	}
+}
+
+// Soap bubbles drift by: thin iridescent rings, each with a bright glint.
+static void sky_event_66(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int bubble = 0; bubble < 8; bubble++) {
+		int r = size * (4 + bubble % 3) / 6 + 3;
+		int bx = x - direction * bubble * size * 3 / 2 + (int)(sin(phase / 800.0 + bubble) * size);
+		int by = y + bubble * size / 2 + (int)(sin(phase / 600.0 + bubble * 1.7) * size);
+		circleRGBA(surface, bx, by, r, 255, 140, 220, (Uint8)(alpha * 0.55));
+		circleRGBA(surface, bx, by, r - 1, 120, 230, 255, (Uint8)(alpha * 0.45));
+		circleRGBA(surface, bx, by, r - 2, 255, 240, 140, (Uint8)(alpha * 0.25));
+		filledCircleRGBA(surface, bx, by, r - 2, 200, 220, 255, (Uint8)(alpha * 0.08));
+		filledCircleRGBA(surface, bx - r / 3, by - r / 3, r / 6 + 1, 255, 255, 255, alpha);
+	}
+}
+
+// A big banded ringed planet slides slowly across the sky.
+static void sky_event_67(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	int r = size * 2;
+	int ring_w = r * 22 / 10, ring_h = r * 6 / 10;
+	ellipseRGBA(surface, x, y, ring_w, ring_h, 210, 190, 150, (Uint8)(alpha * 0.55));
+	ellipseRGBA(surface, x, y, ring_w - 3, ring_h - 1, 190, 170, 130, (Uint8)(alpha * 0.4));
+	ellipseRGBA(surface, x, y, ring_w * 8 / 10, ring_h * 8 / 10, 220, 200, 160, (Uint8)(alpha * 0.35));
+	filledCircleRGBA(surface, x, y, r, 150, 118, 92, alpha);
+	for(int band = -3; band <= 3; band++) {
+		int by = y + band * r / 4;
+		double dy = (double)(by - y) / r;
+		int half = (int)(r * sqrt(1.0 - dy * dy));
+		lineRGBA(surface, x - half, by, x + half, by, band % 2 ? 190 : 120, band % 2 ? 150 : 92, band % 2 ? 110 : 70,
+			(Uint8)(alpha * 0.6));
+	}
+	filledCircleRGBA(surface, x - r / 3, y - r / 3, r / 2, 255, 235, 200, (Uint8)(alpha * 0.12));
+	for(int step = 0; step < 40; step++) {
+		double a0 = SCENE_PI * step / 40.0, a1 = SCENE_PI * (step + 1) / 40.0;
+		lineRGBA(surface, x + (int)(cos(a0) * ring_w), y + (int)(sin(a0) * ring_h),
+			x + (int)(cos(a1) * ring_w), y + (int)(sin(a1) * ring_h), 215, 195, 155, (Uint8)(alpha * 0.8));
+	}
+}
+
+// A constellation draws itself: stars light up and thin lines join them one by one.
+static void sky_event_68(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const double pts[7][2] = { { -3, 0 }, { -1.5, -1.5 }, { 0, -0.4 }, { 1.8, -1.8 }, { 3, 0.3 }, { 1.4, 1.6 }, { -0.8, 1.4 } };
+	static const Uint8 star[3] = { 235, 240, 255 };
+	double cx = surface->w * (0.2 + 0.6 * ((seed >> 5) % 100) / 100.0);
+	int u = size * 2;
+	double draw = smooth_step(0.1, 0.7, progress) * 6.0;
+	for(int i = 0; i < 7; i++) {
+		double sx = cx + pts[i][0] * u, sy = y + pts[i][1] * u;
+		if(i < 6) {
+			double f = fmin(draw - i, 1.0);
+			if(f > 0.0) {
+				double nx = cx + pts[i + 1][0] * u, ny = y + pts[i + 1][1] * u;
+				lineRGBA(surface, (int)sx, (int)sy, (int)(sx + (nx - sx) * f), (int)(sy + (ny - sy) * f),
+					170, 195, 235, (Uint8)(alpha * 0.7));
+			}
+		}
+		double lit = smooth_step(i * 0.08, i * 0.08 + 0.1, progress);
+		weapon_glow(surface, sx, sy, 1.5 + (i % 3) * 0.5, star, 235.0 * fade * lit * (0.7 + 0.3 * sin(phase / 300.0 + i)));
+	}
+}
+
+// NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
+
+#define SKY_CLASSIC_VARIANTS 3
+
+// The three classic sky objects: pulsing star, comet and shooting star.
+static void sky_event_classic(const SkyEvent *event, int variant) {
+	SKY_EVENT_UNPACK(event);
+	switch(variant) {
+		case 0: {
+			int pulse_radius = size + (int)(progress * size * 2);
+			filledCircleRGBA(surface, x, y, size / 2 + 1,
+				245, 233, 207, alpha);
+			circleRGBA(surface, x, y, pulse_radius,
+				162, 193, 213, (Uint8)(alpha * 0.72));
+			for(int ray = 0; ray < 8; ray++) {
+				double angle = ray * 0.78539816339 + progress;
+				int ray_x = x + (int)(cos(angle) * pulse_radius * 1.7);
+				int ray_y = y + (int)(sin(angle) * pulse_radius * 1.7);
+				thickLineRGBA(surface, x, y, ray_x, ray_y, 1,
+					180, 203, 220, (Uint8)(alpha * 0.35));
 			}
 			break;
 		}
+		case 1: {
+			int tail_x = x - direction * size * 4;
+			int tail_y = y - size;
+			thickLineRGBA(surface, x, y, tail_x, tail_y,
+				2, 194, 205, 218, alpha);
+			filledCircleRGBA(surface, x, y, size / 2,
+				227, 224, 211, alpha);
+			break;
+		}
+		default: {
+			int trail_x = x - direction * size * 4;
+			int trail_y = y + size;
+			thickLineRGBA(surface, trail_x, trail_y, x, y,
+				2, 202, 177, 130, alpha);
+			filledCircleRGBA(surface, x, y, size / 2,
+				235, 221, 185, alpha);
+			for(int fragment = 1; fragment <= 2; fragment++) {
+				int fragment_x = x - direction * size * (fragment + 1);
+				int fragment_y = y + size * fragment;
+				pixelRGBA(surface, fragment_x, fragment_y,
+					214, 193, 159, (Uint8)(alpha * 0.75));
+			}
+			break;
+		}
+	}
+}
+
+static void (*const sky_event_kinds[])(const SkyEvent *) = {
+	sky_event_23, sky_event_24, sky_event_25, sky_event_26, sky_event_27,
+	sky_event_28, sky_event_29, sky_event_30, sky_event_31, sky_event_32,
+	sky_event_33, sky_event_34, sky_event_35, sky_event_36, sky_event_37,
+	sky_event_38, sky_event_39, sky_event_40, sky_event_41, sky_event_42,
+	sky_event_43, sky_event_44, sky_event_45, sky_event_46, sky_event_47,
+	sky_event_48, sky_event_49, sky_event_50, sky_event_51, sky_event_52,
+	sky_event_53, sky_event_54, sky_event_55, sky_event_56, sky_event_57,
+	sky_event_58, sky_event_59, sky_event_60, sky_event_61, sky_event_62,
+	sky_event_63, sky_event_64,
+	sky_event_65,
+	sky_event_66,
+	sky_event_67,
+	sky_event_68,
+	// NEW_SKY_KINDS_ABOVE
+};
+static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
+	== RARE_SKY_KINDS, "RARE_SKY_KINDS does not match sky_event_kinds[]");
+
+static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+	EffectWindow window;
+	if(!effect_window(&EFFECT_RARE_SKY, ticks, &window)) return;
+
+	SkyEvent event;
+	event.surface = surface;
+	event.ticks = ticks;
+	event.scale = scale;
+	event.seed = window.seed;
+	event.phase = window.phase;
+	event.progress = window.progress;
+	event.fade = window.fade;
+	event.direction = (window.seed & 1) ? 1 : -1;
+	event.y = surface->h * (8 + (window.seed >> 8) % 39) / 100;
+	int margin = scale / 12;
+	event.x = event.direction > 0
+		? -margin + (int)(window.progress * (surface->w + 2.0 * margin))
+		: surface->w + margin - (int)(window.progress * (surface->w + 2.0 * margin));
+	event.size = scale / (26 + (window.seed >> 16) % 24);
+	if(event.size < 4) event.size = 4;
+	event.alpha = (Uint8)(150 * window.fade);
+
+	// Kinds >= RARE_SKY_CLASSIC_KINDS are thinned out by rare_sky_accept().
+	int kind = effect_kind(&EFFECT_RARE_SKY, (window.seed >> 24) % RARE_SKY_KINDS);
+	if(kind < RARE_SKY_CLASSIC_KINDS) {
+		sky_event_classic(&event, kind % SKY_CLASSIC_VARIANTS);
+	} else {
+		sky_event_kinds[kind - RARE_SKY_CLASSIC_KINDS](&event);
 	}
 }
 
 static void render_foreground_event(SDL_Surface *surface, Uint32 ticks, int scale) {
-	// Deliberately empty. This used to spawn drifting motes in front of the
-	// clock, which read as fireflies and pulled the eye away from the time.
-	// The backdrop already carries enough movement.
-	(void)surface;
-	(void)ticks;
-	(void)scale;
+	EffectWindow window;
+	if(!effect_window(&EFFECT_FOREGROUND, ticks, &window)) return;
+	Uint32 seed = window.seed;
+	int kind = effect_kind(&EFFECT_FOREGROUND, seed % 4);
+	double progress = window.progress;
+	double fade = window.fade;
+	int count = 24 + kind * 7;
+	for(int particle = 0; particle < count; particle++) {
+		Uint32 particle_seed = (Uint32)particle * 1664525u + seed;
+		int start_x = particle_seed % surface->w;
+		int start_y = (particle_seed >> 9) % surface->h;
+		int speed = 3 + (particle_seed >> 20) % 8;
+		int drift = (int)(ticks / (30 + speed * 7));
+		int particle_x = (start_x + drift + surface->w) % surface->w;
+		int particle_y = start_y;
+		Uint8 red = 191, green = 204, blue = 215;
+		Uint8 alpha = (Uint8)((18 + (particle_seed >> 24) % 32) * fade);
+		if(kind == 0) {
+			particle_y = (start_y + drift * 2) % surface->h;
+			particle_x += (int)(sin(ticks / 500.0 + particle) * scale * 0.02);
+			red = 207;
+			green = (Uint8)(91 + particle % 5 * 18);
+			blue = 54;
+			thickLineRGBA(surface, particle_x, particle_y,
+				particle_x - 2, particle_y + 4, 1, red, green, blue, alpha);
+		} else if(kind == 1) {
+			particle_y = (start_y - drift + surface->h) % surface->h;
+			red = 245;
+			green = (Uint8)(112 + particle % 4 * 18);
+			blue = 67;
+			filledCircleRGBA(surface, particle_x, particle_y, 1 + particle % 2,
+				red, green, blue, alpha);
+		} else if(kind == 2) {
+			particle_y = (start_y + drift * 3) % surface->h;
+			red = 167;
+			green = 213;
+			blue = 231;
+			filledCircleRGBA(surface, particle_x, particle_y, 1 + particle % 2,
+				red, green, blue, alpha);
+		} else {
+			particle_y = surface->h * (28 + particle_seed % 58) / 100
+				- (int)(progress * scale * (0.025 + particle % 3 * 0.01));
+			int radius = scale / 230;
+			if(radius < 2) radius = 2;
+			filledCircleRGBA(surface, particle_x, particle_y, radius,
+				153, 167, 180, (Uint8)(alpha * 0.3));
+		}
+	}
 }
 
 static void render_rare_screen_fade(SDL_Surface *surface, Uint32 ticks) {
-	const Uint32 cycle = 300000;
-	const Uint32 duration = 12000;
-	Uint32 slot = ticks / cycle;
-	Uint32 phase = ticks % cycle;
-	Uint32 seed = slot * 2654435761u + 0x9e3779b9u;
-	if(seed % 4 != 0) return;
-	Uint32 start = (seed >> 16) % (cycle - duration);
-	if(phase < start || phase >= start + duration) return;
-
-	Uint32 event_phase = phase - start;
-	double fade = smooth_step(0.0, 1800.0, event_phase)
-		* (1.0 - smooth_step(duration - 1800.0, duration, event_phase));
-	Uint8 color = (seed & 0x80) ? 255 : 0;
+	EffectWindow window;
+	if(!effect_window(&EFFECT_SCREEN_FADE, ticks, &window)) return;
+	Uint8 color = (window.seed & 0x80) ? 255 : 0;
 	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-		color, color, color, (Uint8)(255 * fade));
+		color, color, color, (Uint8)(255 * window.fade));
 }
 
 void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
@@ -2104,67 +5682,24 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 						blue = blend_channel(blue, nebula_blue, light);
 					}
 
-					// Cloud. The band centre wanders with x and the envelope is
-					// a smooth falloff rather than a linear tent: a fixed centre
-					// with a linear envelope draws a bright horizontal stripe
-					// straight across the frame, which reads as a smear.
 					double cloud_mass = smooth_noise(nx * 4.2 + drift * 0.42, ny * 6.0 + drift * 0.08, 631) * 0.62
 						+ smooth_noise(nx * 13.0 + drift * 0.7, ny * 19.0 - drift * 0.16, 719) * 0.38;
-					double cloud_band = 0.48
-						+ (smooth_noise(nx * 2.1 + drift * 0.10, 2.0, 811) - 0.5) * 0.20
-						+ (smooth_noise(nx * 5.7, 7.0, 857) - 0.5) * 0.07;
-					double cloud_span = 0.13
-						+ smooth_noise(nx * 3.3, 9.0, 883) * 0.09;
-					double cloud_offset = (ny - cloud_band) / cloud_span;
-					// Gaussian-ish: no corner where the envelope meets zero.
-					double cloud_envelope = exp(-cloud_offset * cloud_offset * 2.2);
-					double cloud_density = (cloud_mass - 0.52) * 2.6 * cloud_envelope;
+					double cloud_band = 0.48 + 0.035 * (smooth_noise(nx * 3.0 + drift * 0.14, 2.0, 811) - 0.5);
+					double cloud_envelope = 1.0 - fabs(ny - cloud_band) / 0.14;
+					double cloud_density = cloud_envelope > 0.0
+						? (cloud_mass - 0.50) * 3.2 * cloud_envelope : 0.0;
 					if(cloud_density > 0.0) {
-						// Dimmer than the sky's own highlights, so the cloud
-						// reads as a thinning of the dark rather than a light.
-						double amount = cloud_density * 0.30;
-						red = blend_channel(red, (Uint8)(74 + 26 * fine), amount);
-						green = blend_channel(green, (Uint8)(86 + 24 * fine), amount);
-						blue = blend_channel(blue, (Uint8)(116 + 30 * fine), amount);
+						double amount = cloud_density * 0.42;
+						red = blend_channel(red, (Uint8)(123 + 32 * fine), amount);
+						green = blend_channel(green, (Uint8)(139 + 29 * fine), amount);
+						blue = blend_channel(blue, (Uint8)(174 + 34 * fine), amount);
 					}
 				}
 
-				// Ridge lines. Smooth noise gives rounded humps, and a row of
-				// rounded humps reads as a line of bubbles. Ridged noise
-				// (1 - |2n-1|) folds the field at its midpoint, producing the
-				// sharp crests and long flanks a real skyline has.
-				//
-				// Two things stop it becoming a comb of identical cones: the
-				// frequencies stay low (a distant range has a handful of major
-				// peaks, not fifty), and a separate low-frequency field scales
-				// the amplitude so some peaks tower and others barely rise.
-				double far_amp = 0.35 + 0.65 * smooth_noise(nx * 2.4, 0.5, 881);
-				double middle_amp = 0.35 + 0.65 * smooth_noise(nx * 2.0 + 5.0, 1.5, 887);
-				double near_amp = 0.35 + 0.65 * smooth_noise(nx * 1.7 - 2.0, 2.5, 893);
-				double far_ridge = far_amp * (
-					ridged_noise(nx * 5.2, 1.0, 907) * 0.66
-					+ ridged_noise(nx * 12.5, 4.0, 941) * 0.24
-					+ ridged_noise(nx * 28.0, 8.0, 967) * 0.10);
-				double middle_ridge = middle_amp * (
-					ridged_noise(nx * 6.4 + 8.0, 2.0, 1013) * 0.64
-					+ ridged_noise(nx * 15.9, 5.0, 1051) * 0.25
-					+ ridged_noise(nx * 34.0, 9.0, 1069) * 0.11);
-				double near_ridge = near_amp * (
-					ridged_noise(nx * 7.6 - 3.0, 3.0, 1123) * 0.62
-					+ ridged_noise(nx * 19.4, 6.0, 1153) * 0.26
-					+ ridged_noise(nx * 41.0, 11.0, 1171) * 0.12);
-				double far_edge = 0.68 + (far_ridge - 0.34) * 0.30;
-				double middle_edge = 0.79 + (middle_ridge - 0.34) * 0.25;
-				double near_edge = 0.88 + (near_ridge - 0.34) * 0.19;
-				// Two octaves of ground texture. A single low-frequency field
-				// stretched over the lower third reads as a flat slab, so the
-				// fine octave carries the visible grain.
-				double ground_coarse = smooth_noise(nx * 22.0, ny * 26.0, 1237);
-				double ground_fine = smooth_noise(nx * 90.0, ny * 110.0, 1291);
-				double ground_noise = ground_coarse * 0.55 + ground_fine * 0.45;
-				// Depth: the ground darkens toward the bottom of the frame, so
-				// the foreground recedes instead of ending in a flat wall.
-				double depth = smooth_step(0.62, 1.0, ny);
+				double far_edge = ridge_height(RIDGE_FAR, nx);
+				double middle_edge = ridge_height(RIDGE_MIDDLE, nx);
+				double near_edge = ridge_height(RIDGE_NEAR, nx);
+				double ground_noise = smooth_noise(nx * 28.0, ny * 32.0, 1237);
 				double far_cover = smooth_step(far_edge - 0.014, far_edge + 0.014, ny);
 				red = blend_channel(red, (Uint8)(35 + 17 * ground_noise), far_cover);
 				green = blend_channel(green, (Uint8)(44 + 21 * ground_noise), far_cover);
@@ -2177,12 +5712,6 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 				red = blend_channel(red, (Uint8)(9 + 8 * ground_noise), near_cover);
 				green = blend_channel(green, (Uint8)(17 + 10 * ground_noise), near_cover);
 				blue = blend_channel(blue, (Uint8)(25 + 12 * ground_noise), near_cover);
-				// Apply the depth falloff only where ground is present, so the
-				// sky is untouched.
-				double ground_present = far_cover;
-				red = blend_channel(red, (Uint8)(red * 0.45), depth * ground_present);
-				green = blend_channel(green, (Uint8)(green * 0.45), depth * ground_present);
-				blue = blend_channel(blue, (Uint8)(blue * 0.50), depth * ground_present);
 
 				Uint32 pixel = SDL_MapRGB(surface->format, red, green, blue);
 				int block_width = surface->w - x < 4 ? surface->w - x : 4;
@@ -2236,8 +5765,10 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		+ weather.lightning * 12 + weather.aurora * 12 + weather.sunshine * 33);
 	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
 		(Uint8)tint_red, (Uint8)tint_green, (Uint8)tint_blue, tint_alpha);
-	render_fullscreen_event(surface, ticks, scale);
+	render_fullscreen_event(surface, ticks, scale, &weather);
 	render_weather_effects(surface, ticks, &weather, scale);
+	render_alien_weather(surface, ticks, scale);
+	render_world_jump(surface, ticks, scale);
 	if(weather.sunshine > 0.01) {
 		int sun_x = surface->w * 3 / 4;
 		int sun_y = surface->h * 27 / 100;
@@ -2267,42 +5798,51 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 	static const int bird_group_x[] = { 8, 36, 65, 91 };
 	static const int bird_group_y[] = { 29, 43, 34, 48 };
 	for(size_t group = 0; group < sizeof(bird_group_x) / sizeof(bird_group_x[0]); group++) {
-			int bird_span = scale / 95;
-			if(bird_span < 3) bird_span = 3;
-			int formation_width = 27 * bird_span;
-			int exit_margin = bird_span * 2;
-			int route_length = surface->w + formation_width + exit_margin * 2;
-			int travel = (int)((Uint64)ticks * route_length / 90000);
-			int route_start = route_length * bird_group_x[group] / 100;
-			int group_x = (route_start + travel) % route_length - exit_margin;
-			int group_y = surface->h * bird_group_y[group] / 100
-				+ (int)(sin(ticks / 1700.0 + group * 2.1) * scale * 0.008);
-			// A loose, uneven V. Offsets are hand-tuned rather than generated so
-			// the formation never looks mechanically spaced.
-			static const int formation_x[] = { 0, -3, -6, -9, -12, -15, -18, -21 };
-			static const int formation_y[] = { 0, 3, -2, 5, -5, 1, 6, -3 };
-			for(int bird = 0; bird < 8; bird++) {
-				int bird_x = group_x + formation_x[bird] * bird_span;
-				int bird_y = group_y + formation_y[bird] * bird_span
-					+ (int)(sin(ticks / (900.0 + bird * 130) + group * 1.8 + bird * 2.3)
-						* bird_span * 0.5);
-				// Each bird beats at its own rate and phase, so the flock
-				// ripples instead of pulsing in unison.
-				double beat = sin(ticks / (150.0 + bird * 11) + group * 1.8 + bird * 2.1);
-				int flap = (int)((0.5 + 0.5 * beat) * (bird_span + 1));
-				int bird_size = bird_span - (bird % 3 == 0 ? 1 : 0);
-				draw_bird(surface, bird_x, bird_y, bird_size, flap);
-			}
+		int bird_span = scale / 85;
+		if(bird_span < 4) bird_span = 4;
+		int formation_width = 27 * bird_span;
+		int exit_margin = bird_span * 2;
+		int route_length = surface->w + formation_width + exit_margin * 2;
+		int travel = (int)((Uint64)ticks * route_length / 90000);
+		int route_start = route_length * bird_group_x[group] / 100;
+		int group_x = (route_start + travel) % route_length - exit_margin;
+		int group_y = surface->h * bird_group_y[group] / 100
+			+ (int)(sin(ticks / 1700.0 + group * 2.1) * scale * 0.008);
+		static const int formation_x[] = { 0, -3, -6, -9, -12, -15, -18, -21, -24, -27 };
+		static const int formation_y[] = { 0, 3, -3, 5, -6, 1, 7, -4, 4, -1 };
+		for(int bird = 0; bird < 10; bird++) {
+			int bird_x = group_x + formation_x[bird] * bird_span;
+			int bird_y = group_y + formation_y[bird] * bird_span;
+			int flap = (int)((0.5 + 0.5 * sin(ticks / 170.0 + group * 1.8 + bird))
+				* (bird_span + 1));
+			draw_bird(surface, bird_x, bird_y, bird_span, flap);
 		}
+	}
 
+	// Battles, flyby and rare sky events never overlap (see GROUP_SKY).
+	render_fleet_battle(surface, ticks, scale);
+	render_background_battle(surface, ticks, scale);
+	render_battle_flyby(surface, ticks, scale);
+	render_dogfight_effect(surface, ticks, scale);
 	render_rare_sky_event(surface, ticks, scale);
 	render_long_scene(surface, ticks, scale);
+	render_hill_event(surface, ticks, scale);
+
+	int autumn = weather.season[2] * 16;
+	for(int i = 0; i < autumn; i++) {
+		unsigned int seed = (unsigned int)i * 2246822519u + 3266489917u;
+		int x = (seed + ticks / (32 + i % 5 * 9)) % surface->w;
+		int y = (seed / 11 + ticks * (2 + i % 3) / 55) % surface->h;
+		int sway = (int)(sin(ticks / 370.0 + i * 1.7) * scale * 0.012);
+		Uint8 alpha = (Uint8)(55 + 90 * weather.season[2]);
+		thickLineRGBA(surface, x, y, x + sway + 2, y + 3,
+			2, (Uint8)(154 + i % 3 * 20), (Uint8)(76 + i % 4 * 13), 43, alpha);
+	}
 
 	unsigned int rain_seed = 0x7f4a7c15u;
 	double storm_strength = smooth_step(0.25, 0.75, weather.lightning);
-	double rain_share = 1.0 - weather.snow * 0.45;
 	int rain_count = (int)(surface->w * surface->h / 1650.0 * weather.rain
-		* (1.0 + storm_strength * 2.0) * rain_share);
+		* (1.0 + storm_strength * 2.0));
 	if(rain_count > MAX_RAIN_DROPS) rain_count = MAX_RAIN_DROPS;
 	for(int i = 0; i < rain_count; i++) {
 		rain_seed = rain_seed * 1664525u + 1013904223u;
@@ -2314,15 +5854,15 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		double travel = ticks * speed / 150.0;
 		int y = (start_y + (int)travel) % (surface->h + length);
 		int x = (start_x + (int)(travel * (0.16 + weather.wind * 0.22))) % surface->w;
-		int x_end = x - length / 3;
+		// The streak leans the same way the drop travels.
+		int x_end = x - (int)(length * (0.16 + weather.wind * 0.22) + 0.5);
 		int y_start = y - length;
 		Uint8 alpha = (Uint8)(38 + (rain_seed >> 16) % 48 + weather.rain * 35);
 		thickLineRGBA(surface, x, y, x_end, y_start, 1,
 			154, 174, 207, alpha);
 	}
 
-	double snow_share = 1.0 - weather.rain * 0.45;
-	int snow_count = (int)(surface->w * surface->h / 3400.0 * weather.snow * snow_share);
+	int snow_count = (int)(surface->w * surface->h / 3400.0 * weather.snow);
 	for(int i = 0; i < snow_count; i++) {
 		unsigned int seed = (unsigned int)i * 1664525u + 1013904223u;
 		int x = (seed + ticks / (12 + i % 7 * 4)) % surface->w;
@@ -2330,14 +5870,9 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 		filledCircleRGBA(surface, x, y, i % 9 == 0 ? 2 : 1,
 			202, 216, 231, (Uint8)(85 + weather.snow * 80));
 	}
-	// Only blend the warm wash when there is actually warmth to add. In most
-	// weather presets warm_blend is zero, and a full-screen alpha blend of
-	// 2M pixels is not free on a Pi 4.
 	Uint8 warm_alpha = (Uint8)(warm_blend * (75 + weather.sunshine * 15));
-	if(warm_alpha > 0) {
-		boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
-			warm_red, warm_green, warm_blue, warm_alpha);
-	}
+	boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1,
+		warm_red, warm_green, warm_blue, warm_alpha);
 }
 
 
@@ -2345,23 +5880,15 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 void blit_digits(SDL_Surface *surface, SDL_Rect *rect, int spc, char digits[], SDL_Color color) {
 	SDL_Surface *glyph;
 	SDL_Rect coords;
-	// The cached glyphs are rendered at full FONT_COLOR. The flip animation
-	// passes a dimmed color for the scaling half, so render those on the fly.
-	bool use_cache = color.r == FONT_COLOR.r && color.g == FONT_COLOR.g
-		&& color.b == FONT_COLOR.b;
 
 	if(digits[1]) {
 		int gap = spc + spc / 2;
-		SDL_Surface *first_glyph = use_cache ? digit_glyphs[digits[0] - '0']
-			: TTF_RenderGlyph_Blended(font_time, digits[0], color);
-		SDL_Surface *second_glyph = use_cache ? digit_glyphs[digits[1] - '0']
-			: TTF_RenderGlyph_Blended(font_time, digits[1], color);
+		SDL_Surface *first_glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
+		SDL_Surface *second_glyph = TTF_RenderGlyph_Blended(font_time, digits[1], color);
 		if(!first_glyph || !second_glyph) {
 			fprintf(stderr, "Unable to render clock digits: %s\n", TTF_GetError());
-			if(!use_cache) {
-				if(first_glyph) SDL_FreeSurface(first_glyph);
-				if(second_glyph) SDL_FreeSurface(second_glyph);
-			}
+			if(first_glyph) SDL_FreeSurface(first_glyph);
+			if(second_glyph) SDL_FreeSurface(second_glyph);
 			return;
 		}
 		int total_width = first_glyph->w + gap + second_glyph->w;
@@ -2369,24 +5896,17 @@ void blit_digits(SDL_Surface *surface, SDL_Rect *rect, int spc, char digits[], S
 		coords.y = rect->y + (rect->h - first_glyph->h) / 2;
 		SDL_BlitSurface(first_glyph, 0, surface, &coords);
 		coords.x += first_glyph->w + gap;
+		SDL_FreeSurface(first_glyph);
 		coords.y = rect->y + (rect->h - second_glyph->h) / 2;
 		SDL_BlitSurface(second_glyph, 0, surface, &coords);
-		if(!use_cache) {
-			SDL_FreeSurface(first_glyph);
-			SDL_FreeSurface(second_glyph);
-		}
+		SDL_FreeSurface(second_glyph);
 	} else {
 		// single digit
-		glyph = use_cache ? digit_glyphs[digits[0] - '0']
-			: TTF_RenderGlyph_Blended(font_time, digits[0], color);
-		if(!glyph) {
-			fprintf(stderr, "Unable to render clock digits: %s\n", TTF_GetError());
-			return;
-		}
+		glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
 		coords.x = rect->x + (rect->w - glyph->w) / 2;
 		coords.y = rect->y + (rect->h - glyph->h) / 2;
 		SDL_BlitSurface(glyph, 0, surface, &coords);
-		if(!use_cache) SDL_FreeSurface(glyph);
+		SDL_FreeSurface(glyph);
 	}
 }
 
@@ -2488,6 +6008,10 @@ void render_digits(SDL_Surface *surface, SDL_Rect *background, char digits[], ch
 	SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 0x35, 0x3a, 0x49));
 }
 
+// Backdrop picture reused by the frames of one flip while an overlay is showing.
+static SDL_Surface *flip_backdrop;
+static bool flip_backdrop_valid = false;
+
 void render_clock(int maxsteps, int step, bool ambient_frame) {
 	static Uint32 last_profile_report;
 	char buffer[3], buffer2[3];
@@ -2514,45 +6038,75 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 		burnin_y = new_burnin_y;
 		moved = true;
 	}
+	Uint32 now = scene_time();
+	// The screen buffer is not preserved between frames, so anything drawn over
+	// the cards (foreground particles, screen fades) must start from a freshly
+	// drawn backdrop, or its alpha would pile up on the previous frame.
+	bool overlay_active = effect_is_active(&EFFECT_FOREGROUND, now)
+		|| effect_is_active(&EFFECT_SCREEN_FADE, now);
+	bool backdrop_redrawn = moved || ambient_frame || overlay_active;
 	if(moved || ambient_frame) {
 		Uint32 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
-		render_backdrop(screen, SDL_GetTicks());
+		render_backdrop(screen, now);
 		if(profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
+		flip_backdrop_valid = false;
+	} else if(overlay_active) {
+		// Flip frame with an overlay: render the backdrop once, then reuse that
+		// picture for the rest of the flip so frames stay cheap.
+		if(!(flip_backdrop_valid && flip_backdrop
+			&& SDL_BlitSurface(flip_backdrop, NULL, screen, NULL) == 0)) {
+			Uint32 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
+			render_backdrop(screen, now);
+			if(profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
+			if(flip_backdrop && (flip_backdrop->w != screen->w || flip_backdrop->h != screen->h)) {
+				SDL_FreeSurface(flip_backdrop);
+				flip_backdrop = NULL;
+			}
+			if(!flip_backdrop) {
+				flip_backdrop = SDL_ConvertSurface(screen, screen->format, SDL_SWSURFACE);
+				flip_backdrop_valid = flip_backdrop != NULL;
+			} else {
+				flip_backdrop_valid = SDL_BlitSurface(screen, NULL, flip_backdrop, NULL) == 0;
+			}
+		}
 	}
 	bool time_changed = _time->tm_hour != past_h || _time->tm_min != past_m;
-	bool redraw = ambient_frame || (moved && !time_changed);
+	bool redraw = ambient_frame || (backdrop_redrawn && !time_changed);
 	int render_steps = redraw ? 20 : maxsteps;
 	int render_step = redraw ? 19 : step;
+	bool card_drawn[2] = { false, false };
 
 	// draw hours
-	if(_time->tm_hour != past_h || redraw || moved) {
+	if(_time->tm_hour != past_h || backdrop_redrawn) {
 		int h = twentyfourh ? _time->tm_hour : (_time->tm_hour + 11) % 12 + 1;
 		// past_h is stored in 24-hour form; convert it the same way as h
 		// so the flip animation shows the previous 12-hour value.
 		int prev_h = twentyfourh ? past_h : (past_h + 11) % 12 + 1;
-		int hour_steps = render_steps;
-		int hour_step = render_step;
-		if(moved && _time->tm_hour == past_h) {
-			hour_steps = 20;
-			hour_step = 19;
-		}
+		// A card the backdrop just painted over is redrawn as it is, not mid-flip.
+		bool hour_static = backdrop_redrawn && (redraw || _time->tm_hour == past_h);
+		int hour_steps = hour_static ? 20 : render_steps;
+		int hour_step = hour_static ? 19 : render_step;
 		if(leadingzero) {
 			snprintf(buffer, 3, "%02d", h);
-			snprintf(buffer2, 3, "%02d", redraw ? h : prev_h);
+			snprintf(buffer2, 3, "%02d", hour_static ? h : prev_h);
 		} else {
 			snprintf(buffer, 3, "%d", h);
-			snprintf(buffer2, 3, "%d", redraw ? h : prev_h);
+			snprintf(buffer2, 3, "%d", hour_static ? h : prev_h);
 		}
 		render_digits(screen, &hourBackground, buffer, buffer2, hour_steps, hour_step);
 		// draw am/pm
 		if(!twentyfourh) render_ampm(screen, &hourBackground, _time->tm_hour >= 12);
+		card_drawn[0] = true;
 	}
 
 	// draw minutes
-	if(_time->tm_min != past_m || redraw) {
+	if(_time->tm_min != past_m || backdrop_redrawn) {
+		bool min_static = backdrop_redrawn && (redraw || _time->tm_min == past_m);
 		snprintf(buffer, 3, "%02d", _time->tm_min);
-		snprintf(buffer2, 3, "%02d", redraw ? _time->tm_min : past_m);
-		render_digits(screen, &minBackground, buffer, buffer2, render_steps, render_step);
+		snprintf(buffer2, 3, "%02d", min_static ? _time->tm_min : past_m);
+		render_digits(screen, &minBackground, buffer, buffer2,
+			min_static ? 20 : render_steps, min_static ? 19 : render_step);
+		card_drawn[1] = true;
 	}
 
 	if(_time->tm_yday != date_surface_yday) {
@@ -2568,7 +6122,7 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			date_surface_yday = _time->tm_yday;
 		}
 	}
-	if((redraw || moved || _time->tm_yday != past_yday)
+	if((backdrop_redrawn || _time->tm_yday != past_yday)
 		&& date_surface_cache && date_surface_yday == _time->tm_yday) {
 		SDL_Rect date_coords;
 		date_coords.x = (screen->w - date_surface_cache->w) / 2 + burnin_x;
@@ -2577,10 +6131,12 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 		past_yday = _time->tm_yday;
 	}
 
-	SceneWeather weather = get_scene_weather(SDL_GetTicks());
+	SceneWeather weather = get_scene_weather(now);
 	SDL_Rect *clock_cards[] = { &hourBackground, &minBackground };
 	for(size_t card_index = 0; card_index < sizeof(clock_cards) / sizeof(clock_cards[0]); card_index++) {
 		SDL_Rect *card = clock_cards[card_index];
+		// Only weather over cards drawn this frame, or it would build up on stale ones.
+		if(!card_drawn[card_index]) continue;
 		SDL_SetClipRect(screen, card);
 		int drops = (int)(card->w / 42.0 * weather.rain);
 		for(int i = 0; i < drops; i++) {
@@ -2589,7 +6145,7 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			int length = 4 + (seed >> 24) % 7;
 			int speed = 7 + (seed >> 12) % 7;
 			int drop_y = card->y
-				+ (int)((seed + SDL_GetTicks() * speed / 90) % card->h);
+				+ (int)((seed + now * speed / 90) % card->h);
 			Uint8 alpha = (Uint8)(24 + (seed >> 18) % 30);
 			thickLineRGBA(screen, drop_x, drop_y, drop_x - 1, drop_y - length,
 				1, 151, 174, 211, alpha);
@@ -2599,14 +6155,14 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			Uint32 seed = (Uint32)(i + card_index * 61) * 1664525u + 1013904223u;
 			int flake_x = card->x + seed % card->w;
 			int flake_y = card->y
-				+ (int)((seed + SDL_GetTicks() * (2 + (seed >> 16) % 4) / 80) % card->h);
+				+ (int)((seed + now * (2 + (seed >> 16) % 4) / 80) % card->h);
 			pixelRGBA(screen, flake_x, flake_y, 208, 221, 236, 110);
 		}
 	}
 	SDL_SetClipRect(screen, NULL);
 	int scene_scale = screen->h < screen->w ? screen->h : screen->w;
-	render_foreground_event(screen, SDL_GetTicks(), scene_scale);
-	render_rare_screen_fade(screen, SDL_GetTicks());
+	render_foreground_event(screen, now, scene_scale);
+	render_rare_screen_fade(screen, now);
 
 	// flip backbuffer
 	SDL_Flip(screen);
@@ -2664,10 +6220,30 @@ Uint32 update_time(Uint32 interval, void *param) {
 	return interval;
 }
 
+// Returns the value that follows option argv[*i] and advances *i, or NULL (with a message) if it is missing.
+static const char *option_value(int argc, char **argv, int *i) {
+	if(*i + 1 >= argc) {
+		fprintf(stderr, "Option %s needs a value\n", argv[*i]);
+		return NULL;
+	}
+	return argv[++*i];
+}
+
+static bool parse_int_in_range(const char *text, long min, long max, long *value) {
+	char *end = NULL;
+	errno = 0;
+	long parsed = strtol(text, &end, 0);
+	if(errno != 0 || end == text || *end != '\0' || parsed < min || parsed > max) return false;
+	*value = parsed;
+	return true;
+}
+
 int main(int argc, char** argv ) {
 	char *wid_env;
 	static char sdlwid[100];
 	double display_scale_factor = 1;
+	bool seed_given = false;
+	Uint32 scene_seed = 0;
 	profile_rendering = getenv("GLUQLO_PROFILE") != NULL;
 
 	Uint32 wid = 0;
@@ -2687,6 +6263,8 @@ int main(int argc, char** argv ) {
 			printf("  -h\t\tCustom height\n");
 			printf("  -r\t\tCustom resolution in WxH format\n");
 			printf("  -s\t\tCustom display scale factor\n");
+			printf("  -effect NAME[:KIND]\tShow only one scheduled effect, repeating (NAME 'list' lists them)\n");
+			printf("  -seed N\tStart the scenery (season, weather, effects) at a fixed point instead of a random one\n");
 			return 0;
 		} else if(strcmp("-root", argv[i]) == 0 || strcmp("-f", argv[i]) == 0 || strcmp("--fullscreen", argv[i]) == 0) {
 			fullscreen = true;
@@ -2699,30 +6277,112 @@ int main(int argc, char** argv ) {
 		} else if(strcmp("-leadingzero", argv[i]) == 0) {
 			leadingzero = true;
 		} else if(strcmp("-r", argv[i]) == 0 || strcmp("--resolution", argv[i]) == 0) {
-			char *resolution = argv[i+1];
-			char *val = strtok(resolution, "x");
-			width = atoi(val);
-			val = strtok(NULL, "x");
-			height = atoi(val);
-			i++;
-		} else if(strcmp("-w", argv[i]) == 0) {
-			width = atoi(argv[i+1]);
-			i++;
-		} else if(strcmp("-h", argv[i]) == 0) {
-			height = atoi(argv[i+1]);
-			i++;
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			int parsed_width, parsed_height;
+			char trailing;
+			if(sscanf(value, "%dx%d%c", &parsed_width, &parsed_height, &trailing) != 2
+				|| parsed_width < 1 || parsed_width > 16384
+				|| parsed_height < 1 || parsed_height > 16384) {
+				fprintf(stderr, "Invalid resolution -- %s (expected WxH, e.g. 1280x720)\n", value);
+				return 1;
+			}
+			width = parsed_width;
+			height = parsed_height;
+		} else if(strcmp("-w", argv[i]) == 0 || strcmp("-h", argv[i]) == 0) {
+			bool is_width = argv[i][1] == 'w';
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			long parsed;
+			if(!parse_int_in_range(value, 1, 16384, &parsed)) {
+				fprintf(stderr, "Invalid %s -- %s\n", is_width ? "width" : "height", value);
+				return 1;
+			}
+			if(is_width) width = (int)parsed;
+			else height = (int)parsed;
 		} else if(strcmp("-s", argv[i]) == 0) {
-			display_scale_factor = atof(argv[i+1]);
-			i++;
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			char *end = NULL;
+			double parsed = strtod(value, &end);
+			if(end == value || *end != '\0' || !(parsed > 0.0 && parsed <= 16.0)) {
+				fprintf(stderr, "Invalid scale factor -- %s (expected a number above 0)\n", value);
+				return 1;
+			}
+			display_scale_factor = parsed;
 		} else if(strcmp("-window-id", argv[i]) == 0) {
-			wid = strtol(argv[i+1], (char **) NULL, 0);
-			i++;
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			long parsed;
+			if(!parse_int_in_range(value, 1, 0xffffffffL, &parsed)) {
+				fprintf(stderr, "Invalid window id -- %s\n", value);
+				return 1;
+			}
+			wid = (Uint32)parsed;
+		} else if(strcmp("-seed", argv[i]) == 0) {
+			const char *value = option_value(argc, argv, &i);
+			if(!value) return 1;
+			long parsed;
+			if(!parse_int_in_range(value, 0, 0xffffffffL, &parsed)) {
+				fprintf(stderr, "Invalid seed -- %s (expected a number)\n", value);
+				return 1;
+			}
+			scene_seed = (Uint32)parsed;
+			seed_given = true;
+		} else if(strcmp("-effect", argv[i]) == 0) {
+			const char *effect_value = option_value(argc, argv, &i);
+			if(!effect_value) {
+				fprintf(stderr, "Try -effect list for the available effects.\n");
+				return 1;
+			}
+			char effect_arg[64];
+			snprintf(effect_arg, sizeof(effect_arg), "%s", effect_value);
+			if(strcmp(effect_arg, "list") == 0) {
+				for(size_t effect = 0; effect < effect_count; effect++) {
+					if(effect_table[effect]->kind_count > 0) {
+						printf("%s (kinds 0-%d)\n", effect_table[effect]->name,
+							effect_table[effect]->kind_count - 1);
+					} else {
+						printf("%s\n", effect_table[effect]->name);
+					}
+				}
+				return 0;
+			}
+			char *kind_separator = strchr(effect_arg, ':');
+			if(kind_separator) *kind_separator = '\0';
+			forced_effect = find_effect(effect_arg);
+			if(!forced_effect) {
+				printf("Unknown effect -- %s\n", effect_arg);
+				printf("Try -effect list for the available effects.\n");
+				return 1;
+			}
+			if(kind_separator) {
+				char *kind_end = NULL;
+				long requested = strtol(kind_separator + 1, &kind_end, 10);
+				if(kind_end == kind_separator + 1 || *kind_end != '\0'
+					|| requested < 0 || requested >= forced_effect->kind_count) {
+					if(forced_effect->kind_count > 0) {
+						printf("Effect %s takes a kind from 0 to %d\n",
+							forced_effect->name, forced_effect->kind_count - 1);
+					} else {
+						printf("Effect %s has no kinds\n", forced_effect->name);
+					}
+					return 1;
+				}
+				forced_kind = (int)requested;
+			}
 		} else {
-			printf("Invalid option -- %s\n", argv[i]);
-			printf("Try --help for more information.\n");
-			return 0;
+			fprintf(stderr, "Invalid option -- %s\n", argv[i]);
+			fprintf(stderr, "Try --help for more information.\n");
+			return 1;
 		}
 	}
+
+	// Each launch starts at a different point of the season/weather/effect schedule.
+	// -effect starts at 0 so the chosen effect begins straight away.
+	if(forced_effect) scene_offset = 0;
+	else if(seed_given) scene_offset = scene_offset_from_seed(scene_seed);
+	else scene_offset = random_scene_offset();
 
 	/* If no window argument, check environment */
 	if(wid == 0) {
@@ -2734,12 +6394,17 @@ int main(int argc, char** argv ) {
 	/* Get win attrs if we've been given a window, otherwise we'll use our own */
 	if(wid != 0) {
 		if ((display = XOpenDisplay(NULL)) != NULL) { /* Use the default display */
-			XGetWindowAttributes(display, (Window) wid, &windowAttributes);
+			Status attributes_status = XGetWindowAttributes(display, (Window) wid, &windowAttributes);
 			XCloseDisplay(display);
-			snprintf(sdlwid, 100, "SDL_WINDOWID=0x%X", wid);
-			putenv(sdlwid); /* Tell SDL to use this window */
-			width = windowAttributes.width;
-			height = windowAttributes.height;
+			if(attributes_status) {
+				snprintf(sdlwid, 100, "SDL_WINDOWID=0x%X", wid);
+				putenv(sdlwid); /* Tell SDL to use this window */
+				width = windowAttributes.width;
+				height = windowAttributes.height;
+			} else {
+				fprintf(stderr, "Unable to read attributes of window 0x%X\n", wid);
+				wid = 0;
+			}
 		}
 	}
 
@@ -2793,10 +6458,9 @@ int main(int argc, char** argv ) {
 		fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
 		return 1;
 	}
-	init_glyph_cache();
 
 	// Draw the layered forest before placing the clock over it.
-	render_backdrop(screen, SDL_GetTicks());
+	render_backdrop(screen, scene_time());
 
 	// calculate box coordinates
 	int rectsize;
@@ -2877,8 +6541,8 @@ int main(int argc, char** argv ) {
 		fprintf(stderr, "Unable to start clock timer: %s\n", SDL_GetError());
 		SDL_FreeSurface(bg);
 		if(backdrop_base) SDL_FreeSurface(backdrop_base);
+		if(flip_backdrop) SDL_FreeSurface(flip_backdrop);
 		if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
-		free_glyph_cache();
 		TTF_CloseFont(font_time);
 		TTF_CloseFont(font_mode);
 		TTF_CloseFont(font_date);
@@ -2942,8 +6606,9 @@ int main(int argc, char** argv ) {
 
 	SDL_FreeSurface(bg);
 	if(backdrop_base) SDL_FreeSurface(backdrop_base);
+	if(flip_backdrop) SDL_FreeSurface(flip_backdrop);
+	if(ship_backup) SDL_FreeSurface(ship_backup);
 	if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
-	free_glyph_cache();
 
 	TTF_CloseFont(font_time);
 	TTF_CloseFont(font_mode);

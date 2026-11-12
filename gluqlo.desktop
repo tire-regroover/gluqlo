@@ -1,7 +1,7 @@
 [Desktop Entry]
 Encoding=UTF-8
-Name=Gluqlo: Fliqlo for Linux
-Comment=SDL implementation of Fliqlo, a very popular OSX screensaver
+Name=Gluqlo L-Space
+Comment=A Fliqlo-style flip clock in a living night landscape with seasons, weather and hundreds of scenery events
 Icon=gluqlo
 Exec=/usr/libexec/xscreensaver/gluqlo -root
 TryExec=/usr/libexec/xscreensaver/gluqlo

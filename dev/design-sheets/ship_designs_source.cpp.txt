@@ -1,0 +1,180 @@
+#include "ships.h"
+
+// Candidate designs. Top-down, symmetrical, +x is forward. Each hull is given as
+// the upper half of its outline from the nose (y = 0) to the tail (y = 0); the
+// lower half is mirrored automatically.
+static void sym(SDL_Surface *s, int x, int y, int u, int d, const ShipPoint *h, int n,
+	Uint8 r, Uint8 g, Uint8 b, Uint8 a, Uint8 e) {
+	ShipPoint p[24];
+	int c = 0;
+	for(int i = 0; i < n; i++) { p[c][0] = h[i][0]; p[c][1] = h[i][1]; c++; }
+	for(int i = n - 2; i >= 1; i--) { p[c][0] = h[i][0]; p[c][1] = (signed char)-h[i][1]; c++; }
+	ship_shape(s, x, y, u, d, p, c, r, g, b, a, e);
+}
+
+#define DESIGN(name) static void name(SDL_Surface *s, int x, int y, int u, int d, \
+	Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+#define SPINE(h, n) sym(s, x, y, u, d, h, n, ship_light(r, 12), ship_light(g, 12), \
+	ship_light(b, 12), a, a / 3)
+#define RED 196, 56, 42
+
+DESIGN(dagger) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {45,0},{30,-3},{12,-5},{-4,-14},{-20,-22},{-14,-8},{-26,-5},{-28,0} };
+	static const ShipPoint spine[] = { {40,0},{18,-2},{-20,-2},{-28,0} };
+	sym(s, x, y, u, d, hull, 8, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	ship_line(s, x, y, u, d, 34, 0, 22, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -28, -3, 2, a);
+	ship_engine(s, x, y, u, d, -28, 3, 2, a);
+}
+
+DESIGN(manta) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {32,0},{20,-6},{4,-16},{-12,-30},{-20,-27},{-14,-15},{-26,-8},{-32,-4},{-32,0} };
+	static const ShipPoint spine[] = { {34,0},{10,-4},{-30,-3},{-32,0} };
+	sym(s, x, y, u, d, hull, 9, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	ship_line(s, x, y, u, d, 26, 0, 12, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -32, -3, 2, a);
+	ship_engine(s, x, y, u, d, -32, 3, 2, a);
+}
+
+DESIGN(hammerhead) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {38,0},{37,-18},{29,-19},{26,-6},{-8,-7},{-22,-12},{-30,-9},{-30,0} };
+	static const ShipPoint spine[] = { {26,0},{24,-3},{-8,-4},{-30,-3},{-30,0} };
+	sym(s, x, y, u, d, hull, 8, r, g, b, a, a / 2);
+	SPINE(spine, 5);
+	ship_line(s, x, y, u, d, 36, -15, 36, 15, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -30, -4, 2, a);
+	ship_engine(s, x, y, u, d, -30, 4, 2, a);
+}
+
+DESIGN(mandible) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {8,0},{22,-4},{38,-12},{22,-18},{2,-15},{-14,-12},{-26,-8},{-32,-3},{-32,0} };
+	static const ShipPoint spine[] = { {2,0},{0,-5},{-30,-4},{-32,0} };
+	sym(s, x, y, u, d, hull, 9, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	filledEllipseRGBA(s, ship_coord(x, u, d, 0), y, 3 * u / 10 + 2, u / 10 + 1, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -32, -3, 2, a);
+	ship_engine(s, x, y, u, d, -32, 3, 2, a);
+}
+
+DESIGN(trident) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {46,0},{24,-3},{16,-5},{30,-16},{12,-12},{-4,-9},{-24,-12},{-30,-6},{-30,0} };
+	static const ShipPoint spine[] = { {44,0},{10,-2},{-28,-2},{-30,0} };
+	sym(s, x, y, u, d, hull, 9, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	ship_line(s, x, y, u, d, 38, 0, 26, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -30, -3, 2, a);
+	ship_engine(s, x, y, u, d, -30, 3, 2, a);
+}
+
+DESIGN(scythe) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {30,0},{22,-6},{8,-16},{-8,-26},{-28,-36},{-20,-20},{-14,-10},{-28,-6},{-30,0} };
+	static const ShipPoint spine[] = { {32,0},{6,-4},{-28,-3},{-30,0} };
+	sym(s, x, y, u, d, hull, 9, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	ship_line(s, x, y, u, d, 24, 0, 10, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -30, -3, 2, a);
+	ship_engine(s, x, y, u, d, -30, 3, 2, a);
+}
+
+DESIGN(bat) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {26,0},{14,-8},{-4,-20},{-10,-31},{-16,-22},{-18,-31},{-24,-19},{-28,-25},{-30,-8},{-32,0} };
+	static const ShipPoint spine[] = { {28,0},{8,-4},{-30,-3},{-32,0} };
+	sym(s, x, y, u, d, hull, 10, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	ship_line(s, x, y, u, d, 20, 0, 8, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -32, -3, 2, a);
+	ship_engine(s, x, y, u, d, -32, 3, 2, a);
+}
+
+DESIGN(leviathan) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {52,0},{38,-4},{12,-7},{-30,-8},{-46,-5},{-50,0} };
+	static const ShipPoint spine[] = { {48,0},{12,-3},{-46,-2},{-50,0} };
+	int spike_x[4] = { 20, 4, -12, -28 };
+	int spike_h[4] = { 14, 18, 18, 14 };
+	for(int i = 0; i < 4; i++) {
+		for(int side = -1; side <= 1; side += 2) {
+			ShipPoint p[3] = { {(signed char)spike_x[i], (signed char)(side * 7)},
+				{(signed char)(spike_x[i] - 5), (signed char)(side * spike_h[i])},
+				{(signed char)(spike_x[i] - 10), (signed char)(side * 7)} };
+			ship_shape(s, x, y, u, d, p, 3, r, g, b, a, a / 2);
+		}
+	}
+	sym(s, x, y, u, d, hull, 6, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	ship_line(s, x, y, u, d, 44, 0, 30, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -50, -2, 2, a);
+	ship_engine(s, x, y, u, d, -50, 2, 2, a);
+}
+
+DESIGN(wedge) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {42,0},{-4,-16},{-30,-22},{-36,-14},{-36,0} };
+	static const ShipPoint mid[] = { {30,0},{-6,-10},{-30,-14},{-34,-8},{-34,0} };
+	static const ShipPoint top[] = { {16,0},{-8,-5},{-30,-7},{-34,-4},{-34,0} };
+	sym(s, x, y, u, d, hull, 5, r, g, b, a, a / 2);
+	sym(s, x, y, u, d, mid, 5, ship_light(r, 8), ship_light(g, 8), ship_light(b, 8), a, a / 3);
+	sym(s, x, y, u, d, top, 5, ship_light(r, 16), ship_light(g, 16), ship_light(b, 16), a, a / 3);
+	ship_line(s, x, y, u, d, 26, 0, 8, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -36, -10, 2, a);
+	ship_engine(s, x, y, u, d, -36, 0, 2, a);
+	ship_engine(s, x, y, u, d, -36, 10, 2, a);
+}
+
+DESIGN(forward_swept) {
+	ship_set_palette(&r, &g, &b);
+	static const ShipPoint hull[] = { {36,0},{12,-4},{28,-22},{6,-20},{-6,-8},{-20,-10},{-26,-4},{-26,0} };
+	static const ShipPoint spine[] = { {34,0},{10,-2},{-24,-2},{-26,0} };
+	sym(s, x, y, u, d, hull, 8, r, g, b, a, a / 2);
+	SPINE(spine, 4);
+	ship_line(s, x, y, u, d, 28, 0, 16, 0, RED, (Uint8)(a * 0.9));
+	ship_engine(s, x, y, u, d, -26, -3, 2, a);
+	ship_engine(s, x, y, u, d, -26, 3, 2, a);
+}
+
+typedef void (*Design)(SDL_Surface *, int, int, int, int, Uint8, Uint8, Uint8, Uint8);
+
+int main() {
+	static const struct { const char *name; Design draw; } designs[10] = {
+		{ "1  Dagger", dagger }, { "2  Manta", manta }, { "3  Hammerhead", hammerhead },
+		{ "4  Mandible", mandible }, { "5  Trident", trident }, { "6  Scythe", scythe },
+		{ "7  Bat", bat }, { "8  Leviathan", leviathan }, { "9  Wedge", wedge },
+		{ "10  Forward-swept", forward_swept } };
+	const int cols = 5, cell_w = 400, cell_h = 330;
+	int W = cols * cell_w, H = 2 * cell_h;
+	SDL_Surface *s = SDL_CreateRGBSurface(SDL_SWSURFACE, W, H, 32,
+		0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
+	for(int yy = 0; yy < H; yy++) {
+		int row_y = yy % cell_h;
+		SDL_Rect r = { 0, (Sint16)yy, (Uint16)W, 1 };
+		SDL_FillRect(s, &r, SDL_MapRGB(s->format, 16 + row_y / 22, 22 + row_y / 18, 46 + row_y / 12));
+	}
+	unsigned int seed = 12345;
+	for(int i = 0; i < 260; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		int sx = seed % W;
+		seed = seed * 1664525u + 1013904223u;
+		pixelRGBA(s, sx, seed % H, 205, 214, 235, 90);
+	}
+	for(int i = 0; i < 10; i++) {
+		int cx = (i % cols) * cell_w, cy = (i / cols) * cell_h;
+		vlineRGBA(s, cx, cy, cy + cell_h - 1, 70, 80, 110, 160);
+		hlineRGBA(s, cx, cx + cell_w - 1, cy, 70, 80, 110, 160);
+		stringRGBA(s, cx + 12, cy + 10, designs[i].name, 235, 235, 245, 255);
+		designs[i].draw(s, cx + cell_w / 2, cy + 125, 24, 1, 100, 147, 167, 230);
+		stringRGBA(s, cx + 12, cy + 245, "in game size:", 150, 160, 185, 255);
+		designs[i].draw(s, cx + 110, cy + 295, 10, 1, 100, 147, 167, 150);
+		designs[i].draw(s, cx + 290, cy + 295, 10, -1, 170, 126, 101, 150);
+	}
+	SDL_SaveBMP(s, "designs.bmp");
+	return 0;
+}
