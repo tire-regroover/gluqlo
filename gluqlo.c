@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 89
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 47         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 50         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -4513,6 +4513,99 @@ static void hill_shepherd(const HillEvent *event) {
 	filledEllipseRGBA(surface, (int)dx, (int)(hill_ground(event, dx) - s * 0.008), (int)(s * 0.01), (int)(s * 0.006), 14, 18, 26, alpha);
 }
 
+// An arched stone bridge over a stream; a lantern-carrying traveller crosses and the water glints beneath.
+static void hill_bridge(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = surface->w * 0.5, span = s * 0.2;
+	double ground = hill_ground(event, cx);
+	double rise = smooth_step(0.0, 0.12, event->progress) * (1.0 - smooth_step(0.94, 0.98, event->progress));
+	Uint8 alpha = weapon_alpha(236.0 * event->fade);
+	filledEllipseRGBA(surface, (int)cx, (int)(ground + s * 0.006), (int)(span * 1.2 * rise), (int)(s * 0.008 * rise) + 1, 40, 80, 110, weapon_alpha(200.0 * event->fade));
+	for(int k = 0; k < 14; k++) {
+		double gx = cx - span * 1.1 + fmod(k * 37.0 + event->t * 6.0, span * 2.2);
+		pixelRGBA(surface, (int)gx, (int)(ground + s * 0.006 + sin(k * 3.0) * 2.0), 190, 225, 245, weapon_alpha(160.0 * rise * event->fade));
+	}
+	for(int i = 0; i < 24; i++) {
+		double u0 = -1.0 + 2.0 * i / 24.0, u1 = -1.0 + 2.0 * (i + 1) / 24.0;
+		double y0 = ground - s * 0.03 * rise * (1.0 - u0 * u0), y1 = ground - s * 0.03 * rise * (1.0 - u1 * u1);
+		thickLineRGBA(surface, (int)(cx + u0 * span), (int)y0, (int)(cx + u1 * span), (int)y1, 4, 52, 56, 72, alpha);
+	}
+	for(int i = 0; i <= 8; i++) {
+		double u = -1.0 + 2.0 * i / 8.0;
+		lineRGBA(surface, (int)(cx + u * span), (int)(ground - s * 0.03 * rise * (1.0 - u * u)), (int)(cx + u * span), (int)(ground - s * 0.03 * rise * (1.0 - u * u) - s * 0.008), 30, 34, 48, alpha);
+	}
+	double u = (event->progress - 0.25) / 0.5;
+	if(u > 0.0 && u < 1.0) {
+		double px = cx + d * (-1.2 + 2.4 * u) * span;
+		double nu = (px - cx) / span;
+		double py = ground - s * 0.03 * (1.0 - fmin(1.0, nu * nu));
+		hill_walker(surface, px, py, s * 0.036, d, event->t * 5.0, true, event->fade, event->t, 0);
+	}
+}
+
+// Carved totem poles stand in a row; their eyes open one after another and glow.
+static void hill_totems(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int poles = 5;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	static const Uint8 eye[3] = { 255, 190, 90 };
+	for(int i = 0; i < poles; i++) {
+		int order = event->direction > 0 ? i : poles - 1 - i;
+		double x = surface->w * (0.1 + 0.8 * (i + 0.5) / poles);
+		double ground = hill_ground(event, x);
+		double rise = smooth_step(0.0 + i * 0.03, 0.1 + i * 0.03, event->progress);
+		double h = s * (0.07 + 0.015 * (i % 3)) * rise, w = s * 0.012;
+		double awake = smooth_step(0.2 + order * 0.08, 0.28 + order * 0.08, event->progress) * (1.0 - smooth_step(0.9, 0.97, event->progress));
+		boxRGBA(surface, (int)(x - w), (int)(ground - h), (int)(x + w), (int)ground, 54, 40, 40, alpha);
+		boxRGBA(surface, (int)(x - w), (int)(ground - h), (int)(x - w * 0.4), (int)ground, 74, 54, 50, alpha);
+		for(int face = 0; face < 3; face++) {
+			double fy = ground - h * (0.2 + 0.28 * face);
+			boxRGBA(surface, (int)(x - w), (int)(fy - w * 0.15), (int)(x + w), (int)(fy + w * 0.15), 30, 22, 24, alpha);
+			for(int side = -1; side <= 1; side += 2) {
+				weapon_glow(surface, x + side * w * 0.45, fy - w * 0.5, 1.4, eye, 235.0 * awake * event->fade * (0.8 + 0.2 * sin(event->t * 3.0 + i + face)));
+			}
+		}
+		filledTrigonRGBA(surface, (int)(x - w * 1.3), (int)(ground - h), (int)(x + w * 1.3), (int)(ground - h), (int)x, (int)(ground - h - w * 1.6), 100, 44, 46, alpha);
+	}
+}
+
+// Snowmen build themselves ball by ball, then wave their twig arms as snow drifts down around them.
+static void hill_snowmen(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int count = 4;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	for(int i = 0; i < count; i++) {
+		double x = surface->w * (0.12 + 0.76 * (i + 0.5) / count);
+		double ground = hill_ground(event, x);
+		double r = s * (0.016 + 0.003 * (i % 2));
+		double b1 = smooth_step(0.02 + i * 0.05, 0.08 + i * 0.05, event->progress);
+		double b2 = smooth_step(0.08 + i * 0.05, 0.14 + i * 0.05, event->progress);
+		double b3 = smooth_step(0.14 + i * 0.05, 0.2 + i * 0.05, event->progress);
+		filledCircleRGBA(surface, (int)x, (int)(ground - r * b1), (int)(r * b1) + 1, 224, 234, 244, alpha);
+		filledCircleRGBA(surface, (int)x, (int)(ground - r * 2.0 - r * 0.7 * b2), (int)(r * 0.75 * b2) + 1, 232, 240, 248, alpha);
+		double hy = ground - r * 2.0 - r * 1.4 - r * 0.5 * b3;
+		filledCircleRGBA(surface, (int)x, (int)hy, (int)(r * 0.55 * b3) + 1, 238, 244, 250, alpha);
+		if(b3 < 0.9) continue;
+		filledTrigonRGBA(surface, (int)(x + 1), (int)hy, (int)(x + r * 0.9), (int)(hy + 1), (int)x, (int)(hy + 2), 230, 120, 50, alpha);
+		pixelRGBA(surface, (int)(x - r * 0.2), (int)(hy - r * 0.15), 20, 24, 32, alpha);
+		pixelRGBA(surface, (int)(x + r * 0.2), (int)(hy - r * 0.15), 20, 24, 32, alpha);
+		double wave = sin(event->t * 4.0 + i * 1.3) * r * 0.5;
+		double sy = ground - r * 2.8;
+		thickLineRGBA(surface, (int)(x - r * 0.6), (int)sy, (int)(x - r * 1.5), (int)(sy - r * 0.2 + wave), 1, 70, 50, 40, alpha);
+		thickLineRGBA(surface, (int)(x + r * 0.6), (int)sy, (int)(x + r * 1.5), (int)(sy - r * 0.2 - wave), 1, 70, 50, 40, alpha);
+	}
+	for(int f = 0; f < 36; f++) {
+		double r1 = hill_random(event, f, 1), r2 = hill_random(event, f, 2);
+		double u = fmod(event->t * (0.12 + 0.08 * r2) + r1, 1.0);
+		double fx = surface->w * r1 + sin(event->t + f) * s * 0.01, fy = surface->h * 0.55 + u * (surface->h * 0.4);
+		filledCircleRGBA(surface, (int)fx, (int)fy, 1, 225, 235, 245, weapon_alpha(200.0 * (1.0 - u * 0.4) * event->fade));
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4539,6 +4632,9 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_pagoda,
 	hill_skaters,
 	hill_shepherd,
+	hill_bridge,
+	hill_totems,
+	hill_snowmen,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
