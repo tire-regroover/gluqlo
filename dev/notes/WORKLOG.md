@@ -27,7 +27,7 @@ captured after 10 s.
 | Events added after that (33 of the planned 100 so far) | 143 |
 | Third session: 4 hill + 5 sky | 152 (the code count gives 155) |
 | Fourth session: 24 hill + 28 sky in five batches | 207 |
-| Fifth session: events added one at a time (see below) | 232 and counting |
+| Fifth session: events added one at a time (see below) | 237 |
 
 The 27 "others": alien weather 5, long scene 5, world jump 4, fullscreen 4, foreground 4, and one each for
 screen fade, flyby, background battle, fleet battle and dogfight.
@@ -88,6 +88,9 @@ Fifth session (one event per commit, each looked at before committing):
   Fixed after looking: heron wings (first a stiff kite), bell tower (too tall, hit the date), maze
   (flat; taller hedges), lantern tree (tiny lanterns), air surfer (dark rider on dark sky), forge (no body),
   bird ribbon (tight clump; spread out).
+- Last of the session: hill 90 seed tree, 91 stone circle, 92 sandcastle; sky 135 orrery, 136 frost crystal.
+  The orrery was too small and crowded (widened); the stone circle beam was faint (made a solid shaft).
+  The sandcastle is small on a real screen and sits just under the date line.
 - Lantern-fish were first dim and overlapping, so they were brightened and spaced out. The cloud wave was
   first a plain arch with stray spray dots (an unsigned-arithmetic slip in the offset); it was rewritten as a
   curling swell.
