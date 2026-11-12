@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 133
+#define RARE_SKY_KINDS 134
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 89         // things that happen on the hills (see render_hill_event)
 
@@ -8331,6 +8331,26 @@ static void sky_event_132(const SkyEvent *event) {
 	}
 }
 
+// A lone figure on a glowing disc surfs the air on a long ribbon of light, carving slow S-curves.
+static void sky_event_133(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 trail[3] = { 140, 220, 255 };
+	for(int i = 1; i <= 30; i++) {
+		double px = x - direction * i * size * 0.5;
+		double py = y + sin(phase / 500.0 - i * 0.28) * size * 0.9;
+		double f = 1.0 - i / 31.0;
+		filledCircleRGBA(surface, (int)px, (int)py, (int)(1 + 3 * f), trail[0], trail[1], trail[2], (Uint8)(alpha * 1.3 * f));
+	}
+	double bank = cos(phase / 500.0) * 0.5;
+	double sx = x, sy = y + sin(phase / 500.0) * size * 0.9;
+	thickLineRGBA(surface, (int)(sx - size * 1.0), (int)(sy + size * 0.1 + bank * size * 0.4), (int)(sx + size * 1.0), (int)(sy + size * 0.1 - bank * size * 0.4), 3, 230, 240, 255, alpha);
+	weapon_glow(surface, sx, sy + size * 0.1, size * 0.35, trail, 150.0 * fade);
+	thickLineRGBA(surface, (int)sx, (int)(sy + size * 0.1), (int)(sx + bank * size * 0.5), (int)(sy - size * 1.1), 4, 235, 225, 210, alpha);
+	filledCircleRGBA(surface, (int)(sx + bank * size * 0.6), (int)(sy - size * 1.4), (int)(size * 0.3) + 1, 245, 235, 220, alpha);
+	thickLineRGBA(surface, (int)(sx + bank * size * 0.4), (int)(sy - size * 0.8), (int)(sx - size * 0.9 + bank * size * 0.4), (int)(sy - size * 0.5 - bank * size * 0.6), 3, 235, 225, 210, alpha);
+	thickLineRGBA(surface, (int)(sx + bank * size * 0.4), (int)(sy - size * 0.8), (int)(sx + size * 0.9 + bank * size * 0.4), (int)(sy - size * 0.5 + bank * size * 0.6), 3, 235, 225, 210, alpha);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8459,6 +8479,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_130,
 	sky_event_131,
 	sky_event_132,
+	sky_event_133,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
