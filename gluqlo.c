@@ -6,7 +6,7 @@
 * https://github.com/alexanderk23/gluqlo, which is itself based on noflipqlo by
 * Jacek Kuźniarski. The flip cards, the flip animation and the licence come from
 * those projects. What is new in L-Space is everything behind and around the cards:
-* a procedural backdrop with seasons and weather, and well over a hundred scheduled
+* a procedural backdrop with seasons and weather, and hundreds of scheduled
 * scenery events (things that cross the sky, happen on the hills, or take over the
 * whole screen) including ship battles with nine weapon types. See README.md and
 * NOTES.md for the details and for how to add an event.
@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 126
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 81         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 82         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5536,6 +5536,42 @@ static void hill_seesaw(const HillEvent *event) {
 	}
 }
 
+// A line of laundry strung between two poles: sheets and shirts billow in the wind and a lantern glows beneath.
+static void hill_laundry(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 43));
+	double span = s * 0.1;
+	double g1 = hill_ground(event, cx - span), g2 = hill_ground(event, cx + span);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double up = smooth_step(0.0, 0.08, event->progress);
+	double h = s * 0.055 * up;
+	static const Uint8 lamp[3] = { 255, 205, 120 };
+	thickLineRGBA(surface, (int)(cx - span), (int)g1, (int)(cx - span), (int)(g1 - h), 2, 100, 78, 64, alpha);
+	thickLineRGBA(surface, (int)(cx + span), (int)g2, (int)(cx + span), (int)(g2 - h), 2, 100, 78, 64, alpha);
+	double ax = cx - span, ay = g1 - h, bx = cx + span, by = g2 - h;
+	double prevx = ax, prevy = ay;
+	for(int i = 1; i <= 14; i++) {
+		double f = i / 14.0;
+		double nx = ax + (bx - ax) * f, ny = ay + (by - ay) * f + sin(f * 3.14159) * s * 0.01;
+		lineRGBA(surface, (int)prevx, (int)prevy, (int)nx, (int)ny, 180, 180, 188, alpha);
+		prevx = nx;
+		prevy = ny;
+	}
+	double hang = smooth_step(0.1, 0.2, event->progress);
+	for(int k = 0; k < 6; k++) {
+		double f = (k + 1) / 7.0;
+		double px = ax + (bx - ax) * f, py = ay + (by - ay) * f + sin(f * 3.14159) * s * 0.01;
+		double billow = sin(event->t * 2.2 + k * 1.1) * s * 0.006;
+		double w = s * (0.011 + 0.005 * (k % 2)), l = s * (0.022 + 0.01 * (k % 3)) * hang;
+		static const Uint8 col[3][3] = { { 235, 235, 235 }, { 200, 120, 110 }, { 120, 160, 210 } };
+		const Uint8 *c = col[k % 3];
+		filledTrigonRGBA(surface, (int)(px - w), (int)py, (int)(px + w), (int)py, (int)(px + billow), (int)(py + l), c[0], c[1], c[2], alpha);
+		filledTrigonRGBA(surface, (int)(px - w), (int)py, (int)(px + billow), (int)(py + l), (int)(px - w + billow * 1.5), (int)(py + l), c[0], c[1], c[2], alpha);
+	}
+	weapon_glow(surface, cx, (g1 + g2) * 0.5 - s * 0.006, 2.0, lamp, 190.0 * smooth_step(0.15, 0.25, event->progress) * event->fade * (0.85 + 0.15 * sin(event->t * 5.0)));
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5596,6 +5632,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_hamlet,
 	hill_stepstones,
 	hill_seesaw,
+	hill_laundry,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
