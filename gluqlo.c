@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 124
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 79         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 80         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5476,6 +5476,37 @@ static void hill_hamlet(const HillEvent *event) {
 	filledCircleRGBA(surface, (int)(cx + swing), (int)(cg - ch + s * 0.01), (int)(s * 0.003) + 1, 230, 190, 90, weapon_alpha(235.0 * event->fade));
 }
 
+// A row of glowing stepping stones lights up across a dark pond, one after another, as a traveller hops along them.
+static void hill_stepstones(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * 0.5;
+	double ground = hill_ground(event, cx);
+	double pw = s * 0.26, ph = s * 0.03;
+	static const Uint8 glow[3] = { 130, 220, 255 };
+	double fill = smooth_step(0.0, 0.1, event->progress);
+	filledEllipseRGBA(surface, (int)cx, (int)(ground - ph * 0.3), (int)(pw * fill) + 1, (int)(ph * fill) + 1, 22, 40, 62, weapon_alpha(225.0 * event->fade));
+	const int stones = 8;
+	for(int i = 0; i < stones; i++) {
+		double f = (double)i / (stones - 1);
+		double x = cx + (f - 0.5) * pw * 1.6 * event->direction;
+		double y = ground - ph * 0.3 + sin(f * 6.28) * ph * 0.3;
+		double on = smooth_step(0.1 + i * 0.05, 0.16 + i * 0.05, event->progress);
+		filledEllipseRGBA(surface, (int)x, (int)y, (int)(s * 0.012) + 1, (int)(s * 0.004) + 1, 110, 116, 130, weapon_alpha(235.0 * on * event->fade));
+		weapon_glow(surface, x, y, s * 0.004, glow, 150.0 * on * event->fade * (0.7 + 0.3 * sin(event->t * 2.0 + i)));
+		double rip = fmod(event->t * 0.5 + i * 0.13, 1.0);
+		ellipseRGBA(surface, (int)x, (int)y, (int)(s * 0.01 + rip * s * 0.02), (int)(s * 0.003 + rip * s * 0.006), 170, 210, 240, weapon_alpha(110.0 * (1.0 - rip) * on * event->fade));
+	}
+	double hop = fmod(event->t * 0.18, 1.0);
+	double hf = hop * (stones - 1);
+	int k = (int)hf;
+	double u = hf - k;
+	double f0 = (double)k / (stones - 1), f1 = (double)(k + 1 < stones ? k + 1 : k) / (stones - 1);
+	double x0 = cx + (f0 - 0.5) * pw * 1.6 * event->direction, x1 = cx + (f1 - 0.5) * pw * 1.6 * event->direction;
+	double px = x0 + (x1 - x0) * u, py = ground - ph * 0.3 - sin(u * 3.14159) * s * 0.02 - s * 0.012;
+	hill_walker(surface, px, py + s * 0.012, s * 0.03, event->direction, event->t * 5.0, false, event->fade * smooth_step(0.3, 0.4, event->progress), event->t, 0);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5534,6 +5565,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_hammock,
 	hill_telegraph,
 	hill_hamlet,
+	hill_stepstones,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
