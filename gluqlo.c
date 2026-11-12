@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 137
+#define RARE_SKY_KINDS 138
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 93         // things that happen on the hills (see render_hill_event)
 
@@ -8543,6 +8543,23 @@ static void sky_event_136(const SkyEvent *event) {
 	weapon_glow(surface, x, y, size * 0.3, ice, 160.0 * fade);
 }
 
+// A string of glowing fairy lights unspools across the sky, each bulb twinkling in a travelling wave.
+static void sky_event_137(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double px = x, py = y;
+	for(int i = 1; i <= 26; i++) {
+		double nx = x - direction * i * size * 0.6;
+		double ny = y + sin(phase / 900.0 - i * 0.35) * size * 0.8 + sin(i * 0.9) * size * 0.2;
+		lineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, 190, 190, 200, (Uint8)(alpha * 0.6 * (1.0 - i / 30.0)));
+		double wave = 0.5 + 0.5 * sin(phase / 250.0 - i * 0.7);
+		double hue = i * 0.5;
+		Uint8 c[3] = { (Uint8)(220 + 35 * sin(hue)), (Uint8)(190 + 60 * sin(hue + 2.1)), (Uint8)(170 + 80 * sin(hue + 4.2)) };
+		weapon_glow(surface, nx, ny + size * 0.15, 1.2 + wave, c, 230.0 * (0.3 + 0.7 * wave) * (1.0 - i / 30.0) * fade);
+		px = nx;
+		py = ny;
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8675,6 +8692,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_134,
 	sky_event_135,
 	sky_event_136,
+	sky_event_137,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
