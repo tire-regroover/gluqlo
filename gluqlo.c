@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 124
+#define RARE_SKY_KINDS 125
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 80         // things that happen on the hills (see render_hill_event)
 
@@ -7796,6 +7796,30 @@ static void sky_event_123(const SkyEvent *event) {
 	}
 }
 
+// A small spinning top of light floats across the sky, shedding a spiral of sparks from its tip.
+static void sky_event_124(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 tint[3] = { 255, 190, 120 };
+	double wob = sin(phase / 300.0) * size * 0.15;
+	double spin = phase / 90.0;
+	filledTrigonRGBA(surface, (int)(x - size * 0.7 + wob), y, (int)(x + size * 0.7 + wob), y, (int)x, (int)(y + size * 1.2), 235, 120, 80, alpha);
+	for(int band = 0; band < 3; band++) {
+		double w = size * (0.55 - band * 0.15), yy = y + band * size * 0.22 + size * 0.1;
+		double shift = cos(spin + band) * w * 0.7;
+		lineRGBA(surface, (int)(x - w + wob * (1.0 - band * 0.3)), (int)yy, (int)(x + w + wob * (1.0 - band * 0.3)), (int)yy, 255, 235, 190, alpha);
+		filledCircleRGBA(surface, (int)(x + shift), (int)yy, 1, 255, 255, 230, alpha);
+	}
+	thickLineRGBA(surface, (int)(x + wob), y, (int)(x + wob * 0.5), (int)(y - size * 0.5), 2, 220, 190, 140, alpha);
+	for(int i = 0; i < 26; i++) {
+		double a = spin * 0.6 - i * 0.4;
+		double r = size * (0.15 + i * 0.07);
+		double px = x - direction * i * size * 0.15 + cos(a) * r, py = y + size * 1.2 + sin(a) * r * 0.4;
+		double f = 1.0 - i / 26.0;
+		filledCircleRGBA(surface, (int)px, (int)py, f > 0.6 ? 2 : 1, 255, (Uint8)(220 * f + 30), 120, (Uint8)(alpha * 1.4 * f));
+	}
+	weapon_glow(surface, x, y + size * 1.2, 1.4, tint, 210.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -7915,6 +7939,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_121,
 	sky_event_122,
 	sky_event_123,
+	sky_event_124,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
