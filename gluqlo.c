@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 132
+#define RARE_SKY_KINDS 133
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 88         // things that happen on the hills (see render_hill_event)
 
@@ -8283,6 +8283,26 @@ static void sky_event_131(const SkyEvent *event) {
 	weapon_glow(surface, x, y, 1.6, sand, 150.0 * fade);
 }
 
+// A drift of glowing spores rises like champagne bubbles and bursts at the top into tiny rings of pale light.
+static void sky_event_132(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int b = 0; b < 30; b++) {
+		unsigned int h = fx_hash(seed, b);
+		double u = fmod(phase / 2800.0 + (h % 100) / 100.0, 1.0);
+		double bx = x - direction * ((h >> 8) % 16) * size * 0.5 + sin(phase / 700.0 + b) * size * 0.25;
+		double by = y + size * 2.5 - u * size * 4.0;
+		double r = size * (0.12 + 0.1 * ((h >> 16) % 3));
+		if(u < 0.88) {
+			filledCircleRGBA(surface, (int)bx, (int)by, (int)r + 1, 180, 230, 255, (Uint8)(alpha * 0.5));
+			circleRGBA(surface, (int)bx, (int)by, (int)r + 1, 230, 250, 255, (Uint8)(alpha * 1.1));
+			pixelRGBA(surface, (int)(bx - r * 0.3), (int)(by - r * 0.3), 255, 255, 255, alpha);
+		} else {
+			double q = (u - 0.88) / 0.12;
+			ellipseRGBA(surface, (int)bx, (int)by, (int)(r + q * size * 0.5) + 1, (int)(r + q * size * 0.5) + 1, 220, 245, 255, (Uint8)(alpha * 1.3 * (1.0 - q)));
+		}
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8410,6 +8430,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_129,
 	sky_event_130,
 	sky_event_131,
+	sky_event_132,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
