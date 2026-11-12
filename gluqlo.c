@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 123
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 78         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 79         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5444,6 +5444,38 @@ static void hill_telegraph(const HillEvent *event) {
 	}
 }
 
+// A chimney-lit village of tiny houses on a hillside: windows blink on at random, and a church bell swings.
+static void hill_hamlet(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	static const Uint8 lamp[3] = { 255, 205, 120 };
+	double start = surface->w * (0.2 + 0.2 * hill_random(event, 0, 40));
+	for(int i = 0; i < 7; i++) {
+		double x = start + i * s * 0.07;
+		double ground = hill_ground(event, x);
+		double up = smooth_step(0.0 + i * 0.03, 0.08 + i * 0.03, event->progress);
+		double w = s * (0.016 + 0.006 * (i % 3)), h = s * (0.02 + 0.008 * ((i + 1) % 3)) * up;
+		boxRGBA(surface, (int)(x - w), (int)(ground - h), (int)(x + w), (int)ground, 74 + i * 6, 62, 70, alpha);
+		filledTrigonRGBA(surface, (int)(x - w * 1.25), (int)(ground - h), (int)(x + w * 1.25), (int)(ground - h), (int)x, (int)(ground - h - w * 1.1), 120, 60, 56, alpha);
+		double blink = fmod(event->t * 0.15 + hill_random(event, i, 41), 1.0);
+		double on = smooth_step(0.2, 0.3, event->progress) * (blink < 0.7 ? 1.0 : 0.0);
+		boxRGBA(surface, (int)(x - w * 0.3), (int)(ground - h * 0.7), (int)(x + w * 0.3), (int)(ground - h * 0.35), lamp[0], lamp[1], lamp[2], weapon_alpha(235.0 * on * event->fade));
+		if(i % 3 == 1) {
+			for(int p = 0; p < 5; p++) {
+				double u = fmod(event->t * 0.2 + p / 5.0 + i * 0.1, 1.0);
+				filledCircleRGBA(surface, (int)(x + w * 0.6 + sin(event->t + p) * 2.0 * u + u * event->direction * s * 0.02), (int)(ground - h - w - u * s * 0.06), (int)(1 + u * 3), 150, 152, 160, weapon_alpha(110.0 * (1.0 - u) * up * event->fade));
+			}
+		}
+	}
+	double cx = start + 7 * s * 0.07, cg = hill_ground(event, cx);
+	double ch = s * 0.07 * smooth_step(0.1, 0.2, event->progress);
+	boxRGBA(surface, (int)(cx - s * 0.01), (int)(cg - ch), (int)(cx + s * 0.01), (int)cg, 96, 90, 100, alpha);
+	filledTrigonRGBA(surface, (int)(cx - s * 0.013), (int)(cg - ch), (int)(cx + s * 0.013), (int)(cg - ch), (int)cx, (int)(cg - ch - s * 0.02), 110, 70, 66, alpha);
+	double swing = sin(event->t * 2.2) * s * 0.004;
+	filledCircleRGBA(surface, (int)(cx + swing), (int)(cg - ch + s * 0.01), (int)(s * 0.003) + 1, 230, 190, 90, weapon_alpha(235.0 * event->fade));
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5501,6 +5533,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_eggs,
 	hill_hammock,
 	hill_telegraph,
+	hill_hamlet,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
