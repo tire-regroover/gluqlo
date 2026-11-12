@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 129
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 84         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 85         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5644,6 +5644,43 @@ static void hill_kiln(const HillEvent *event) {
 	}
 }
 
+// A rope bridge sags between two rises; lanterns hang along it and sway as a traveller crosses.
+static void hill_ropebridge(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double x1 = surface->w * 0.2, x2 = surface->w * 0.8;
+	double g1 = hill_ground(event, x1), g2 = hill_ground(event, x2);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double up = smooth_step(0.0, 0.12, event->progress);
+	static const Uint8 lamp[3] = { 255, 205, 120 };
+	thickLineRGBA(surface, (int)x1, (int)g1, (int)x1, (int)(g1 - s * 0.05 * up), 3, 100, 76, 60, alpha);
+	thickLineRGBA(surface, (int)x2, (int)g2, (int)x2, (int)(g2 - s * 0.05 * up), 3, 100, 76, 60, alpha);
+	const int n = 28;
+	double prevx = x1, prevy = g1 - s * 0.03 * up, prevy2 = g1 - s * 0.06 * up;
+	for(int i = 1; i <= n; i++) {
+		double f = (double)i / n;
+		double nx = x1 + (x2 - x1) * f;
+		double sag = sin(f * 3.14159) * s * 0.05 * up;
+		double deck = g1 + (g2 - g1) * f - s * 0.03 * up + sag + sin(event->t * 1.3 - f * 8.0) * s * 0.0015;
+		double rail = deck - s * 0.03 * up;
+		thickLineRGBA(surface, (int)prevx, (int)prevy, (int)nx, (int)deck, 2, 130, 98, 76, alpha);
+		lineRGBA(surface, (int)prevx, (int)prevy2, (int)nx, (int)rail, 170, 150, 120, alpha);
+		if(i % 3 == 0) lineRGBA(surface, (int)nx, (int)deck, (int)nx, (int)rail, 150, 126, 100, (Uint8)(alpha * 0.7));
+		if(i % 7 == 0) {
+			double sw = sin(event->t * 1.8 + i) * s * 0.003;
+			weapon_glow(surface, nx + sw, rail + s * 0.008, 1.6, lamp, 200.0 * smooth_step(0.15, 0.25, event->progress) * event->fade);
+		}
+		prevx = nx;
+		prevy = deck;
+		prevy2 = rail;
+	}
+	double cross = fmod(event->t * 0.04, 1.0);
+	double f = event->direction > 0 ? cross : 1.0 - cross;
+	double wx = x1 + (x2 - x1) * f;
+	double wy = g1 + (g2 - g1) * f - s * 0.03 * up + sin(f * 3.14159) * s * 0.05 * up;
+	hill_walker(surface, wx, wy, s * 0.03, event->direction, event->t * 5.0, true, event->fade * smooth_step(0.2, 0.3, event->progress), event->t, 0);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5707,6 +5744,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_laundry,
 	hill_well,
 	hill_kiln,
+	hill_ropebridge,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
