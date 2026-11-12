@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 138
+#define RARE_SKY_KINDS 139
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 94         // things that happen on the hills (see render_hill_event)
 
@@ -8593,6 +8593,25 @@ static void sky_event_137(const SkyEvent *event) {
 	}
 }
 
+// A lone hot-air lantern balloon rises through a swarm of tiny sparks that spiral up around it like a chimney draught.
+static void sky_event_138(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 warm[3] = { 255, 190, 100 };
+	double bx = x, by = y + sin(phase / 800.0) * size * 0.4;
+	double r = size * 1.1;
+	filledEllipseRGBA(surface, (int)bx, (int)by, (int)(r * 0.8), (int)r, 235, 120, 80, alpha);
+	filledEllipseRGBA(surface, (int)(bx - r * 0.2), (int)(by - r * 0.2), (int)(r * 0.4), (int)(r * 0.6), 255, 190, 140, (Uint8)(alpha * 0.8));
+	for(int k = -1; k <= 1; k++) lineRGBA(surface, (int)(bx + k * r * 0.5), (int)(by + r * 0.7), (int)(bx + k * r * 0.2), (int)(by + r * 1.6), 200, 190, 180, alpha);
+	boxRGBA(surface, (int)(bx - r * 0.25), (int)(by + r * 1.6), (int)(bx + r * 0.25), (int)(by + r * 1.9), 130, 90, 70, alpha);
+	weapon_glow(surface, bx, by + r * 1.5, 1.6, warm, 230.0 * (0.8 + 0.2 * sin(phase / 90.0)) * fade);
+	for(int i = 0; i < 40; i++) {
+		double u = fmod(phase / 2200.0 + i / 40.0, 1.0);
+		double a = u * 14.0 + i;
+		double sx = bx + cos(a) * r * (0.5 + 0.7 * u), sy = by + r * 1.5 - u * size * 5.0 + sin(a) * 2.0;
+		filledCircleRGBA(surface, (int)sx, (int)sy, 1, 255, 210, 140, (Uint8)(alpha * 1.5 * (1.0 - u)));
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8726,6 +8745,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_135,
 	sky_event_136,
 	sky_event_137,
+	sky_event_138,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
