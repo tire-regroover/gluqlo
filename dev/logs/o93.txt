@@ -1,0 +1,6 @@
+rare_sky:59 ok
+rare_sky:60 ok
+rare_sky:61 ok
+rare_sky:62 ok
+rare_sky:63 ok
+rare_sky:64 ok
