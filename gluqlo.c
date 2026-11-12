@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 127
+#define RARE_SKY_KINDS 128
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 83         // things that happen on the hills (see render_hill_event)
 
@@ -7971,6 +7971,31 @@ static void sky_event_126(const SkyEvent *event) {
 	}
 }
 
+// A ring of paper cutout stars spins slowly like a mobile, each star turning on its own thread.
+static void sky_event_127(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 col[4][3] = { { 255, 220, 120 }, { 255, 160, 170 }, { 150, 210, 255 }, { 190, 240, 170 } };
+	double R = size * 2.2;
+	double turn = phase / 1800.0;
+	lineRGBA(surface, x, (int)(y - size * 2.4), x, y, 210, 210, 220, (Uint8)(alpha * 0.6));
+	ellipseRGBA(surface, x, y, (int)R, (int)(R * 0.22), 210, 210, 220, (Uint8)(alpha * 0.7));
+	for(int k = 0; k < 6; k++) {
+		double a = turn + k * 1.0472;
+		double sx = x + cos(a) * R, sy = y + sin(a) * R * 0.22;
+		double drop = size * (0.9 + 0.35 * (k % 3));
+		lineRGBA(surface, (int)sx, (int)sy, (int)sx, (int)(sy + drop), 200, 200, 210, (Uint8)(alpha * 0.6));
+		double cy = sy + drop, spin = phase / 400.0 * (k % 2 ? 1.0 : -1.0) + k;
+		double squash = fabs(cos(spin * 0.5)) * 0.7 + 0.3;
+		const Uint8 *c = col[k % 4];
+		for(int p = 0; p < 5; p++) {
+			double a1 = p * 1.2566 - 1.5708, a2 = a1 + 0.6283, a3 = a1 + 1.2566;
+			double r1 = size * 0.5, r2 = size * 0.2;
+			filledTrigonRGBA(surface, (int)(sx + cos(a1) * r1 * squash), (int)(cy + sin(a1) * r1), (int)(sx + cos(a2) * r2 * squash), (int)(cy + sin(a2) * r2), (int)sx, (int)cy, c[0], c[1], c[2], alpha);
+			filledTrigonRGBA(surface, (int)(sx + cos(a2) * r2 * squash), (int)(cy + sin(a2) * r2), (int)(sx + cos(a3) * r1 * squash), (int)(cy + sin(a3) * r1), (int)sx, (int)cy, c[0], c[1], c[2], alpha);
+		}
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8093,6 +8118,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_124,
 	sky_event_125,
 	sky_event_126,
+	sky_event_127,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
