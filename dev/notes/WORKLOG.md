@@ -27,7 +27,7 @@ captured after 10 s.
 | Events added after that (33 of the planned 100 so far) | 143 |
 | Third session: 4 hill + 5 sky | 152 (the code count gives 155) |
 | Fourth session: 24 hill + 28 sky in five batches | 207 |
-| Fifth session: events added one at a time (see below) | 237 |
+| Fifth session: events added one at a time (see below) | 241 |
 
 The 27 "others": alien weather 5, long scene 5, world jump 4, fullscreen 4, foreground 4, and one each for
 screen fade, flyby, background battle, fleet battle and dogfight.
@@ -91,6 +91,11 @@ Fifth session (one event per commit, each looked at before committing):
 - Last of the session: hill 90 seed tree, 91 stone circle, 92 sandcastle; sky 135 orrery, 136 frost crystal.
   The orrery was too small and crowded (widened); the stone circle beam was faint (made a solid shaft).
   The sandcastle is small on a real screen and sits just under the date line.
+- Final additions: sky 137 fairy lights, 138 lantern balloon; hill 93 music box, 94 light stairs.
+  Mistakes to remember: one commit (`a9ec2ce`) was pushed with HILL_EVENT_KINDS one too low, so it did not
+  compile; fixed in `0bce617`. A screenshot once used a stale binary because `make` had not been rerun after
+  an edit, so check the binary timestamp when a change seems to have no effect. The light stairs climb
+  behind the clock cards, so only the base and lower steps are clearly visible.
 - Lantern-fish were first dim and overlapping, so they were brightened and spaced out. The cloud wave was
   first a plain arch with stray spray dots (an unsigned-arithmetic slip in the offset); it was rewritten as a
   curling swell.

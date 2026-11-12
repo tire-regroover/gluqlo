@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 139
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 94         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 95         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5969,6 +5969,31 @@ static void hill_musicbox(const HillEvent *event) {
 	}
 }
 
+// A tall spiral staircase of light winds up from a hilltop dais into the sky, steps lighting one after another.
+static void hill_lightstairs(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 60));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	static const Uint8 step_c[3] = { 190, 225, 255 };
+	filledEllipseRGBA(surface, (int)cx, (int)(ground - 1), (int)(s * 0.07), (int)(s * 0.012) + 1, 140, 138, 152, alpha);
+	const int steps = 40;
+	double reach = smooth_step(0.05, 0.6, event->progress) * steps;
+	for(int i = 0; i < steps; i++) {
+		if(i > reach) break;
+		double f = (double)i / steps;
+		double a = i * 0.42 + event->t * 0.3;
+		double sx = cx + cos(a) * s * 0.06, sy = ground - 4 - f * s * 0.34 + sin(a) * s * 0.014;
+		bool front = sin(a) > 0;
+		double pulse = 0.55 + 0.45 * sin(event->t * 3.0 - i * 0.5);
+		double fade = 1.0 - f * 0.6;
+		weapon_glow(surface, sx, sy, front ? 3.4 : 2.0, step_c, 235.0 * pulse * fade * (front ? 1.0 : 0.55) * event->fade);
+		if(i % 4 == 0) lineRGBA(surface, (int)cx, (int)sy, (int)sx, (int)sy, 170, 205, 240, weapon_alpha(110.0 * fade * event->fade));
+	}
+	thickLineRGBA(surface, (int)cx, (int)(ground - 2), (int)cx, (int)(ground - 4 - s * 0.34 * smooth_step(0.05, 0.6, event->progress)), 2, 150, 190, 235, weapon_alpha(120.0 * event->fade));
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -6042,6 +6067,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_stonecircle,
 	hill_sandcastle,
 	hill_musicbox,
+	hill_lightstairs,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
