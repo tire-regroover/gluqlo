@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 125
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 80         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 81         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5507,6 +5507,35 @@ static void hill_stepstones(const HillEvent *event) {
 	hill_walker(surface, px, py + s * 0.012, s * 0.03, event->direction, event->t * 5.0, false, event->fade * smooth_step(0.3, 0.4, event->progress), event->t, 0);
 }
 
+// A seesaw rocks on the hill with two small figures; a gentle ripple of dust puffs at each landing.
+static void hill_seesaw(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 42));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double fin = smooth_step(0.0, 0.08, event->progress);
+	double half = s * 0.05;
+	double tilt = sin(event->t * 1.8) * 0.28;
+	double piv_y = ground - s * 0.012;
+	filledTrigonRGBA(surface, (int)(cx - s * 0.01), (int)ground, (int)(cx + s * 0.01), (int)ground, (int)cx, (int)piv_y, 130, 100, 84, alpha);
+	for(int side = -1; side <= 1; side += 2) {
+		double ex = cx + side * cos(tilt) * half * fin, ey = piv_y - side * sin(tilt) * half * fin;
+		thickLineRGBA(surface, (int)cx, (int)piv_y, (int)ex, (int)ey, 3, 190, 140, 90, alpha);
+		double hy = ey - s * 0.004;
+		thickLineRGBA(surface, (int)ex, (int)hy, (int)ex, (int)(hy - s * 0.014), 3, side < 0 ? 40 : 150, 60, side < 0 ? 140 : 60, alpha);
+		filledCircleRGBA(surface, (int)ex, (int)(hy - s * 0.019), (int)(s * 0.004) + 1, 226, 190, 160, alpha);
+		bool landing = (side * sin(tilt) < -0.25);
+		if(landing) {
+			double q = (fabs(sin(tilt)) - 0.25) / 0.03;
+			if(q > 1.0) q = 1.0;
+			for(int p = 0; p < 4; p++) {
+				filledCircleRGBA(surface, (int)(ex + (p - 1.5) * s * 0.006 * q), (int)(ground - p % 2 * 2 - q * s * 0.006), 2, 150, 130, 100, weapon_alpha(110.0 * (1.0 - q * 0.5) * fin * event->fade));
+			}
+		}
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5566,6 +5595,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_telegraph,
 	hill_hamlet,
 	hill_stepstones,
+	hill_seesaw,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
