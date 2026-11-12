@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 79
+#define RARE_SKY_KINDS 89
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 47         // things that happen on the hills (see render_hill_event)
 
@@ -5930,6 +5930,192 @@ static void sky_event_78(const SkyEvent *event) {
 	if((phase / 500) % 2 == 0) filledCircleRGBA(surface, x - direction * len / 2, zy, 2, 255, 60, 50, alpha);
 }
 
+// Five small saucers hold a V formation, wheel together and wink their rim lights.
+static void sky_event_79(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int u = 0; u < 5; u++) {
+		int row = (u + 1) / 2, side = u == 0 ? 0 : (u % 2 ? -1 : 1);
+		int ux = x - direction * row * size * 3;
+		int uy = y + side * row * size * 2 + (int)(sin(phase / 600.0 + row) * size * 0.4);
+		filledEllipseRGBA(surface, ux, uy, size, size / 3 + 1, 120, 132, 150, alpha);
+		filledEllipseRGBA(surface, ux, uy - size / 4, size / 2, size / 3 + 1, 160, 215, 230, (Uint8)(alpha * 0.9));
+		for(int light = -1; light <= 1; light++) {
+			if(((phase / 160) + u + light + 3) % 3 == 0) filledCircleRGBA(surface, ux + light * size * 2 / 3, uy + size / 5, 1, 255, 240, 160, alpha);
+		}
+	}
+}
+
+// A ball of plasma drifts across the sky throwing crackling arcs of violet light.
+static void sky_event_80(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 violet[3] = { 190, 140, 255 };
+	weapon_glow(surface, x, y, size * 1.1, violet, 220.0 * fade);
+	unsigned int tick = phase / 90;
+	for(int arc = 0; arc < 7; arc++) {
+		double a = fx_hash(seed + arc, tick) % 6283 / 1000.0;
+		double len = size * (1.5 + (fx_hash(seed, tick + arc * 7) % 100) / 60.0);
+		double px = x, py = y;
+		for(int seg = 1; seg <= 5; seg++) {
+			double f = seg / 5.0;
+			double nx = x + cos(a) * len * f + ((int)(fx_hash(tick, arc * 9 + seg) % 7) - 3) * size * 0.12;
+			double ny = y + sin(a) * len * f + ((int)(fx_hash(tick, arc * 11 + seg) % 7) - 3) * size * 0.12;
+			thickLineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, 1, 235, 225, 255, (Uint8)(alpha * (1.0 - f * 0.6)));
+			px = nx;
+			py = ny;
+		}
+	}
+}
+
+// Red sprites: faint crimson jellyfish-shaped flashes blink high above a distant storm.
+static void sky_event_81(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double cx = surface->w * (0.2 + 0.6 * ((seed >> 5) % 100) / 100.0);
+	for(int burst = 0; burst < 3; burst++) {
+		unsigned int step = phase / 380 + burst * 5;
+		double life = fmod(phase / 380.0 + burst * 0.37, 1.0);
+		if(fx_hash(seed, step) % 3 == 0) continue;
+		double bx = cx + ((int)(fx_hash(seed, step + 3) % 200) - 100) * size * 0.05;
+		double flash = (1.0 - life) * (1.0 - life);
+		for(int tendril = -3; tendril <= 3; tendril++) {
+			double top = y - size * 2.2 + abs(tendril) * size * 0.2;
+			thickLineRGBA(surface, (int)(bx + tendril * size * 0.35), (int)top, (int)(bx + tendril * size * 0.2), (int)(top + size * 2.0 * flash + size * 0.4), 1, 255, 70, 80, weapon_alpha(alpha * 1.3 * flash));
+		}
+		filledEllipseRGBA(surface, (int)bx, (int)(y - size * 2.2), (int)(size * 1.5), (int)(size * 0.35), 255, 70, 90, weapon_alpha(alpha * 0.5 * flash));
+	}
+}
+
+// A modular space station crosses the sky: truss, habitat tubes, big solar wings catching the light.
+static void sky_event_82(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	int tilt = (int)(sin(phase / 1500.0) * size * 0.3);
+	thickLineRGBA(surface, x - size * 4, y + tilt, x + size * 4, y - tilt, 2, 150, 158, 170, alpha);
+	for(int mod = -1; mod <= 1; mod++) {
+		int mx = x + mod * size * 2;
+		filledEllipseRGBA(surface, mx, y - mod * tilt / 4, size * 3 / 4, size / 3 + 1, 178, 184, 194, alpha);
+		thickLineRGBA(surface, mx, y - size * 3 / 4, mx, y + size * 3 / 4, 2, 120, 128, 140, alpha);
+	}
+	for(int side = -1; side <= 1; side += 2) {
+		int wx = x + side * size * 4;
+		boxRGBA(surface, wx - size / 4, y - size * 2, wx + size / 4, y + size * 2, 60, 105, 160, alpha);
+		for(int cell = 1; cell < 4; cell++) lineRGBA(surface, wx - size / 4, y - size * 2 + cell * size, wx + size / 4, y - size * 2 + cell * size, 130, 180, 230, (Uint8)(alpha * 0.8));
+	}
+	double glint = 0.5 + 0.5 * sin(phase / 220.0);
+	static const Uint8 white[3] = { 250, 252, 255 };
+	weapon_glow(surface, x + size * 4, y - size, 1.8, white, 200.0 * fade * glint);
+}
+
+// A binary star: two suns, one gold and one blue, orbit each other and pass in front of one another.
+static void sky_event_83(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 gold[3] = { 255, 215, 130 }, blue[3] = { 150, 200, 255 };
+	double cx = surface->w * (0.25 + 0.5 * ((seed >> 5) % 100) / 100.0);
+	double a = phase / 900.0, r = size * 1.6;
+	double gx = cx + cos(a) * r, gy = y + sin(a) * r * 0.4;
+	double bx = cx - cos(a) * r, by = y - sin(a) * r * 0.4;
+	if(sin(a) >= 0.0) {
+		weapon_glow(surface, bx, by, size * 0.55, blue, 235.0 * fade);
+		weapon_glow(surface, gx, gy, size * 0.8, gold, 235.0 * fade);
+	} else {
+		weapon_glow(surface, gx, gy, size * 0.8, gold, 235.0 * fade);
+		weapon_glow(surface, bx, by, size * 0.55, blue, 235.0 * fade);
+	}
+	ellipseRGBA(surface, (int)cx, y, (int)r, (int)(r * 0.4), 200, 210, 235, (Uint8)(alpha * 0.25));
+}
+
+// A hawk circles on still wings, then folds them and stoops in a steep dive.
+static void sky_event_84(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double cx = surface->w * (0.25 + 0.5 * ((seed >> 5) % 100) / 100.0);
+	double dive = smooth_step(0.6, 0.85, progress);
+	double a = phase / 800.0;
+	double hx = cx + cos(a) * size * 4.0 * (1.0 - dive) + dive * direction * size * 3.0;
+	double hy = y + sin(a) * size * 1.2 * (1.0 - dive) + dive * dive * scale * 0.35;
+	double span = size * (1.4 - 1.0 * dive);
+	int dir = cos(a) > 0 ? -1 : 1;
+	if(dive > 0.0) dir = direction;
+	thickLineRGBA(surface, (int)(hx - span), (int)(hy + span * 0.15), (int)hx, (int)hy, 2, 40, 32, 30, alpha);
+	thickLineRGBA(surface, (int)hx, (int)hy, (int)(hx + span), (int)(hy + span * 0.15), 2, 40, 32, 30, alpha);
+	filledEllipseRGBA(surface, (int)hx, (int)hy, (int)(size * 0.45), (int)(size * (0.2 + 0.4 * dive)) + 1, 52, 40, 36, alpha);
+	filledTrigonRGBA(surface, (int)hx, (int)(hy + size * 0.3), (int)(hx - size * 0.2), (int)(hy + size * 0.9), (int)(hx + size * 0.2), (int)(hy + size * 0.9), 70, 52, 44, alpha);
+	filledCircleRGBA(surface, (int)(hx + dir * size * 0.4), (int)(hy - size * 0.1), (int)(size * 0.17) + 1, 60, 46, 40, alpha);
+}
+
+// A bunch of escaped party balloons floats up and away on their trailing strings.
+static void sky_event_85(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 colors[5][3] = { { 230, 80, 90 }, { 240, 200, 80 }, { 90, 170, 230 }, { 130, 220, 140 }, { 200, 120, 230 } };
+	for(int b = 0; b < 7; b++) {
+		double sway = sin(phase / 700.0 + b * 1.4);
+		int bx = x - direction * (b % 4) * size + (int)(sway * size * 0.5);
+		int by = y - (int)(progress * size * 2.0) - (b / 4) * size * 2 + (b % 3) * size / 2;
+		const Uint8 *c = colors[b % 5];
+		int r = size * 2 / 3 + 2;
+		double sx = bx, sy = by + r;
+		for(int seg = 1; seg <= 6; seg++) {
+			double nx = bx - sway * size * 0.2 * seg * 0.3 + sin(phase / 300.0 + seg + b) * 2.0, ny = by + r + seg * size * 0.5;
+			lineRGBA(surface, (int)sx, (int)sy, (int)nx, (int)ny, 200, 205, 215, (Uint8)(alpha * 0.7));
+			sx = nx;
+			sy = ny;
+		}
+		filledEllipseRGBA(surface, bx, by, r * 4 / 5, r, c[0], c[1], c[2], alpha);
+		filledTrigonRGBA(surface, bx - 2, by + r, bx + 2, by + r, bx, by + r + 3, c[0], c[1], c[2], alpha);
+		filledEllipseRGBA(surface, bx - r / 3, by - r / 3, r / 5 + 1, r / 3 + 1, 255, 255, 255, (Uint8)(alpha * 0.5));
+	}
+}
+
+// A golden haze of pollen drifts through the sky, each grain glinting as it turns.
+static void sky_event_86(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 gold[3] = { 255, 225, 120 };
+	for(int g = 0; g < 40; g++) {
+		unsigned int h = fx_hash(seed, g);
+		double gx = x - direction * (h % 12) * size * 0.9 + sin(phase / 900.0 + g * 0.7) * size;
+		double gy = y + ((h >> 8) % 10) * size * 0.5 + cos(phase / 1100.0 + g * 1.1) * size * 0.8;
+		double glint = 0.5 + 0.5 * sin(phase / 200.0 + g * 2.0);
+		filledCircleRGBA(surface, (int)gx, (int)gy, 1, gold[0], gold[1], gold[2], (Uint8)(alpha * (0.5 + 0.5 * glint)));
+		if(glint > 0.92) weapon_glow(surface, gx, gy, 1.5, gold, 180.0 * fade);
+	}
+}
+
+// A serpent of pale mist winds across the sky, thickening in the middle, with two faint glowing eyes.
+static void sky_event_87(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	const int segs = 20;
+	for(int i = segs; i >= 0; i--) {
+		double u = (double)i / segs;
+		double sx = x - direction * i * size * 0.9;
+		double sy = y + sin(phase / 500.0 - i * 0.45) * size * 1.2;
+		double r = size * (0.3 + 0.9 * sin(3.14159 * (1.0 - u) * 0.9 + 0.1));
+		filledCircleRGBA(surface, (int)sx, (int)sy, (int)r + 1, 200, 215, 235, (Uint8)(alpha * 0.25 * (1.0 - u * 0.6)));
+		filledCircleRGBA(surface, (int)sx, (int)(sy - r * 0.2), (int)(r * 0.6) + 1, 235, 242, 250, (Uint8)(alpha * 0.18));
+	}
+	weapon_glow(surface, x + direction * size * 0.3, y - size * 0.15, 1.5, (const Uint8[]){ 255, 240, 170 }, 220.0 * fade);
+	weapon_glow(surface, x + direction * size * 0.3, y + size * 0.25, 1.5, (const Uint8[]){ 255, 240, 170 }, 220.0 * fade);
+}
+
+// Two small sky-galleons with billowing sails sail past, lanterns glowing at their sterns.
+static void sky_event_88(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 lamp[3] = { 255, 200, 120 };
+	for(int ship = 0; ship < 2; ship++) {
+		int sx = x - direction * ship * size * 7, sy = y + ship * size * 2 + (int)(sin(phase / 800.0 + ship * 2.0) * size * 0.5);
+		int len = size * 3 - ship * size / 2;
+		filledTrigonRGBA(surface, sx - len, sy, sx + len, sy - size / 3, sx + len * 3 / 4, sy + size * 2 / 3, 70, 46, 40, alpha);
+		filledTrigonRGBA(surface, sx - len, sy, sx + len * 3 / 4, sy + size * 2 / 3, sx - len * 3 / 4, sy + size * 2 / 3, 70, 46, 40, alpha);
+		for(int mast = 0; mast < 2; mast++) {
+			int mx = sx - len / 3 + mast * len * 2 / 3;
+			thickLineRGBA(surface, mx, sy, mx, sy - size * 3, 1, 50, 36, 32, alpha);
+			double belly = sin(phase / 600.0 + mast + ship) * size * 0.2 + size * 0.7;
+			filledTrigonRGBA(surface, mx, sy - size * 3 + 2, mx, sy - size / 2, mx + direction * (int)belly, sy - size * 3 / 2, 235, 228, 210, alpha);
+		}
+		weapon_glow(surface, sx - direction * len, sy - size / 4, 1.8, lamp, 210.0 * fade);
+		for(int puff = 0; puff < 3; puff++) {
+			double u = fmod(phase / 1500.0 + puff / 3.0, 1.0);
+			filledCircleRGBA(surface, (int)(sx - direction * (len + u * size * 3)), sy + size / 3, (int)(size * 0.3 * (0.5 + u)) + 1, 215, 225, 240, (Uint8)(alpha * 0.3 * (1.0 - u)));
+		}
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -6004,6 +6190,16 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_76,
 	sky_event_77,
 	sky_event_78,
+	sky_event_79,
+	sky_event_80,
+	sky_event_81,
+	sky_event_82,
+	sky_event_83,
+	sky_event_84,
+	sky_event_85,
+	sky_event_86,
+	sky_event_87,
+	sky_event_88,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
