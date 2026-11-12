@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 123
+#define RARE_SKY_KINDS 124
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 79         // things that happen on the hills (see render_hill_event)
 
@@ -7743,6 +7743,27 @@ static void sky_event_122(const SkyEvent *event) {
 	filledCircleRGBA(surface, (int)(x + direction * size * 1.75), (int)(cy - size * 0.15), 1, 20, 24, 30, alpha);
 }
 
+// A line of prayer flags streams across the sky on an unseen cord, each flag rippling in turn.
+static void sky_event_123(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 col[5][3] = { { 70, 130, 220 }, { 240, 240, 240 }, { 220, 70, 70 }, { 80, 190, 100 }, { 245, 205, 70 } };
+	double px = x, py = y;
+	for(int i = 1; i <= 24; i++) {
+		double nx = x - direction * i * size * 0.55;
+		double ny = y + sin(phase / 900.0 - i * 0.3) * size * 0.5 + i * size * 0.04;
+		lineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, 200, 200, 205, (Uint8)(alpha * 0.8));
+		if(i % 2 == 0) {
+			double ripple = sin(phase / 180.0 - i * 0.9) * size * 0.2;
+			const Uint8 *c = col[(i / 2) % 5];
+			double fw = size * 0.45, fh = size * 0.6;
+			filledTrigonRGBA(surface, (int)nx, (int)ny, (int)(nx + fw * 0.9 * -direction), (int)(ny + ripple), (int)nx, (int)(ny + fh), c[0], c[1], c[2], (Uint8)(alpha * (1.0 - i / 30.0)));
+			filledTrigonRGBA(surface, (int)(nx + fw * 0.9 * -direction), (int)(ny + ripple), (int)(nx + fw * 0.9 * -direction), (int)(ny + fh + ripple), (int)nx, (int)(ny + fh), c[0], c[1], c[2], (Uint8)(alpha * (1.0 - i / 30.0)));
+		}
+		px = nx;
+		py = ny;
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -7861,6 +7882,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_120,
 	sky_event_121,
 	sky_event_122,
+	sky_event_123,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
