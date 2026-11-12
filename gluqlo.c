@@ -236,9 +236,9 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 74
+#define RARE_SKY_KINDS 76
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 37         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 40         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -4232,6 +4232,91 @@ static void hill_spaceelevator(const HillEvent *event) {
 	}
 }
 
+// A small airstrip: runway lights come on in a row and a little plane lands, taxis and lifts off again.
+static void hill_airstrip(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	static const Uint8 white[3] = { 255, 245, 210 };
+	const int lights = 12;
+	double lit = smooth_step(0.04, 0.14, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
+	double x0 = surface->w * 0.12, x1 = surface->w * 0.88;
+	for(int i = 0; i < lights; i++) {
+		double x = x0 + (x1 - x0) * i / (lights - 1.0);
+		double on = smooth_step(i / (double)lights * 0.5, i / (double)lights * 0.5 + 0.1, lit);
+		weapon_glow(surface, x, hill_ground(event, x) - 1.0, 2.0, white, 220.0 * on * event->fade * (0.75 + 0.25 * sin(event->t * 4.0 + i)));
+	}
+	double u = (event->progress - 0.2) / 0.6;
+	if(u <= 0.0 || u >= 1.0) return;
+	double run = d > 0 ? u : 1.0 - u;
+	double px = x0 + (x1 - x0) * run;
+	double air = u < 0.5 ? pow(1.0 - u * 2.0, 2.0) : pow((u - 0.5) * 2.0, 2.0) * 0.0;
+	double py = hill_ground(event, px) - s * 0.012 - air * s * 0.18;
+	Uint8 alpha = weapon_alpha(238.0 * event->fade);
+	filledEllipseRGBA(surface, (int)px, (int)py, (int)(s * 0.02), (int)(s * 0.006), 30, 34, 48, alpha);
+	thickLineRGBA(surface, (int)(px - d * s * 0.02), (int)py, (int)(px - d * s * 0.03), (int)(py - s * 0.01), 2, 30, 34, 48, alpha);
+	thickLineRGBA(surface, (int)px, (int)(py - s * 0.004), (int)px, (int)(py + s * 0.004), 3, 60, 66, 86, alpha);
+	weapon_glow(surface, px, py - s * 0.007, 2.0, white, 200.0 * event->fade);
+}
+
+// Hot springs: pools of glowing water on the ridge breathe slow clouds of steam.
+static void hill_hotsprings(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int pools = 4;
+	double warm = smooth_step(0.0, 0.12, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
+	for(int i = 0; i < pools; i++) {
+		double x = surface->w * (0.12 + 0.76 * (i + 0.5 * hill_random(event, i, 1)) / pools);
+		double ground = hill_ground(event, x);
+		double w = s * (0.03 + 0.015 * hill_random(event, i, 2));
+		filledEllipseRGBA(surface, (int)x, (int)ground, (int)(w * 1.2), (int)(w * 0.2) + 1, 30, 36, 44, weapon_alpha(235.0 * event->fade));
+		filledEllipseRGBA(surface, (int)x, (int)ground, (int)w, (int)(w * 0.14) + 1, 80, 190, 210,
+			weapon_alpha(190.0 * warm * event->fade * (0.8 + 0.2 * sin(event->t * 1.5 + i))));
+		for(int puff = 0; puff < 9; puff++) {
+			double u = fmod(event->t / 5.0 + puff / 9.0 + i * 0.17, 1.0);
+			double px = x + sin(u * 4.0 + puff + i) * w * 0.5 + event->direction * u * s * 0.03;
+			double py = ground - u * s * 0.16;
+			filledCircleRGBA(surface, (int)px, (int)py, (int)(s * (0.006 + 0.016 * u)), 215, 225, 235,
+				weapon_alpha(70.0 * (1.0 - u) * warm * event->fade));
+		}
+	}
+}
+
+// A night market: stalls under striped awnings, strings of bulbs between poles, and a few shoppers.
+static void hill_market(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	const int stalls = 6;
+	double lit = smooth_step(0.05, 0.16, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
+	Uint8 alpha = weapon_alpha(236.0 * event->fade);
+	static const Uint8 bulbs[4][3] = { { 255, 210, 120 }, { 255, 140, 120 }, { 140, 230, 255 }, { 190, 255, 150 } };
+	double prev_x = 0, prev_y = 0;
+	for(int i = 0; i < stalls; i++) {
+		double x = surface->w * (0.12 + 0.76 * (i + 0.5) / stalls);
+		double ground = hill_ground(event, x);
+		double rise = smooth_step(0.0 + i * 0.015, 0.1 + i * 0.015, event->progress);
+		double w = s * 0.036, h = s * 0.034 * rise;
+		boxRGBA(surface, (int)(x - w), (int)(ground - h), (int)(x + w), (int)ground, 24, 28, 40, alpha);
+		for(int stripe = 0; stripe < 4; stripe++) {
+			double sx = x - w + stripe * w * 0.5;
+			filledTrigonRGBA(surface, (int)sx, (int)(ground - h), (int)(sx + w * 0.5), (int)(ground - h), (int)(sx + w * 0.25), (int)(ground - h - s * 0.012),
+				stripe % 2 ? 210 : 150, stripe % 2 ? 200 : 54, stripe % 2 ? 190 : 60, alpha);
+		}
+		filledCircleRGBA(surface, (int)x, (int)(ground - h * 0.45), 8, 255, 190, 100, weapon_alpha(34.0 * lit * event->fade));
+		boxRGBA(surface, (int)(x - w * 0.5), (int)(ground - h * 0.6), (int)(x + w * 0.5), (int)(ground - h * 0.3), 255, 214, 130,
+			weapon_alpha(220.0 * lit * event->fade * (0.88 + 0.12 * sin(event->t * 5.0 + i))));
+		if(i > 0) {
+			for(int k = 1; k < 6; k++) {
+				double u = k / 6.0;
+				double bx = prev_x + (x - prev_x) * u, by = prev_y + (ground - h - prev_y) * u + sin(3.14159 * u) * s * 0.012;
+				weapon_glow(surface, bx, by, 1.6, bulbs[(i + k) % 4], 220.0 * lit * event->fade);
+			}
+		}
+		prev_x = x;
+		prev_y = ground - h - s * 0.012;
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4248,6 +4333,9 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_pumpkins,
 	hill_castle,
 	hill_spaceelevator,
+	hill_airstrip,
+	hill_hotsprings,
+	hill_market,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
@@ -5547,6 +5635,41 @@ static void sky_event_73(const SkyEvent *event) {
 	}
 }
 
+// A single bright aurora curtain unfurls, hangs rippling and folds away.
+static void sky_event_74(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double open = smooth_step(0.0, 0.25, progress) * (1.0 - smooth_step(0.75, 1.0, progress));
+	const int columns = 36;
+	double left = surface->w * 0.1, width = surface->w * 0.8;
+	for(int c = 0; c < columns; c++) {
+		double u = (double)c / columns;
+		double top = surface->h * 0.08 + sin(u * 7.0 + phase / 900.0) * scale * 0.03;
+		double length = scale * (0.12 + 0.08 * sin(u * 11.0 - phase / 600.0)) * open;
+		double cx = left + width * u;
+		Uint8 g = (Uint8)(190 + 60 * sin(u * 5.0)), b = (Uint8)(150 + 90 * u);
+		for(int seg = 0; seg < 4; seg++) {
+			double f0 = seg / 4.0, f1 = (seg + 1) / 4.0;
+			thickLineRGBA(surface, (int)cx, (int)(top + length * f0), (int)cx, (int)(top + length * f1), 3, 90, g, b,
+				weapon_alpha(alpha * (0.55 - 0.12 * seg) * 0.5));
+		}
+	}
+}
+
+// A great comet with a bright head and a two-part tail: a straight blue ion tail and a curved golden dust tail.
+static void sky_event_75(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 head[3] = { 235, 245, 255 };
+	int len = size * 12;
+	for(int k = 0; k < 24; k++) {
+		double u = k / 24.0;
+		double ix = x - direction * u * len, iy = y - u * len * 0.18;
+		double dx = x - direction * u * len * 0.8, dy = y + u * u * len * 0.35;
+		filledCircleRGBA(surface, (int)ix, (int)iy, (int)(size * 0.25 * (1.0 - u)) + 1, 120, 180, 255, weapon_alpha(alpha * 0.5 * (1.0 - u)));
+		filledCircleRGBA(surface, (int)dx, (int)dy, (int)(size * 0.45 * (0.4 + u * 0.6)) + 1, 255, 215, 140, weapon_alpha(alpha * 0.28 * (1.0 - u)));
+	}
+	weapon_glow(surface, x, y, size * 0.8, head, 235.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -5616,6 +5739,8 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_71,
 	sky_event_72,
 	sky_event_73,
+	sky_event_74,
+	sky_event_75,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
