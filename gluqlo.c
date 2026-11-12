@@ -5937,6 +5937,38 @@ static void hill_sandcastle(const HillEvent *event) {
 	}
 }
 
+// A music box on a stump opens: a tiny dancer turns on its lid and notes float up from it in glowing wisps.
+static void hill_musicbox(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 59));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double up = smooth_step(0.0, 0.1, event->progress);
+	static const Uint8 note[3] = { 255, 225, 150 };
+	double sh = s * 0.03 * up;
+	filledEllipseRGBA(surface, (int)cx, (int)(ground - sh), (int)(s * 0.032), (int)(s * 0.009) + 1, 150, 118, 100, alpha);
+	boxRGBA(surface, (int)(cx - s * 0.028), (int)(ground - sh), (int)(cx + s * 0.028), (int)ground, 128, 98, 82, alpha);
+	double bh = s * 0.024 * up;
+	boxRGBA(surface, (int)(cx - s * 0.026), (int)(ground - sh - bh), (int)(cx + s * 0.026), (int)(ground - sh), 190, 70, 84, alpha);
+	boxRGBA(surface, (int)(cx - s * 0.026), (int)(ground - sh - bh - 3), (int)(cx + s * 0.026), (int)(ground - sh - bh), 225, 190, 100, alpha);
+	double open = smooth_step(0.1, 0.2, event->progress);
+	if(open > 0.0) {
+		double dx = cx, dy = ground - sh - bh - s * 0.012 * open;
+		double spin = event->t * 3.0;
+		thickLineRGBA(surface, (int)dx, (int)(dy + s * 0.012), (int)(dx + cos(spin) * s * 0.004), (int)dy, 2, 245, 235, 245, alpha);
+		filledCircleRGBA(surface, (int)(dx + cos(spin) * s * 0.003), (int)(dy - s * 0.004), (int)(s * 0.003) + 1, 245, 225, 210, alpha);
+		double skirt = fabs(cos(spin)) * s * 0.008 + s * 0.002;
+		filledTrigonRGBA(surface, (int)(dx - skirt), (int)(dy + s * 0.008), (int)(dx + skirt), (int)(dy + s * 0.008), (int)dx, (int)dy, 240, 160, 190, alpha);
+		for(int n = 0; n < 8; n++) {
+			double u = fmod(event->t * 0.15 + n / 8.0, 1.0);
+			double nx = dx + sin(event->t * 1.2 + n * 1.4) * s * 0.02 * (0.3 + u), ny = dy - u * s * 0.16;
+			weapon_glow(surface, nx, ny, 2.8, note, 235.0 * (1.0 - u) * open * event->fade);
+			thickLineRGBA(surface, (int)(nx + 2), (int)ny, (int)(nx + 2), (int)(ny - 6), 1, note[0], note[1], note[2], weapon_alpha(200.0 * (1.0 - u) * open * event->fade));
+		}
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -6009,6 +6041,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_seedtree,
 	hill_stonecircle,
 	hill_sandcastle,
+	hill_musicbox,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
