@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 125
+#define RARE_SKY_KINDS 126
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 81         // things that happen on the hills (see render_hill_event)
 
@@ -7850,6 +7850,34 @@ static void sky_event_124(const SkyEvent *event) {
 	weapon_glow(surface, x, y + size * 1.2, 1.4, tint, 210.0 * fade);
 }
 
+// A feather drifts down through the sky, tumbling gently, leaving a faint shimmering trail.
+static void sky_event_125(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 sheen[3] = { 255, 245, 230 };
+	for(int i = 14; i >= 0; i--) {
+		double age = i * 70.0;
+		double ph = phase - age;
+		double fx = x - direction * i * size * 0.25 + sin(ph / 600.0) * size * 1.0;
+		double fy = y + ph / 500.0 * 0.0 + cos(ph / 900.0) * size * 0.4 + i * size * 0.15;
+		filledCircleRGBA(surface, (int)fx, (int)fy, 1, 255, 245, 230, (Uint8)(alpha * 0.6 * (1.0 - i / 15.0)));
+	}
+	double sway = sin(phase / 600.0), turn = phase / 700.0;
+	double fx = x + sway * size * 1.0, fy = y + cos(phase / 900.0) * size * 0.4;
+	double len = size * 1.6, ang = sin(turn) * 0.9 + 0.3;
+	double tx = fx + cos(ang) * len, ty = fy + sin(ang) * len * 0.6;
+	double bx = fx - cos(ang) * len, by = fy - sin(ang) * len * 0.6;
+	for(int v = 0; v < 12; v++) {
+		double f = (v + 0.5) / 12.0;
+		double mx = bx + (tx - bx) * f, my = by + (ty - by) * f;
+		double w = size * 0.5 * sin(f * 3.14159) * (0.5 + 0.5 * fabs(cos(turn)));
+		double nx = -sin(ang) * 0.6, ny = cos(ang);
+		lineRGBA(surface, (int)mx, (int)my, (int)(mx + nx * w), (int)(my + ny * w + size * 0.1), 240, 236, 230, alpha);
+		lineRGBA(surface, (int)mx, (int)my, (int)(mx - nx * w), (int)(my - ny * w + size * 0.1), 240, 236, 230, alpha);
+	}
+	thickLineRGBA(surface, (int)bx, (int)by, (int)tx, (int)ty, 1, 200, 190, 180, alpha);
+	weapon_glow(surface, tx, ty, 1.0, sheen, 90.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -7970,6 +7998,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_122,
 	sky_event_123,
 	sky_event_124,
+	sky_event_125,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
