@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 130
+#define RARE_SKY_KINDS 131
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 86         // things that happen on the hills (see render_hill_event)
 
@@ -8167,6 +8167,25 @@ static void sky_event_129(const SkyEvent *event) {
 	}
 }
 
+// A flight of paper boats with glowing candle-flames sails through the sky on a slow river of mist.
+static void sky_event_130(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 flame[3] = { 255, 200, 110 };
+	for(int m = 0; m < 14; m++) {
+		double mx = x - direction * m * size * 0.9, my = y + size * 1.2 + sin(phase / 700.0 - m * 0.5) * size * 0.35;
+		filledCircleRGBA(surface, (int)mx, (int)my, (int)(size * 0.7), 190, 205, 230, (Uint8)(alpha * 0.2));
+	}
+	for(int b = 0; b < 5; b++) {
+		double bx = x - direction * b * size * 2.5, by = y + sin(phase / 700.0 - b * 1.1) * size * 0.35 - (b % 2) * size * 0.2;
+		double rock = sin(phase / 500.0 + b) * 0.12;
+		double w = size * (0.8 - 0.05 * b);
+		filledTrigonRGBA(surface, (int)(bx - w), (int)(by - w * 0.1 * rock * 8), (int)(bx + w), (int)(by + w * 0.1 * rock * 8), (int)bx, (int)(by + w * 0.45), 245, 240, 228, alpha);
+		filledTrigonRGBA(surface, (int)bx, (int)(by - w * 0.9), (int)bx, (int)by, (int)(bx - direction * w * 0.7), (int)by, 235, 228, 214, alpha);
+		filledTrigonRGBA(surface, (int)bx, (int)(by - w * 0.6), (int)bx, (int)by, (int)(bx + direction * w * 0.6), (int)by, 250, 246, 236, alpha);
+		weapon_glow(surface, bx, by - w * 0.15, 1.0 + w * 0.05, flame, 220.0 * (0.75 + 0.25 * sin(phase / 130.0 + b * 2.0)) * fade);
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8292,6 +8311,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_127,
 	sky_event_128,
 	sky_event_129,
+	sky_event_130,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
