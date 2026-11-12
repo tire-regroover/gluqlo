@@ -25,7 +25,8 @@ captured after 10 s.
 | Before the second session | 103 (3 + 42 sky + 31 hill + 27 others) |
 | First ten new events | 113 |
 | Events added after that (33 of the planned 100 so far) | 143 |
-| Third session: 4 hill + 5 sky | 152 |
+| Third session: 4 hill + 5 sky | 152 (the code count gives 155) |
+| Fourth session: 24 hill + 28 sky in five batches | 207 |
 
 The 27 "others": alien weather 5, long scene 5, world jump 4, fullscreen 4, foreground 4, and one each for
 screen fade, flyby, background battle, fleet battle and dogfight.
@@ -53,6 +54,28 @@ Third session (after a disconnect; the pending dev/ files were committed first):
 - Hill 50 sunflowers, 51 crystals, 52 glowing mushrooms, 53 tents (pitch, light up, campfire smoke)
 - Manta rays were first too dark to see against the sky and were brightened.
 - Maple seeds (93) are small and mostly sit at the screen edge in the first seconds; they do draw.
+
+Fourth session (goal: over 200). Hill 54-77 and sky 94-121, five batches, each built and looked at before commit:
+
+- Hill 54 fountain, 55 harvester, 56 cairns, 57 watermill, 58 marsh, 59 stargazers, 60 carousel,
+  61 trebuchet, 62 orchard, 63 radio mast, 64 greenhouse, 65 swings, 66 beehives, 67 cableway, 68 ruins,
+  69 geodome, 70 cabin, 71 wind chimes, 72 picnic, 73 wishing tree, 74 mine, 75 dragon eggs, 76 hammock,
+  77 telegraph poles
+- Sky 94 koi, 95 pinwheels, 96 contrails, 97 ribbon, 98 moth, 99 phoenix, 100 diamond dust, 101 solar
+  sailer, 102 ringed gas giant, 103 dragonflies, 104 petals, 105 zodiac ring, 106 spiral galaxy,
+  107 hummingbird, 108 umbrellas, 109 swans, 110 flying fish, 111 floating island, 112 lenticular cloud,
+  113 dolphins, 114 pinwheel firework, 115 thunderbird, 116 crescent moon boat, 117 crystal sphere,
+  118 music staff, 119 kite, 120 twin comets, 121 bead curtain
+- Sky events are timed and move across the screen, so a screenshot taken at a fixed delay often misses them
+  (diamond dust looked missing until the object was drawn directly). `dev/tools/draw_sky.sh FIRST LAST`
+  draws sky kinds offscreen, mid-screen at a fixed size, and makes a contact sheet
+  (`dev/captures/sheet_skyharness_*.png`). `dev/tools/batch_sheet.sh` does the same for a range of hill
+  kinds on the virtual display.
+- Fixes made after looking: cairns, contrails and moth brightened; diamond dust glints made larger then
+  toned down; dolphins had the wrong heading and overlapped; thunderbird wings were too dark.
+- Several new events are small, so on a real screen they are subtle. Not checked on a real screen.
+- Honest count: the total is 207 distinct visuals by the counting rule above. By raw kind number it is
+  122 sky + 78 hill + 27 others = 227, but 20 sky kinds (0-22) collapse to 3 classic visuals.
 
 Screenshots are in `dev/captures/events/` (`rare_sky-N.jpg`, `hill_event-N.jpg`); contact sheets are in
 `dev/captures/` (`sheet_*.jpg`).

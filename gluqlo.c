@@ -236,9 +236,9 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 116
+#define RARE_SKY_KINDS 122
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 76         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 78         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5377,6 +5377,73 @@ static void hill_eggs(const HillEvent *event) {
 	}
 }
 
+// Two trees hold a hammock that sways gently, a sleeper in it and a lantern glowing on a branch.
+static void hill_hammock(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 31));
+	double span = s * 0.09;
+	double g1 = hill_ground(event, cx - span), g2 = hill_ground(event, cx + span);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double grow = smooth_step(0.0, 0.1, event->progress);
+	double h = s * 0.06 * grow;
+	static const Uint8 lamp[3] = { 255, 205, 120 };
+	for(int side = -1; side <= 1; side += 2) {
+		double tx = cx + side * span, tg = side < 0 ? g1 : g2;
+		thickLineRGBA(surface, (int)tx, (int)tg, (int)tx, (int)(tg - h), 3, 84, 62, 50, alpha);
+		filledCircleRGBA(surface, (int)tx, (int)(tg - h - s * 0.012), (int)(s * 0.022 * grow) + 1, 48, 104, 62, alpha);
+	}
+	double sway = sin(event->t * 0.9) * s * 0.004;
+	double px = cx - span, py = g1 - h * 0.55, qx = cx + span, qy = g2 - h * 0.55;
+	double prevx = px, prevy = py;
+	for(int i = 1; i <= 16; i++) {
+		double f = i / 16.0;
+		double hx = px + (qx - px) * f + sway * sin(f * 3.14159) * 2.0;
+		double hy = py + (qy - py) * f + sin(f * 3.14159) * s * 0.02;
+		thickLineRGBA(surface, (int)prevx, (int)prevy, (int)hx, (int)hy, 2, 210, 120, 100, alpha);
+		prevx = hx;
+		prevy = hy;
+	}
+	double mx = cx + sway * 2.0, my = (py + qy) / 2 + s * 0.02;
+	filledEllipseRGBA(surface, (int)mx, (int)(my - s * 0.005), (int)(s * 0.016), (int)(s * 0.005) + 1, 24, 28, 40, alpha);
+	filledCircleRGBA(surface, (int)(mx - s * 0.016), (int)(my - s * 0.008), (int)(s * 0.005) + 1, 24, 28, 40, alpha);
+	weapon_glow(surface, cx - span * 0.9, g1 - h * 0.85, 2.0, lamp, 210.0 * smooth_step(0.1, 0.2, event->progress) * event->fade * (0.9 + 0.1 * sin(event->t * 4.0)));
+}
+
+// A line of telegraph poles runs along the ridge; pulses of light race down the wires between them.
+static void hill_telegraph(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	const int poles = 7;
+	double px[poles], py[poles];
+	for(int i = 0; i < poles; i++) {
+		px[i] = surface->w * (0.1 + 0.8 * i / (poles - 1));
+		double g = hill_ground(event, px[i]);
+		double h = s * 0.07 * smooth_step(0.0 + i * 0.03, 0.1 + i * 0.03, event->progress);
+		py[i] = g - h;
+		thickLineRGBA(surface, (int)px[i], (int)g, (int)px[i], (int)py[i], 2, 100, 78, 62, alpha);
+		thickLineRGBA(surface, (int)(px[i] - s * 0.012), (int)(py[i] + 2), (int)(px[i] + s * 0.012), (int)(py[i] + 2), 2, 120, 94, 74, alpha);
+	}
+	static const Uint8 pulse[3] = { 150, 235, 255 };
+	for(int i = 0; i + 1 < poles; i++) {
+		for(int w = -1; w <= 1; w += 2) {
+			double ax = px[i] + w * s * 0.01, ay = py[i] + 2, bx = px[i + 1] + w * s * 0.01, by = py[i + 1] + 2;
+			double prevx = ax, prevy = ay;
+			for(int k = 1; k <= 10; k++) {
+				double f = k / 10.0;
+				double nx = ax + (bx - ax) * f, ny = ay + (by - ay) * f + sin(f * 3.14159) * s * 0.012;
+				lineRGBA(surface, (int)prevx, (int)prevy, (int)nx, (int)ny, 150, 150, 160, alpha);
+				prevx = nx;
+				prevy = ny;
+			}
+			double u = fmod(event->t * 0.5 + i * 0.37 + (w > 0 ? 0.0 : 0.5), 1.0) * 1.0;
+			double dx = event->direction > 0 ? u : 1.0 - u;
+			weapon_glow(surface, ax + (bx - ax) * dx, ay + (by - ay) * dx + sin(dx * 3.14159) * s * 0.012, 1.0, pulse, 230.0 * smooth_step(0.2, 0.3, event->progress) * event->fade);
+		}
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5432,6 +5499,8 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_wishtree,
 	hill_mine,
 	hill_eggs,
+	hill_hammock,
+	hill_telegraph,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
@@ -7493,6 +7562,124 @@ static void sky_event_115(const SkyEvent *event) {
 	weapon_glow(surface, x, y, size * 0.5, (const Uint8[]){ 130, 180, 255 }, 90.0 * fade);
 }
 
+// A slim crescent moon sails across the sky with a tiny boat hung from its tip, fishing for a star.
+static void sky_event_116(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double R = size * 2.6;
+	for(int i = 0; i <= 40; i++) {
+		double a = -1.2 + 2.4 * i / 40.0;
+		double px = x + R * 0.6 - cos(a) * R, py = y - sin(a) * R;
+		double r = size * 0.55 * cos(a / 1.2 * 1.5708) + 1.0;
+		filledCircleRGBA(surface, (int)px, (int)py, (int)r, 245, 235, 200, alpha);
+	}
+	double bx = x + R * 0.6 - cos(1.2) * R, by = y - sin(1.2) * R;
+	double sway = sin(phase / 500.0) * size * 0.3;
+	lineRGBA(surface, (int)bx, (int)by, (int)(bx + sway), (int)(by + size * 1.2), 200, 200, 200, alpha);
+	filledTrigonRGBA(surface, (int)(bx + sway - size * 0.4), (int)(by + size * 1.2), (int)(bx + sway + size * 0.4), (int)(by + size * 1.2), (int)(bx + sway), (int)(by + size * 1.5), 120, 80, 60, alpha);
+	filledTrigonRGBA(surface, (int)(bx + sway), (int)(by + size * 1.2), (int)(bx + sway), (int)(by + size * 0.6), (int)(bx + sway + size * 0.35), (int)(by + size * 1.15), 235, 230, 220, alpha);
+	lineRGBA(surface, (int)(bx + sway), (int)(by + size * 1.3), (int)(bx + sway - size * 0.3), (int)(by + size * 2.6), 200, 200, 200, (Uint8)(alpha * 0.7));
+	weapon_glow(surface, bx + sway - size * 0.3, by + size * 2.6, 1.2, (const Uint8[]){ 255, 245, 190 }, 220.0 * (0.6 + 0.4 * sin(phase / 250.0)) * fade);
+}
+
+// A big crystal sphere rolls through the sky with a slow storm of gold and violet turning inside it.
+static void sky_event_117(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double R = size * 1.5;
+	filledCircleRGBA(surface, x, y, (int)R, 70, 80, 130, (Uint8)(alpha * 0.5));
+	for(int i = 0; i < 60; i++) {
+		double t = i / 60.0;
+		double a = phase / 700.0 + t * 12.0;
+		double r = R * 0.85 * t;
+		double px = x + cos(a) * r, py = y + sin(a) * r * 0.9;
+		filledCircleRGBA(surface, (int)px, (int)py, t < 0.4 ? 2 : 1, (Uint8)(255 * (1.0 - t * 0.4)), (Uint8)(200 - 100 * t), (Uint8)(120 + 120 * t), (Uint8)(alpha * 1.6 * (1.0 - t * 0.4)));
+	}
+	circleRGBA(surface, x, y, (int)R, 200, 215, 255, (Uint8)(alpha * 1.1));
+	filledEllipseRGBA(surface, (int)(x - R * 0.4), (int)(y - R * 0.5), (int)(R * 0.25), (int)(R * 0.12) + 1, 255, 255, 255, (Uint8)(alpha * 0.8));
+	weapon_glow(surface, x, y, R * 0.3, (const Uint8[]){ 255, 215, 150 }, 120.0 * fade);
+}
+
+// A wavy musical staff unrolls across the sky and glowing notes rise and fall along it.
+static void sky_event_118(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int line = 0; line < 5; line++) {
+		double px = x, py = y + line * size * 0.3;
+		for(int i = 1; i <= 30; i++) {
+			double nx = x - direction * i * size * 0.5;
+			double ny = y + line * size * 0.3 + sin(phase / 600.0 - i * 0.35) * size * 0.8;
+			lineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, 225, 225, 240, (Uint8)(alpha * 0.55 * (1.0 - i / 32.0)));
+			px = nx;
+			py = ny;
+		}
+	}
+	for(int n = 0; n < 8; n++) {
+		double i = 2.0 + n * 3.6;
+		double nx = x - direction * i * size * 0.5;
+		double ny = y + ((n * 7) % 5) * size * 0.3 + sin(phase / 600.0 - i * 0.35) * size * 0.8;
+		double lit = 0.6 + 0.4 * sin(phase / 300.0 + n);
+		filledEllipseRGBA(surface, (int)nx, (int)ny, (int)(size * 0.18) + 1, (int)(size * 0.13) + 1, 255, 225, 150, (Uint8)(alpha * 1.4 * lit));
+		thickLineRGBA(surface, (int)(nx + size * 0.15), (int)ny, (int)(nx + size * 0.15), (int)(ny - size * 0.8), 1, 255, 225, 150, (Uint8)(alpha * 1.2 * lit));
+	}
+}
+
+// A big diamond kite flies on a long string, its tail of paper bows whipping in the wind.
+static void sky_event_119(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double tilt = sin(phase / 700.0) * 0.2;
+	double w = size * 0.9, h = size * 1.3;
+	double cx = x, cy = y;
+	filledTrigonRGBA(surface, (int)cx, (int)(cy - h), (int)(cx - w), (int)cy, (int)cx, (int)(cy + h * 0.2), 235, 90, 80, alpha);
+	filledTrigonRGBA(surface, (int)cx, (int)(cy - h), (int)(cx + w), (int)cy, (int)cx, (int)(cy + h * 0.2), 250, 200, 80, alpha);
+	filledTrigonRGBA(surface, (int)(cx - w), (int)cy, (int)cx, (int)(cy + h * 0.2), (int)cx, (int)(cy + h), 80, 150, 220, alpha);
+	filledTrigonRGBA(surface, (int)(cx + w), (int)cy, (int)cx, (int)(cy + h * 0.2), (int)cx, (int)(cy + h), 100, 200, 130, alpha);
+	lineRGBA(surface, (int)cx, (int)(cy - h), (int)cx, (int)(cy + h), 255, 255, 255, (Uint8)(alpha * 0.5));
+	lineRGBA(surface, (int)(cx - w), (int)cy, (int)(cx + w), (int)cy, 255, 255, 255, (Uint8)(alpha * 0.5));
+	double tx = cx, ty = cy + h;
+	for(int i = 1; i <= 12; i++) {
+		double nx = cx - direction * i * size * 0.4 + sin(phase / 250.0 - i * 0.8) * size * 0.4 * (i / 12.0) + tilt * i;
+		double ny = cy + h + i * size * 0.28;
+		lineRGBA(surface, (int)tx, (int)ty, (int)nx, (int)ny, 230, 230, 235, alpha);
+		if(i % 2 == 0) {
+			filledTrigonRGBA(surface, (int)nx, (int)ny, (int)(nx - size * 0.3), (int)(ny - size * 0.18), (int)(nx - size * 0.3), (int)(ny + size * 0.18), i % 4 ? 240 : 100, 120, i % 4 ? 100 : 230, alpha);
+			filledTrigonRGBA(surface, (int)nx, (int)ny, (int)(nx + size * 0.3), (int)(ny - size * 0.18), (int)(nx + size * 0.3), (int)(ny + size * 0.18), i % 4 ? 240 : 100, 120, i % 4 ? 100 : 230, alpha);
+		}
+		tx = nx;
+		ty = ny;
+	}
+}
+
+// Two comets circle one another as they travel, their tails braiding into a bright double spiral.
+static void sky_event_120(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int c = 0; c < 2; c++) {
+		for(int i = 0; i < 26; i++) {
+			double a = phase / 450.0 + c * 3.14159 - i * 0.16;
+			double r = size * 1.2;
+			double px = x - direction * i * size * 0.18 + cos(a) * r, py = y + sin(a) * r * 0.8;
+			double f = 1.0 - i / 26.0;
+			filledCircleRGBA(surface, (int)px, (int)py, (int)(1 + 2 * f), c ? 150 : 255, c ? 200 : 190, c ? 255 : 120, (Uint8)(alpha * 1.4 * f));
+		}
+		double a = phase / 450.0 + c * 3.14159;
+		weapon_glow(surface, x + cos(a) * size * 1.2, y + sin(a) * size * 0.96, 1.4, c ? (const Uint8[]){ 160, 210, 255 } : (const Uint8[]){ 255, 200, 130 }, 230.0 * fade);
+	}
+}
+
+// A curtain of glowing glass beads falls in long strands, swaying as if hung on invisible threads.
+static void sky_event_121(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	for(int strand = 0; strand < 14; strand++) {
+		unsigned int h = fx_hash(seed, strand);
+		double sx = x - direction * strand * size * 0.7;
+		double top = y - size * 1.0 + ((h >> 4) & 7) * size * 0.1;
+		for(int b = 0; b < 9; b++) {
+			double v = fmod(phase / 2600.0 + b / 9.0 + (h & 63) / 64.0, 1.0);
+			double by = top + v * size * 6.0, bx = sx + sin(phase / 800.0 + strand * 0.5 + v * 3.0) * size * 0.3;
+			double hue = strand * 0.5 + b * 0.7;
+			Uint8 c[3] = { (Uint8)(190 + 60 * sin(hue)), (Uint8)(190 + 60 * sin(hue + 2.1)), (Uint8)(215 + 40 * sin(hue + 4.2)) };
+			filledCircleRGBA(surface, (int)bx, (int)by, 2, c[0], c[1], c[2], (Uint8)(alpha * 1.4 * sin(v * 3.14159)));
+		}
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -7604,6 +7791,12 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_113,
 	sky_event_114,
 	sky_event_115,
+	sky_event_116,
+	sky_event_117,
+	sky_event_118,
+	sky_event_119,
+	sky_event_120,
+	sky_event_121,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])

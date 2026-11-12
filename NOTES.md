@@ -56,17 +56,18 @@ Review of `gluqlo.c` (~2450 lines) done before adding and fixing effects.
 - `dogfight` (one pair) and `background_battle` (2-3 pairs) share `render_dogfight()`: chaser and leader fly
   looping routes, tilt along their heading, the chaser fires its weapon, one volley hits and on the last
   pass the leader is destroyed. `battle_flyby` is the old simple pass with pulse bolts.
-- `hill_event` has 37 kinds (`hill_event_kinds[]`): village, caravan, turbines, lanterns, campfire,
+- `hill_event` has 78 kinds (`hill_event_kinds[]`; 0-36 listed here, 37-77 are in the work log): village, caravan, turbines, lanterns, campfire,
   bloom, herd, volcano, beacons, fireflies, kites, fireworks, train, rocket, abduction, geysers, stones,
   then ferris wheel, observatory, windmills, light tree, meteorite, dust devils, lasers, tesla towers,
   balloons, giant, clock tower, drones, bats, gate, then lighthouse, cherry tree, wolf, pumpkins, castle,
   space elevator.
-- `rare_sky` has 69 kinds (23 classic + `sky_event_23..68`); kinds 43-50 are hot air balloons, geese,
+- `rare_sky` has 122 kinds (23 classic + `sky_event_23..121`; the newer ones are in the work log); kinds 43-50 are hot air balloons, geese,
   meteor shower, triangle lights, skywriting loop, sky whale, storm cell and eclipse.
 - Unique visuals in total (kinds 0-22 of `rare_sky` are only 3 distinct classic visuals, so count those
-  as 3): 5 alien weather + 4 world jump + 5 long scene + 49 rare sky + 4 fullscreen + 4 foreground +
-  37 hill + 5 single-kind effects (screen fade, flyby, background battle, fleet battle, dogfight) = 113.
-  Every kind was smoke-tested with `-effect NAME:KIND` (see `dev/tools/check_event.sh`). The plant growth is
+  as 3): 5 alien weather + 4 world jump + 5 long scene + 102 rare sky + 4 fullscreen + 4 foreground +
+  78 hill + 5 single-kind effects (screen fade, flyby, background battle, fleet battle, dogfight) = 207.
+  Every kind was smoke-tested with `-effect NAME:KIND` (see `dev/tools/check_event.sh`), and sky kinds
+  were also drawn mid-screen at full size with `dev/tools/draw_sky.sh`. The plant growth is
   `draw_hill_garden()`, used by `long_scene` kind 0.
 - Spaceship events are rare: gates are fleet_battle 6, background_battle 9, battle_flyby 6, dogfight 4.
   Measured over 48 h of scene time, starts per hour went from 5.0 / 8.3 / 16.8 / 17.0 to
