@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 138
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 93         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 94         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
