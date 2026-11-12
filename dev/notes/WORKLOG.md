@@ -27,7 +27,7 @@ captured after 10 s.
 | Events added after that (33 of the planned 100 so far) | 143 |
 | Third session: 4 hill + 5 sky | 152 (the code count gives 155) |
 | Fourth session: 24 hill + 28 sky in five batches | 207 |
-| Fifth session: events added one at a time (see below) | 221 and counting |
+| Fifth session: events added one at a time (see below) | 232 and counting |
 
 The 27 "others": alien weather 5, long scene 5, world jump 4, fullscreen 4, foreground 4, and one each for
 screen fade, flyby, background battle, fleet battle and dogfight.
@@ -83,6 +83,11 @@ Fifth session (one event per commit, each looked at before committing):
 - Sky 122 sea turtle, 123 prayer flags, 124 spinning top, 125 feather, 126 lantern-fish, 127 star mobile,
   128 cloud wave
 - Hill 78 hamlet, 79 stepping stones, 80 seesaw, 81 laundry line, 82 well, 83 kiln, 84 rope bridge
+- More, same session: sky 129 heron, 130 paper boats, 131 hourglass, 132 rising bubbles, 133 air surfer,
+  134 rainbow bird ribbon; hill 85 bell tower, 86 hedge maze, 87 fisherman, 88 lantern tree, 89 forge.
+  Fixed after looking: heron wings (first a stiff kite), bell tower (too tall, hit the date), maze
+  (flat; taller hedges), lantern tree (tiny lanterns), air surfer (dark rider on dark sky), forge (no body),
+  bird ribbon (tight clump; spread out).
 - Lantern-fish were first dim and overlapping, so they were brightened and spaced out. The cloud wave was
   first a plain arch with stray spray dots (an unsigned-arithmetic slip in the offset); it was rewritten as a
   curling swell.
