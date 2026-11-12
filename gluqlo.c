@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 131
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 86         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 87         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5713,6 +5713,43 @@ static void hill_belltower(const HillEvent *event) {
 	}
 }
 
+// A hedge maze of dark walls; a tiny lantern wanders its paths and, at the end, the centre blooms with light.
+static void hill_maze(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 46));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(235.0 * event->fade);
+	double w = s * 0.11, h = s * 0.022;
+	double grow = smooth_step(0.0, 0.12, event->progress);
+	static const Uint8 lamp[3] = { 255, 215, 130 };
+	static const Uint8 bloom[3] = { 255, 170, 200 };
+	filledEllipseRGBA(surface, (int)cx, (int)(ground - 1), (int)(w * 1.1), (int)(h * 0.9) + 1, 24, 40, 30, weapon_alpha(200.0 * grow * event->fade));
+	for(int ring = 0; ring < 3; ring++) {
+		double rw = w * (1.0 - ring * 0.3), rh = h * (1.0 - ring * 0.3);
+		for(int k = 0; k < 16; k++) {
+			double a0 = k * 0.3927 + ring * 0.2, a1 = a0 + 0.3927;
+			bool gap = ((k + ring * 5) % 7 == 0);
+			if(gap) continue;
+			double x0 = cx + cos(a0) * rw, y0 = ground - 1 + sin(a0) * rh;
+			double x1 = cx + cos(a1) * rw, y1 = ground - 1 + sin(a1) * rh;
+			double top = s * 0.022 * grow;
+			Uint8 g = (Uint8)(50 + ring * 10);
+			filledTrigonRGBA(surface, (int)x0, (int)y0, (int)x1, (int)y1, (int)x0, (int)(y0 - top), 34, g, 44, alpha);
+			filledTrigonRGBA(surface, (int)x1, (int)y1, (int)x1, (int)(y1 - top), (int)x0, (int)(y0 - top), 40, (Uint8)(g + 14), 50, alpha);
+		}
+	}
+	double trip = fmod(event->t * 0.1, 1.0);
+	double a = trip * 6.2832 * 2.4, r = 1.0 - 0.9 * trip;
+	double lx = cx + cos(a) * w * 0.85 * r, ly = ground - 1 + sin(a) * h * 0.85 * r - s * 0.006;
+	weapon_glow(surface, lx, ly - s * 0.008, 2.6, lamp, 235.0 * smooth_step(0.15, 0.25, event->progress) * event->fade);
+	double end = smooth_step(0.8, 0.95, trip);
+	for(int p = 0; p < 8; p++) {
+		double pa = p * 0.785 + event->t;
+		weapon_glow(surface, cx + cos(pa) * s * 0.012 * end, ground - s * 0.012 + sin(pa) * s * 0.004 * end, 1.0, bloom, 190.0 * end * event->fade);
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5778,6 +5815,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_kiln,
 	hill_ropebridge,
 	hill_belltower,
+	hill_maze,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
