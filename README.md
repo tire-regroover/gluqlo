@@ -37,6 +37,18 @@ Then compile and install as usual:
     $ sudo pacman -S --needed base-devel sdl12-compat sdl_ttf sdl_gfx libx11
     $ make && sudo make install
 
+### openSUSE (Leap and Tumbleweed)
+
+    $ sudo zypper install gcc-c++ make libSDL-devel libSDL_ttf-devel libSDL_gfx-devel libX11-devel
+    $ make && sudo make install
+
+If a package is not found, look for the current name with `zypper search SDL_gfx` (and likewise for `SDL_ttf`).
+On Tumbleweed the SDL 1.2 headers come from `sdl12_compat`, which provides `sdl-config`.
+
+`make install` puts the program in `/usr/libexec/xscreensaver`. If your XScreenSaver looks for its programs
+somewhere else (for example `/usr/lib64/xscreensaver`), copy `gluqlo` there, or put the full path in
+`~/.xscreensaver`, for example `/usr/libexec/xscreensaver/gluqlo -root \n\`.
+
 The Ubuntu PPA from the upstream project installs upstream Gluqlo, not L-Space.
 
 ## Usage
