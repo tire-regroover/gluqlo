@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 135
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 90         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 91         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5848,6 +5848,33 @@ static void hill_forge(const HillEvent *event) {
 	}
 }
 
+// A great bonsai-like tree on a rock holds a nest of glowing fireflies-free "star seeds" that drift up one by one into the sky.
+static void hill_seedtree(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 54));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double grow = smooth_step(0.0, 0.12, event->progress);
+	static const Uint8 seed_c[3] = { 200, 230, 255 };
+	filledEllipseRGBA(surface, (int)cx, (int)ground, (int)(s * 0.03), (int)(s * 0.009) + 1, 96, 92, 104, alpha);
+	double h = s * 0.055 * grow;
+	thickLineRGBA(surface, (int)cx, (int)ground, (int)(cx + s * 0.006), (int)(ground - h * 0.6), 4, 120, 92, 76, alpha);
+	thickLineRGBA(surface, (int)(cx + s * 0.006), (int)(ground - h * 0.6), (int)(cx - s * 0.012), (int)(ground - h), 3, 120, 92, 76, alpha);
+	for(int c = 0; c < 5; c++) {
+		double a = c * 1.25;
+		filledCircleRGBA(surface, (int)(cx - s * 0.012 + cos(a) * s * 0.02 * grow), (int)(ground - h + sin(a) * s * 0.012 * grow), (int)(s * 0.014 * grow) + 1, 54, 116, 70, alpha);
+	}
+	for(int k = 0; k < 14; k++) {
+		double u = fmod(event->t * 0.06 + hill_random(event, k, 55), 1.0);
+		double born = smooth_step(0.0, 0.1, u), fade = 1.0 - smooth_step(0.8, 1.0, u);
+		double sx = cx - s * 0.012 + sin(event->t * 0.7 + k) * s * 0.02 * u + (hill_random(event, k, 56) - 0.5) * s * 0.03;
+		double sy = ground - h - u * s * 0.22;
+		weapon_glow(surface, sx, sy, 2.4, seed_c, 230.0 * born * fade * smooth_step(0.1, 0.2, event->progress) * event->fade);
+		if(u > 0.3) weapon_glow(surface, sx + sin(u * 20.0) * 1.5, sy + 6, 0.8, seed_c, 90.0 * born * fade * event->fade);
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5917,6 +5944,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_fisher,
 	hill_lanterntree,
 	hill_forge,
+	hill_seedtree,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
