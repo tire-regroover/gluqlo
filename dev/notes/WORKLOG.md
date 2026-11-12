@@ -25,6 +25,7 @@ captured after 10 s.
 | Before the second session | 103 (3 + 42 sky + 31 hill + 27 others) |
 | First ten new events | 113 |
 | Events added after that (33 of the planned 100 so far) | 143 |
+| Third session: 4 hill + 5 sky | 152 |
 
 The 27 "others": alien weather 5, long scene 5, world jump 4, fullscreen 4, foreground 4, and one each for
 screen fade, flyby, background battle, fleet battle and dogfight.
@@ -45,6 +46,13 @@ Hill (`hill_event:N`):
 - 37 airstrip, 38 hot springs, 39 night market, 40 lotus lights, 41 bonfire festival
 - 42 waterfall, 43 scarecrows and crows, 44 pagoda, 45 ice skaters, 46 shepherd and sheep
 - 47 stone bridge, 48 totem poles, 49 snowmen
+
+Third session (after a disconnect; the pending dev/ files were committed first):
+
+- Sky 89 jellyfish, 90 manta rays, 91 smoke rings, 92 hang gliders, 93 maple seeds
+- Hill 50 sunflowers, 51 crystals, 52 glowing mushrooms, 53 tents (pitch, light up, campfire smoke)
+- Manta rays were first too dark to see against the sky and were brightened.
+- Maple seeds (93) are small and mostly sit at the screen edge in the first seconds; they do draw.
 
 Screenshots are in `dev/captures/events/` (`rare_sky-N.jpg`, `hill_event-N.jpg`); contact sheets are in
 `dev/captures/` (`sheet_*.jpg`).
