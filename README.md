@@ -1,8 +1,6 @@
 # Gluqlo L-Space
 
-A flip clock that lives inside a night landscape. Seasons turn, the weather changes, ships fight above the
-clouds, and over a hundred different things drift through the sky or happen on the hills while the cards
-keep the time.
+A flip clock that sits inside a night landscape. Things happen behind it while it keeps the time.
 
 ![Gluqlo L-Space](preview.png)
 
@@ -14,28 +12,8 @@ It is not affiliated with, or endorsed by, the upstream project.
 
 ## What L-Space adds
 
-Behind the cards there is a procedurally drawn night landscape: nebula, clouds, stars, three ridges and flocks
-of birds. It moves through four seasons and a changing cycle of weather (clear, sunset, rain, storm, snow, fog,
-aurora). On top of that, a large set of scenery events turns up at random times. For testing, `-effect NAME[:KIND]`
-and `-seed N` show any event on demand.
-
-### Scenery events
-
-Events are drawn behind the cards and fade in and out. They never overlap in a way that would look wrong:
-the "takeover" events (alien weather, world jump, long scenes, hill events) take turns, and so do the sky events
-(fleet battles, furballs, dogfights, flybys and rare sky events).
-
-- **Rare sky events** – things that cross the sky: comets, dragons, paper planes, soap bubbles, an eclipse, a ghost
-  ship, a portal, a pulsar and many more.
-- **Hill events** – things that happen on the near ridge: a village, a lighthouse, a train, fireworks, a volcano,
-  a space elevator, a castle, a howling wolf and many more.
-- **Ship battles** – ship designs, turrets and nine weapons (pulse laser, beam, plasma, mass driver, flak, missile,
-  swarm, torpedo and railgun) modelled on the weapon families of *X4: Foundations*.
-- **Takeovers** – alien weather (five kinds), world jumps (four destinations), long scenes (garden, flood, fire,
-  aurora, a lone watcher), fullscreen events and foreground drifts.
-
-Nothing is stored between frames: every event is a pure function of time, so a frame can be drawn from the time
-alone. See `NOTES.md` for how events are scheduled and how to add one.
+A landscape behind the cards that changes with the seasons and the weather, plus a lot of small scenes that
+turn up now and then, in the sky and on the hills. See `NOTES.md` if you want the details.
 
 ## Requirements
 
@@ -79,25 +57,20 @@ Options: `-root` (fullscreen), `-noflip`, `-ampm`, `-leadingzero`, `-w`, `-h`, `
 Scenery events normally appear at random times. To see one right away, run only that event on repeat:
 
     $ gluqlo -effect list          # list effect names and their kinds
-    $ gluqlo -effect rare_sky      # repeat one effect (random kind each time)
-    $ gluqlo -effect rare_sky:67   # force a specific kind (here: the ringed planet)
-    $ gluqlo -effect hill_event:31 # the lighthouse
+    $ gluqlo -effect rare_sky      # repeat one effect
+    $ gluqlo -effect rare_sky:67   # force a specific kind
     $ gluqlo -seed 42              # start the scenery at a reproducible point
-
-Each launch normally starts at a different point of the season, weather and event schedule.
 
 ## Repository layout
 
 - `gluqlo.c` – the whole program
-- `NOTES.md` – code review notes, how events are scheduled, how to add an event
-- `dev/` – developer tools and design sheets (event check script, ship design sheets); not needed to build
+- `NOTES.md` – notes on how the code works
+- `dev/` – developer tools; not needed to build
 
 ## Credits and licence
 
 - Gluqlo © 2014 Alexander Kovalenko; noflipqlo © 2010–2012 Jacek Kuźniarski.
-- L-Space scenery, weather and events © 2026 tire-regroover.
-- L-Space was written with the help of AI coding assistants: GitHub Copilot (Anthropic Claude), DeepSeek and Qwen.
-  Their output was directed and reviewed by tire-regroover.
+- L-Space © 2026 tire-regroover, written with the help of GitHub Copilot (Anthropic Claude), DeepSeek and Qwen.
 
 Released under the ISC licence, the same as upstream. See `LICENSE`.
 
