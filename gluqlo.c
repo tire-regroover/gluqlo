@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 136
+#define RARE_SKY_KINDS 137
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 92         // things that happen on the hills (see render_hill_event)
 
@@ -8488,6 +8488,30 @@ static void sky_event_135(const SkyEvent *event) {
 	weapon_glow(surface, x, y, size * 0.6, sun, 210.0 * fade);
 }
 
+// A lace of frost spreads across the sky like a window pane: branching ice ferns grow outward and glitter.
+static void sky_event_136(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 ice[3] = { 210, 240, 255 };
+	double grow = smooth_step(0.0, 1.0, fmod(phase / 3200.0, 1.0));
+	for(int arm = 0; arm < 6; arm++) {
+		double a = arm * 1.0472 + phase / 6000.0;
+		double len = size * 3.2 * grow;
+		double ex = x + cos(a) * len, ey = y + sin(a) * len * 0.8;
+		thickLineRGBA(surface, x, y, (int)ex, (int)ey, 2, ice[0], ice[1], ice[2], alpha);
+		for(int k = 1; k <= 6; k++) {
+			double f = k / 7.0;
+			double bx = x + cos(a) * len * f, by = y + sin(a) * len * 0.8 * f;
+			double bl = size * 1.0 * (1.0 - f) * grow;
+			for(int side = -1; side <= 1; side += 2) {
+				lineRGBA(surface, (int)bx, (int)by, (int)(bx + cos(a + side * 0.9) * bl), (int)(by + sin(a + side * 0.9) * bl * 0.8), ice[0], ice[1], ice[2], (Uint8)(alpha * 0.9));
+			}
+		}
+		double tw = sin(phase / 200.0 + arm * 1.3);
+		if(tw > 0.5) weapon_glow(surface, ex, ey, 1.4, ice, 220.0 * (tw - 0.5) * 2.0 * fade);
+	}
+	weapon_glow(surface, x, y, size * 0.3, ice, 160.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8619,6 +8643,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_133,
 	sky_event_134,
 	sky_event_135,
+	sky_event_136,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
