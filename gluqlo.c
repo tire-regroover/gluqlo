@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 136
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 91         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 92         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5875,6 +5875,38 @@ static void hill_seedtree(const HillEvent *event) {
 	}
 }
 
+// A stone circle on the hilltop: each standing stone takes a turn glowing with a vertical beam, then all pulse together.
+static void hill_stonecircle(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 57));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	const int n = 8;
+	double rx = s * 0.12, ry = s * 0.018;
+	static const Uint8 beam[3] = { 150, 235, 255 };
+	double all = smooth_step(0.6, 0.7, event->progress) * (0.6 + 0.4 * sin(event->t * 3.0));
+	for(int i = 0; i < n; i++) {
+		double a = i * 6.2832 / n + 0.3;
+		double sx = cx + cos(a) * rx, sy = ground - 1 + sin(a) * ry;
+		double up = smooth_step(0.0 + i * 0.02, 0.08 + i * 0.02, event->progress);
+		double h = s * (0.035 + 0.012 * (i % 3)) * up, w = s * 0.007;
+		boxRGBA(surface, (int)(sx - w), (int)(sy - h), (int)(sx + w), (int)sy, 96, 94, 104, alpha);
+		boxRGBA(surface, (int)(sx - w), (int)(sy - h), (int)(sx - w * 0.2), (int)sy, 122, 120, 130, alpha);
+		double turn = fmod(event->t * 0.5, (double)n);
+		double lit = (turn >= i && turn < i + 1) ? 1.0 - fabs(turn - i - 0.5) * 2.0 : 0.0;
+		lit = fmax(lit * smooth_step(0.15, 0.25, event->progress), all);
+		if(lit > 0.02) {
+			for(int k = 0; k < 14; k++) {
+				double f = k / 14.0;
+				double bw = 3.0 * (1.0 - f) + 1.0;
+				boxRGBA(surface, (int)(sx - bw), (int)(sy - h - (f + 0.07) * s * 0.2), (int)(sx + bw), (int)(sy - h - f * s * 0.2), beam[0], beam[1], beam[2], weapon_alpha(150.0 * lit * (1.0 - f) * event->fade));
+			}
+			weapon_glow(surface, sx, sy - h, 3.0, beam, 235.0 * lit * event->fade);
+		}
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5945,6 +5977,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_lanterntree,
 	hill_forge,
 	hill_seedtree,
+	hill_stonecircle,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
