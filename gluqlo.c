@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 135
+#define RARE_SKY_KINDS 136
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 91         // things that happen on the hills (see render_hill_event)
 
@@ -8436,6 +8436,25 @@ static void sky_event_134(const SkyEvent *event) {
 	}
 }
 
+// A small orrery drifts by: a bright sun with three planets circling it on faint rings, one with its own moon.
+static void sky_event_135(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 sun[3] = { 255, 220, 140 };
+	static const Uint8 planet[3][3] = { { 150, 190, 255 }, { 255, 160, 120 }, { 190, 255, 190 } };
+	for(int p = 0; p < 3; p++) {
+		double orbit = size * (1.8 + p * 1.3);
+		ellipseRGBA(surface, x, y, (int)orbit, (int)(orbit * 0.4), 200, 205, 225, (Uint8)(alpha * 0.35));
+		double a = phase / (500.0 + p * 380.0) + p * 2.0;
+		double px = x + cos(a) * orbit, py = y + sin(a) * orbit * 0.4;
+		filledCircleRGBA(surface, (int)px, (int)py, (int)(size * (0.32 + 0.08 * p)) + 1, planet[p][0], planet[p][1], planet[p][2], (Uint8)(alpha * 1.4));
+		if(p == 1) {
+			double ma = phase / 160.0;
+			filledCircleRGBA(surface, (int)(px + cos(ma) * size * 0.45), (int)(py + sin(ma) * size * 0.2), 1, 235, 235, 240, alpha);
+		}
+	}
+	weapon_glow(surface, x, y, size * 0.6, sun, 210.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8566,6 +8585,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_132,
 	sky_event_133,
 	sky_event_134,
+	sky_event_135,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
