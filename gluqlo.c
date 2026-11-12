@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 132
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 87         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 88         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5750,6 +5750,41 @@ static void hill_maze(const HillEvent *event) {
 	}
 }
 
+// A fisherman sits on a rock beside a dark pool, casting a line; a fish rises, rings spread and the float bobs.
+static void hill_fisher(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 47));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double fin = smooth_step(0.0, 0.1, event->progress);
+	double pw = s * 0.12, ph = s * 0.02;
+	filledEllipseRGBA(surface, (int)(cx + d * pw * 0.5), (int)(ground - ph * 0.3), (int)(pw * fin) + 1, (int)(ph * fin) + 1, 22, 40, 62, weapon_alpha(225.0 * event->fade));
+	double rx = cx - d * s * 0.02;
+	filledEllipseRGBA(surface, (int)rx, (int)(ground - s * 0.005), (int)(s * 0.016), (int)(s * 0.008) + 1, 96, 92, 100, alpha);
+	double hx = rx, hy = ground - s * 0.012;
+	thickLineRGBA(surface, (int)hx, (int)hy, (int)hx, (int)(hy - s * 0.016), 3, 120, 70, 60, alpha);
+	filledCircleRGBA(surface, (int)hx, (int)(hy - s * 0.022), (int)(s * 0.005) + 1, 226, 190, 160, alpha);
+	filledTrigonRGBA(surface, (int)(hx - d * s * 0.01), (int)(hy - s * 0.026), (int)(hx + d * s * 0.01), (int)(hy - s * 0.026), (int)hx, (int)(hy - s * 0.036), 150, 120, 80, alpha);
+	double tipx = hx + d * s * 0.07, tipy = hy - s * 0.07;
+	thickLineRGBA(surface, (int)(hx + d * s * 0.006), (int)(hy - s * 0.012), (int)tipx, (int)tipy, 1, 150, 110, 80, alpha);
+	double fx = cx + d * pw * 0.55, fy = ground - ph * 0.3;
+	double bite = fmod(event->t * 0.2, 1.0);
+	double bob = bite > 0.8 ? sin((bite - 0.8) * 50.0) * s * 0.003 : sin(event->t * 1.5) * s * 0.0008;
+	lineRGBA(surface, (int)tipx, (int)tipy, (int)fx, (int)(fy + bob), 210, 210, 220, (Uint8)(alpha * 0.8));
+	filledCircleRGBA(surface, (int)fx, (int)(fy + bob), 2, 235, 80, 70, alpha);
+	for(int r = 0; r < 3; r++) {
+		double u = fmod(event->t * 0.4 + r / 3.0, 1.0);
+		ellipseRGBA(surface, (int)fx, (int)fy, (int)(3 + u * s * 0.025), (int)(1 + u * s * 0.008), 190, 215, 240, weapon_alpha(150.0 * (1.0 - u) * fin * event->fade));
+	}
+	if(bite > 0.8) {
+		double q = (bite - 0.8) / 0.2;
+		double jx = fx + d * q * s * 0.012, jy = fy - sin(q * 3.14159) * s * 0.03;
+		filledEllipseRGBA(surface, (int)jx, (int)jy, (int)(s * 0.006) + 1, (int)(s * 0.003) + 1, 200, 215, 235, weapon_alpha(230.0 * event->fade));
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5816,6 +5851,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_ropebridge,
 	hill_belltower,
 	hill_maze,
+	hill_fisher,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
