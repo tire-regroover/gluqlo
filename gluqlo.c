@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 127
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 82         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 83         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5572,6 +5572,40 @@ static void hill_laundry(const HillEvent *event) {
 	weapon_glow(surface, cx, (g1 + g2) * 0.5 - s * 0.006, 2.0, lamp, 190.0 * smooth_step(0.15, 0.25, event->progress) * event->fade * (0.85 + 0.15 * sin(event->t * 5.0)));
 }
 
+// A gentle wooden water-wheel pump by a well: a bucket rises on a rope, tips, and a silver trickle runs off down the hill.
+static void hill_well(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 44));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double up = smooth_step(0.0, 0.1, event->progress);
+	double w = s * 0.022, h = s * 0.02 * up;
+	boxRGBA(surface, (int)(cx - w), (int)(ground - h), (int)(cx + w), (int)ground, 118, 112, 120, alpha);
+	boxRGBA(surface, (int)(cx - w), (int)(ground - h), (int)(cx + w), (int)(ground - h + 2), 150, 144, 152, alpha);
+	double post = s * 0.045 * up;
+	thickLineRGBA(surface, (int)(cx - w), (int)(ground - h), (int)(cx - w), (int)(ground - h - post), 3, 100, 74, 58, alpha);
+	thickLineRGBA(surface, (int)(cx + w), (int)(ground - h), (int)(cx + w), (int)(ground - h - post), 3, 100, 74, 58, alpha);
+	filledTrigonRGBA(surface, (int)(cx - w * 1.5), (int)(ground - h - post), (int)(cx + w * 1.5), (int)(ground - h - post), (int)cx, (int)(ground - h - post - s * 0.02), 120, 70, 60, alpha);
+	double cycle = fmod(event->t * 0.25, 1.0);
+	double lift = cycle < 0.6 ? cycle / 0.6 : 1.0;
+	double by = ground - h - post * 0.15 - lift * post * 0.65;
+	thickLineRGBA(surface, (int)cx, (int)(ground - h - post), (int)cx, (int)by, 1, 200, 190, 170, alpha);
+	boxRGBA(surface, (int)(cx - s * 0.006), (int)by, (int)(cx + s * 0.006), (int)(by + s * 0.009), 140, 100, 70, alpha);
+	if(cycle >= 0.6) {
+		double pour = (cycle - 0.6) / 0.4;
+		for(int d = 0; d < 8; d++) {
+			double u = fmod(pour * 2.0 + d / 8.0, 1.0);
+			filledCircleRGBA(surface, (int)(cx + event->direction * (s * 0.008 + u * s * 0.02)), (int)(by + s * 0.01 + u * u * (ground - by)), 1, 190, 225, 250, weapon_alpha(220.0 * (1.0 - u * 0.4) * smooth_step(0.0, 0.2, pour) * event->fade));
+		}
+	}
+	for(int k = 0; k < 14; k++) {
+		double u = fmod(event->t * 0.4 + k / 14.0, 1.0);
+		double sx = cx + event->direction * (w + u * s * 0.2), sy = hill_ground(event, sx) - 1.0;
+		filledCircleRGBA(surface, (int)sx, (int)sy, 1, 180, 215, 245, weapon_alpha(180.0 * (1.0 - u) * smooth_step(0.1, 0.2, event->progress) * event->fade));
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5633,6 +5667,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_stepstones,
 	hill_seesaw,
 	hill_laundry,
+	hill_well,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
