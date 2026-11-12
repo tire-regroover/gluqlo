@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 134
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 89         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 90         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5812,6 +5812,42 @@ static void hill_lanterntree(const HillEvent *event) {
 	}
 }
 
+// A blacksmith's forge: the anvil rings, a hammer rises and falls, and a fan of orange sparks leaps from each strike.
+static void hill_forge(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 52));
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double up = smooth_step(0.0, 0.1, event->progress);
+	static const Uint8 fire[3] = { 255, 160, 70 };
+	double w = s * 0.03 * up, h = s * 0.03 * up;
+	boxRGBA(surface, (int)(cx - d * s * 0.04 - w), (int)(ground - h), (int)(cx - d * s * 0.04 + w), (int)ground, 90, 70, 66, alpha);
+	boxRGBA(surface, (int)(cx - d * s * 0.04 - w * 0.5), (int)(ground - h * 0.7), (int)(cx - d * s * 0.04 + w * 0.5), (int)(ground - h * 0.2), 255, 170, 80, weapon_alpha(235.0 * smooth_step(0.1, 0.2, event->progress) * (0.85 + 0.15 * sin(event->t * 8.0)) * event->fade));
+	weapon_glow(surface, cx - d * s * 0.04, ground - h * 0.45, w * 0.7, fire, 100.0 * smooth_step(0.1, 0.2, event->progress) * event->fade);
+	double ax = cx + d * s * 0.02, ay = ground - s * 0.012;
+	boxRGBA(surface, (int)(ax - s * 0.018), (int)(ay - s * 0.009), (int)(ax + s * 0.018), (int)ay, 120, 124, 138, alpha);
+	boxRGBA(surface, (int)(ax - s * 0.009), (int)ay, (int)(ax + s * 0.009), (int)ground, 100, 104, 116, alpha);
+	double beat = fmod(event->t * 1.1, 1.0);
+	double swing = beat < 0.7 ? smooth_step(0.0, 0.7, beat) : 1.0 - smooth_step(0.7, 0.78, beat);
+	double handx = ax - d * s * 0.05, handy = ground - s * 0.03;
+	double tipx = ax - d * s * 0.004, tipy = ay - s * 0.008 - (1.0 - swing) * s * 0.05;
+	thickLineRGBA(surface, (int)handx, (int)ground, (int)handx, (int)(handy - s * 0.004), 4, 150, 120, 110, alpha);
+	thickLineRGBA(surface, (int)handx, (int)handy, (int)tipx, (int)tipy, 3, 190, 150, 110, alpha);
+	filledCircleRGBA(surface, (int)tipx, (int)tipy, (int)(s * 0.004) + 1, 150, 154, 168, alpha);
+	filledCircleRGBA(surface, (int)handx, (int)(handy - s * 0.012), (int)(s * 0.006) + 1, 232, 196, 166, alpha);
+	if(beat >= 0.7 && beat < 1.0) {
+		double q = (beat - 0.7) / 0.3;
+		for(int p = 0; p < 12; p++) {
+			double a = -3.14159 * (0.1 + 0.8 * p / 11.0);
+			double r = q * s * (0.025 + 0.02 * hill_random(event, p, 53));
+			filledCircleRGBA(surface, (int)(ax + cos(a) * r), (int)(ay + sin(a) * r + q * q * s * 0.02), 1, 255, 200, 110, weapon_alpha(230.0 * (1.0 - q) * event->fade));
+		}
+		weapon_glow(surface, ax, ay - s * 0.004, 1.6, fire, 200.0 * (1.0 - q) * event->fade);
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5880,6 +5916,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_maze,
 	hill_fisher,
 	hill_lanterntree,
+	hill_forge,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
