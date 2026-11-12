@@ -12,16 +12,12 @@ L-Space is a fork of [Gluqlo](https://github.com/alexanderk23/gluqlo) by Alexand
 The flip cards and the flip animation are theirs. Everything behind and around the cards is new in this branch.
 It is not affiliated with, or endorsed by, the upstream project.
 
-## How L-Space differs from Gluqlo
+## What L-Space adds
 
-| | Gluqlo (upstream) | Gluqlo L-Space |
-|---|---|---|
-| Background | plain dark background | procedural night landscape: nebula, clouds, stars, three ridges, flocks of birds |
-| Time of year | none | four seasons that blend into each other |
-| Weather | none | clear, sunset, rain, storm with lightning, snow, blizzard, fog, aurora |
-| Scenery events | none | well over a hundred unique events, scheduled at random (see below) |
-| Ship battles | none | fleet battles, furballs and dogfights with nine weapon types, explosions and wrecks |
-| Testing | none | `-effect NAME[:KIND]` and `-seed N` to see any event on demand |
+Behind the cards there is a procedurally drawn night landscape: nebula, clouds, stars, three ridges and flocks
+of birds. It moves through four seasons and a changing cycle of weather (clear, sunset, rain, storm, snow, fog,
+aurora). On top of that, a large set of scenery events turns up at random times. For testing, `-effect NAME[:KIND]`
+and `-seed N` show any event on demand.
 
 ### Scenery events
 
