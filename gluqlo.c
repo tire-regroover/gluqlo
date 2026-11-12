@@ -238,7 +238,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
 #define RARE_SKY_KINDS 128
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 83         // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 84         // things that happen on the hills (see render_hill_event)
 
 typedef struct {
 	const char *name;
@@ -5606,6 +5606,44 @@ static void hill_well(const HillEvent *event) {
 	}
 }
 
+// A kiln on the hillside glows hot; potters carry glowing pots out one by one and set them in a row to cool.
+static void hill_kiln(const HillEvent *event) {
+	SDL_Surface *surface = event->surface;
+	double s = event->scale;
+	int d = event->direction;
+	double cx = surface->w * (d > 0 ? 0.25 : 0.75);
+	double ground = hill_ground(event, cx);
+	Uint8 alpha = weapon_alpha(240.0 * event->fade);
+	double up = smooth_step(0.0, 0.1, event->progress);
+	double r = s * 0.03 * up;
+	static const Uint8 fire[3] = { 255, 150, 60 };
+	filledEllipseRGBA(surface, (int)cx, (int)ground, (int)r, (int)(r * 1.1), 120, 80, 64, alpha);
+	filledEllipseRGBA(surface, (int)cx, (int)ground, (int)(r * 0.8), (int)(r * 0.9), 96, 64, 52, alpha);
+	boxRGBA(surface, (int)(cx - r * 0.3), (int)(ground - r * 1.1 - s * 0.012), (int)(cx + r * 0.3), (int)(ground - r * 0.9), 104, 72, 58, alpha);
+	double heat = smooth_step(0.08, 0.18, event->progress) * (0.85 + 0.15 * sin(event->t * 6.0));
+	filledEllipseRGBA(surface, (int)cx, (int)(ground - r * 0.1), (int)(r * 0.35) + 1, (int)(r * 0.4) + 1, 255, 190, 90, weapon_alpha(235.0 * heat * event->fade));
+	weapon_glow(surface, cx, ground - r * 0.1, r * 0.4, fire, 120.0 * heat * event->fade);
+	for(int p = 0; p < 10; p++) {
+		double u = fmod(event->t * 0.2 + p / 10.0, 1.0);
+		filledCircleRGBA(surface, (int)(cx + sin(event->t + p) * s * 0.006 * u * 3.0), (int)(ground - r * 1.1 - s * 0.012 - u * s * 0.12), (int)(2 + u * 5), 130, 130, 140, weapon_alpha(100.0 * (1.0 - u) * heat * event->fade));
+	}
+	const int pots = 6;
+	for(int i = 0; i < pots; i++) {
+		double ready = 0.25 + i * 0.1;
+		double carry = smooth_step(ready, ready + 0.08, event->progress);
+		double rest = surface->w * (d > 0 ? 0.42 + i * 0.07 : 0.58 - i * 0.07);
+		double px = cx + d * r * 1.2 + (rest - (cx + d * r * 1.2)) * carry;
+		double pg = hill_ground(event, px);
+		if(event->progress < ready - 0.02) continue;
+		double cool = smooth_step(ready + 0.06, ready + 0.3, event->progress);
+		double pr = s * 0.007;
+		Uint8 cr = (Uint8)(255 - 150 * cool), cg = (Uint8)(150 - 50 * cool), cb = (Uint8)(60 + 30 * cool);
+		filledEllipseRGBA(surface, (int)px, (int)(pg - pr * 1.2), (int)pr + 1, (int)(pr * 1.2) + 1, cr, cg, cb, alpha);
+		boxRGBA(surface, (int)(px - pr * 0.5), (int)(pg - pr * 2.6), (int)(px + pr * 0.5), (int)(pg - pr * 2.2), cr, cg, cb, alpha);
+		if(cool < 0.7) weapon_glow(surface, px, pg - pr * 1.2, pr, fire, 120.0 * (1.0 - cool) * event->fade);
+	}
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5668,6 +5706,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 	hill_seesaw,
 	hill_laundry,
 	hill_well,
+	hill_kiln,
 	// NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
