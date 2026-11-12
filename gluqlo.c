@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 126
+#define RARE_SKY_KINDS 127
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 82         // things that happen on the hills (see render_hill_event)
 
@@ -7915,6 +7915,27 @@ static void sky_event_125(const SkyEvent *event) {
 	weapon_glow(surface, tx, ty, 1.0, sheen, 90.0 * fade);
 }
 
+// A school of glowing lantern-fish drifts through the sky, each with a bright bulb dangling in front of its mouth.
+static void sky_event_126(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	static const Uint8 bulb[3] = { 150, 255, 220 };
+	for(int f = 0; f < 6; f++) {
+		unsigned int h = fx_hash(seed, f);
+		double fx = x - direction * f * size * 3.0 + sin(phase / 800.0 + f) * size * 0.3;
+		double fy = y + (f % 3 - 1) * size * 1.3 + ((int)(h % 3) - 1) * size * 0.3 + sin(phase / 600.0 + f * 1.7) * size * 0.3;
+		double len = size * (0.8 + 0.1 * (h % 4));
+		filledEllipseRGBA(surface, (int)fx, (int)fy, (int)len, (int)(len * 0.45) + 1, 90, 120, 170, alpha);
+		filledEllipseRGBA(surface, (int)fx, (int)(fy - len * 0.1), (int)(len * 0.8), (int)(len * 0.25) + 1, 140, 175, 220, (Uint8)(alpha * 0.8));
+		double wag = sin(phase / 260.0 + f) * len * 0.3;
+		filledTrigonRGBA(surface, (int)(fx - direction * len * 0.8), (int)fy, (int)(fx - direction * len * 1.5), (int)(fy - len * 0.4 + wag), (int)(fx - direction * len * 1.5), (int)(fy + len * 0.4 + wag), 100, 135, 185, alpha);
+		double mx = fx + direction * len * 0.9;
+		filledCircleRGBA(surface, (int)(mx - direction * len * 0.3), (int)(fy - len * 0.1), 1, 240, 250, 255, alpha);
+		double bx = mx + direction * len * 0.4, by = fy - len * 0.9 + sin(phase / 400.0 + f) * len * 0.15;
+		lineRGBA(surface, (int)(fx + direction * len * 0.4), (int)(fy - len * 0.4), (int)bx, (int)by, 150, 190, 200, (Uint8)(alpha * 0.8));
+		weapon_glow(surface, bx, by, 2.6, bulb, 230.0 * (0.7 + 0.3 * sin(phase / 300.0 + f)) * fade);
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8036,6 +8057,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_123,
 	sky_event_124,
 	sky_event_125,
+	sky_event_126,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
