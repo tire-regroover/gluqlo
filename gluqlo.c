@@ -236,7 +236,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 129
+#define RARE_SKY_KINDS 130
 #define RARE_SKY_CLASSIC_KINDS 23   // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS 85         // things that happen on the hills (see render_hill_event)
 
@@ -8100,6 +8100,40 @@ static void sky_event_128(const SkyEvent *event) {
 	}
 }
 
+// A great white heron glides across the sky with slow wingbeats, long legs trailing, a ripple of light under each stroke.
+static void sky_event_129(const SkyEvent *event) {
+	SKY_EVENT_UNPACK(event);
+	double bob = cos(phase / 520.0) * size * 0.15;
+	double cy = y + bob;
+	for(int wing = 1; wing >= 0; wing--) {
+		// Far wing (wing 1) is dimmer and a little behind; both beat together.
+		double lag = wing ? 0.12 : 0.0;
+		double lift = sin(phase / 520.0 - lag * 3.0);
+		double ox = wing ? direction * size * 0.25 : 0.0;
+		double tipx = x + ox - direction * size * (1.6 + 0.5 * fabs(lift)), tipy = cy - size * 2.0 * lift - size * 0.3;
+		double armx = x + ox - direction * size * 0.2, army = cy - size * 1.2 * lift - size * 0.15;
+		Uint8 a = (Uint8)(alpha * (wing ? 0.65 : 1.0));
+		filledTrigonRGBA(surface, (int)(x + ox + direction * size * 0.6), (int)cy, (int)(x + ox - direction * size * 0.7), (int)cy, (int)armx, (int)army, 245, 246, 250, a);
+		filledTrigonRGBA(surface, (int)(x + ox - direction * size * 0.7), (int)cy, (int)armx, (int)army, (int)tipx, (int)tipy, 228, 232, 244, a);
+		lineRGBA(surface, (int)armx, (int)army, (int)tipx, (int)tipy, 200, 206, 224, a);
+	}
+	filledEllipseRGBA(surface, x, (int)cy, (int)(size * 0.9), (int)(size * 0.24) + 1, 250, 250, 252, alpha);
+	for(int seg = 0; seg < 5; seg++) {
+		double f = seg / 4.0;
+		double nx = x + direction * (size * 0.8 + f * size * 0.7), ny = cy - size * 0.1 - sin(f * 3.14159) * size * 0.45 + f * size * 0.05;
+		filledCircleRGBA(surface, (int)nx, (int)ny, (int)(size * 0.1) + 1, 250, 250, 252, alpha);
+	}
+	filledCircleRGBA(surface, (int)(x + direction * size * 1.6), (int)(cy - size * 0.05), (int)(size * 0.16) + 1, 250, 250, 252, alpha);
+	filledTrigonRGBA(surface, (int)(x + direction * size * 1.7), (int)(cy - size * 0.1), (int)(x + direction * size * 2.4), (int)(cy - size * 0.02), (int)(x + direction * size * 1.7), (int)(cy + size * 0.03), 235, 190, 80, alpha);
+	for(int leg = 0; leg < 2; leg++) {
+		thickLineRGBA(surface, (int)(x - direction * size * 0.7), (int)(cy + size * 0.05 * leg), (int)(x - direction * size * (2.0 + 0.15 * leg)), (int)(cy + size * 0.35 + size * 0.05 * leg), 1, 60, 60, 66, alpha);
+	}
+	for(int r = 0; r < 3; r++) {
+		double u = fmod(phase / 1040.0 + r / 3.0, 1.0);
+		ellipseRGBA(surface, (int)(x - direction * u * size * 0.6), (int)(cy + size * 1.6), (int)(size * (0.3 + u * 1.0)), (int)(size * (0.06 + u * 0.18)) + 1, 220, 230, 245, (Uint8)(alpha * 0.45 * (1.0 - u)));
+	}
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -8224,6 +8258,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 	sky_event_126,
 	sky_event_127,
 	sky_event_128,
+	sky_event_129,
 	// NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])

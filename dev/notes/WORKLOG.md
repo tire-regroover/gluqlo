@@ -27,6 +27,7 @@ captured after 10 s.
 | Events added after that (33 of the planned 100 so far) | 143 |
 | Third session: 4 hill + 5 sky | 152 (the code count gives 155) |
 | Fourth session: 24 hill + 28 sky in five batches | 207 |
+| Fifth session: events added one at a time (see below) | 221 and counting |
 
 The 27 "others": alien weather 5, long scene 5, world jump 4, fullscreen 4, foreground 4, and one each for
 screen fade, flyby, background battle, fleet battle and dogfight.
@@ -76,6 +77,17 @@ Fourth session (goal: over 200). Hill 54-77 and sky 94-121, five batches, each b
 - Several new events are small, so on a real screen they are subtle. Not checked on a real screen.
 - Honest count: the total is 207 distinct visuals by the counting rule above. By raw kind number it is
   122 sky + 78 hill + 27 others = 227, but 20 sky kinds (0-22) collapse to 3 classic visuals.
+
+Fifth session (one event per commit, each looked at before committing):
+
+- Sky 122 sea turtle, 123 prayer flags, 124 spinning top, 125 feather, 126 lantern-fish, 127 star mobile,
+  128 cloud wave
+- Hill 78 hamlet, 79 stepping stones, 80 seesaw, 81 laundry line, 82 well, 83 kiln, 84 rope bridge
+- Lantern-fish were first dim and overlapping, so they were brightened and spaced out. The cloud wave was
+  first a plain arch with stray spray dots (an unsigned-arithmetic slip in the offset); it was rewritten as a
+  curling swell.
+- The wording "well over a hundred" became "hundreds of" in the `gluqlo.c` header and `gluqlo.xml`.
+- README has an openSUSE section; the package names are from memory and untested.
 
 Screenshots are in `dev/captures/events/` (`rare_sky-N.jpg`, `hill_event-N.jpg`); contact sheets are in
 `dev/captures/` (`sheet_*.jpg`).
