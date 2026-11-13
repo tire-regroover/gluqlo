@@ -4,7 +4,7 @@ A flip clock that sits inside a night landscape. Things happen behind it while i
 
 ![Gluqlo L-Space](preview.png)
 
-L-Space is a fork of [Gluqlo](https://github.com/alexanderk23/gluqlo) by Alexander Kovalenko, a SDL remake of the
+L-Space is a fork of [Gluqlo](https://github.com/alexanderk23/gluqlo) by Alexander Kovalenko, an SDL remake of the
 [Fliqlo screensaver](http://9031.com/goodies/#fliqlo). Gluqlo is itself based on
 [noflipqlo](https://github.com/bhm/noflipqlo) (Now Open Flipqlo 2.0) by [Jacek Kuźniarski](https://github.com/bhm).
 The flip cards and the flip animation are theirs. Everything behind and around the cards is new in this branch.
@@ -82,7 +82,7 @@ Scenery events normally appear at random times. To see one right away, run only 
 ## Credits and licence
 
 - Gluqlo © 2014 Alexander Kovalenko; noflipqlo © 2010–2012 Jacek Kuźniarski.
-- L-Space © 2026 tire-regroover, written with the help of GitHub Copilot (Anthropic Claude), DeepSeek and Qwen.
+- L-Space © 2026 tire-regroover, written with the help of GitHub Copilot (Anthropic Claude), GPT, DeepSeek and Qwen.
 
 Released under the ISC licence, the same as upstream. See `LICENSE`.
 
