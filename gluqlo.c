@@ -16,7 +16,7 @@
 * Copyright (c) 2026 tire-regroover (L-Space scenery, weather and events)
 *
 * L-Space was written with the help of AI coding assistants: GitHub Copilot
-* (Anthropic Claude), DeepSeek and Qwen. Their output was directed and reviewed
+* (Anthropic Claude), GPT, DeepSeek and Qwen. Their output was directed and reviewed
 * by tire-regroover.
 *
 * Permission to use, copy, modify, and distribute this software for any
