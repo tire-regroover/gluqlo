@@ -507,7 +507,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 149
+#define RARE_SKY_KINDS 150
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -12829,6 +12829,41 @@ static void sky_event_148(const SkyEvent *event) {
   weapon_glow(surface, x, y, size * 0.42, core_c, 225.0 * fade);
 }
 
+// Quantum prism: a rotating crystal octahedron refracts a single silver
+// starlight ray into a fanning rainbow spectrum across the upper sky.
+static void sky_event_149(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 spec_c[5][3] = {
+      {255, 115, 115}, {255, 200, 105}, {140, 245, 165},
+      {115, 215, 255}, {195, 145, 255}};
+  double r = size * 1.15;
+  double rot = phase / 1900.0;
+  int px[4], py[4];
+  for (int i = 0; i < 4; i++) {
+    double a = rot + i * (M_PI / 2.0);
+    px[i] = x + (int)(cos(a) * r);
+    py[i] = y + (int)(sin(a) * r * 0.72);
+  }
+  // Incoming silver ray
+  thickLineRGBA(surface, x - (int)(size * 2.8), y - (int)(size * 0.6), x, y, 2,
+                235, 242, 255, weapon_alpha(150.0 * fade));
+  // Refracted spectrum fan
+  for (int b = 0; b < 5; b++) {
+    double dy = (b - 2) * size * 0.36;
+    thickLineRGBA(surface, x, y, x + (int)(size * 3.0), (int)(y + dy), 2,
+                  spec_c[b][0], spec_c[b][1], spec_c[b][2],
+                  weapon_alpha(145.0 * fade));
+  }
+  // Translucent crystal prism frame
+  for (int i = 0; i < 4; i++) {
+    int j = (i + 1) % 4;
+    thickLineRGBA(surface, px[i], py[i], px[j], py[j], 2, 215, 235, 255,
+                  weapon_alpha(200.0 * fade));
+  }
+  static const Uint8 core[3] = {240, 248, 255};
+  weapon_glow(surface, x, y, size * 0.25, core, 180.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -12900,7 +12935,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     sky_event_143, sky_event_144, sky_event_145, sky_event_146, sky_event_147,
-    sky_event_148,
+    sky_event_148, sky_event_149,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
