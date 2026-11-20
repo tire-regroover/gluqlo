@@ -642,7 +642,7 @@ static const EffectSpec EFFECT_RARE_SKY = {"rare_sky",
                                            rare_sky_accept};
 static const EffectSpec EFFECT_BATTLE_FLYBY = {
     "battle_flyby", 60000, 1,    6, false,     0, 14000, 0, 0,
-    false,          900,   1100, 0, GROUP_SKY, 4, NULL};
+    false,          900,   1100, 2, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
     0,          true,  900, 1100, 0,     GROUP_SKY, 3,     NULL};
@@ -2581,13 +2581,16 @@ static void render_dogfight(RenderTarget *surface, const EffectWindow *window,
   }
 }
 
-// The old flyby: one ship from each side crosses the sky, firing pulse bolts at
-// the other and passing it in the middle. Nothing is hit.
+// Flyby scenarios:
+//   0: classic head-on pass firing pulse bolts.
+//   1: pursuit ambush — a heavy mid-class raider chases two weaving fighters
+//      across the sky, firing plasma/flak volleys behind them.
 static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
                                 int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
   Uint32 phase = window.phase;
+  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 2);
 
   int size = scale / 170;
   if (size < 4) size = 4;
@@ -2595,15 +2598,43 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
   if (length < 14) length = 14;
   double fade = window.fade;
   double progress = window.progress;
+  int center_y = surface->h * 11 / 100;
+  Uint8 alpha = (Uint8)(150 * fade);
+  Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+
+  if (kind == 1) {
+    int dir = (window.seed >> 3) & 1 ? 1 : -1;
+    double lead_x = dir > 0 ? -length * 2.0 + progress * (surface->w + 4.0 * length)
+                            : surface->w + length * 2.0 -
+                                  progress * (surface->w + 4.0 * length);
+    double chaser_x = lead_x - dir * surface->w * 0.14;
+    double lead_y = center_y + sin(progress * 9.0) * scale * 0.022;
+    double wing_y = center_y - sin(progress * 9.0 + 0.8) * scale * 0.024;
+    double chaser_y = center_y + cos(progress * 5.0) * scale * 0.012;
+    draw_ship_role(surface, (int)lead_x, (int)lead_y, SHIP_SMALL,
+                   window.seed >> 4, length, dir, 0, opacity);
+    draw_ship_role(surface, (int)(lead_x - dir * length * 1.4), (int)wing_y,
+                   SHIP_SMALL, window.seed >> 9, (int)(length * 0.9), dir, 0,
+                   opacity);
+    draw_ship_role(surface, (int)chaser_x, (int)chaser_y, SHIP_MID,
+                   window.seed >> 13, (int)(length * 1.55), dir, 1, opacity);
+    Uint32 volley = phase % 1800;
+    if (volley < 720 && progress > 0.08 && progress < 0.92) {
+      double fx = chaser_x + dir * length * 0.75;
+      double tx = lead_x - dir * length * 0.3;
+      draw_weapon_shot(surface, WEAPON_PLASMA, 0, fx, chaser_y, tx, lead_y,
+                       (double)volley, scale / 95.0, 1, fade, 0,
+                       fx_hash(window.seed, (int)(phase / 1800)));
+    }
+    return;
+  }
+
   int left_x = (int)(-length + progress * (surface->w + 2.0 * length));
   int right_x = surface->w - left_x;
-  int center_y = surface->h * 11 / 100;
   int arc = (int)(sin(progress * 6.28318530718) * scale * 0.018);
   int maneuver = (int)(sin(progress * 12.56637061436) * scale * 0.014);
   int left_y = center_y + arc + maneuver;
   int right_y = center_y - arc - maneuver;
-  Uint8 alpha = (Uint8)(150 * fade);
-  Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
 
   draw_ship_role(surface, left_x, left_y, SHIP_SMALL, window.seed >> 4, length,
                  1, 0, opacity);
