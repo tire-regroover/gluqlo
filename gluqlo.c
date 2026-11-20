@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  99  // things that happen on the hills (see render_hill_event)
+  100  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -8018,6 +8018,44 @@ static void hill_shrikes_tree(const HillEvent *event) {
               150.0 * rise * event->fade);
 }
 
+// "Annihilation" (Jeff VanderMeer): a weathered, pale coastal watchtower
+// stands on the ridge; instead of a normal lantern, a strange spiral of
+// living bioluminescent script winds slowly up its walls and breathes out
+// into the night air.
+static void hill_pale_lighthouse(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.26 + 0.48 * hill_random(event, 0, 65));
+  double ground = hill_ground(event, cx);
+  double h = s * 0.165;
+  double bw = s * 0.022, tw = s * 0.013;
+  Uint8 alpha = weapon_alpha(238.0 * event->fade);
+  static const Uint8 bio_c[3] = {130, 240, 175};
+  // Tapered pale-stone tower silhouette
+  filledTrigonRGBA(surface, (int)(cx - bw), (int)(ground + 2), (int)(cx + bw),
+                   (int)(ground + 2), (int)(cx - tw), (int)(ground - h), 48, 56,
+                   60, alpha);
+  filledTrigonRGBA(surface, (int)(cx + bw), (int)(ground + 2), (int)(cx + tw),
+                   (int)(ground - h), (int)(cx - tw), (int)(ground - h), 48, 56,
+                   60, alpha);
+  boxRGBA(surface, (int)(cx - tw * 1.15), (int)(ground - h - s * 0.014),
+          (int)(cx + tw * 1.15), (int)(ground - h), 32, 38, 44, alpha);
+  // Spiraling bioluminescent script ascending the tower
+  for (int i = 0; i < 12; i++) {
+    double u = (double)i / 11.0;
+    double phase_u = fmod(event->t * 0.25 + u, 1.0);
+    double w = bw * (1.0 - u) + tw * u;
+    double sx = cx + sin(u * 10.0 + event->t * 0.6) * w * 0.85;
+    double sy = ground - u * h * 0.92;
+    weapon_glow(surface, sx, sy, 1.7, bio_c,
+                (110.0 + 115.0 * sin(phase_u * M_PI)) * event->fade);
+  }
+  // Eerie, unfocused green-gold lantern pulse
+  double pulse = 0.55 + 0.45 * sin(event->t * 1.3);
+  weapon_glow(surface, cx, ground - h - s * 0.008, s * 0.016 * pulse, bio_c,
+              190.0 * event->fade);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -8046,6 +8084,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lanterntree,   hill_forge,     hill_seedtree,    hill_stonecircle,
     hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
+    hill_pale_lighthouse,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
