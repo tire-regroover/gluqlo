@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  105  // things that happen on the hills (see render_hill_event)
+  106  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -9009,6 +9009,32 @@ static void hill_canal_skiff(const HillEvent *event) {
               185.0 * event->fade);
 }
 
+// Star-crystal observatory: a stepped basalt dome on the ridge opens its
+// brass shutter to project a soft indigo-cyan starlight beam upward, with
+// motes drifting inside the beam.
+static void hill_prism_observatory(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.28 + 0.44 * hill_random(event, 1, 2));
+  double ground = hill_ground(event, x);
+  double r = s * 0.032;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  // Dome silhouette
+  filledCircleRGBA(surface, (int)x, (int)(ground - r * 0.45), (int)r, 18, 22,
+                   32, hull_a);
+  boxRGBA(surface, (int)(x - r * 1.15), (int)(ground - r * 0.45),
+          (int)(x + r * 1.15), (int)(ground + 2), 14, 18, 26, hull_a);
+  // Sweeping indigo-cyan starlight beam
+  double tilt = -0.35 + 0.25 * sin(event->t * 0.45);
+  double bx = x + sin(tilt) * s * 0.19;
+  double by = ground - r * 1.2 - cos(tilt) * s * 0.19;
+  filledTrigonRGBA(surface, (int)(x - 3), (int)(ground - r * 1.1),
+                   (int)(x + 3), (int)(ground - r * 1.1), (int)bx, (int)by,
+                   125, 205, 250, weapon_alpha(48.0 * event->fade));
+  static const Uint8 slit[3] = {150, 225, 255};
+  weapon_glow(surface, x, ground - r * 1.15, 2.2, slit, 175.0 * event->fade);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -9039,6 +9065,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
     hill_glass_forest, hill_tidal_bell, hill_canal_skiff,
+    hill_prism_observatory,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
