@@ -508,7 +508,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 150
+#define RARE_SKY_KINDS 151
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -12944,6 +12944,38 @@ static void sky_event_149(const SkyEvent *event) {
   weapon_glow(surface, x, y, size * 0.25, core, 180.0 * fade);
 }
 
+// Orbital docking ring: a rotating spoked wheel station with running lights
+// and a tiny shuttle approaching along its central axis.
+static void sky_event_150(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 rim_c[3] = {135, 165, 200};
+  static const Uint8 beacon_c[3] = {255, 185, 95};
+  static const Uint8 shuttle_c[3] = {155, 225, 255};
+  double rx = size * 1.45;
+  double ry = size * 0.62;
+  double rot = phase / 1400.0;
+  ellipseRGBA(surface, x, y, (int)rx, (int)ry, rim_c[0], rim_c[1], rim_c[2],
+              weapon_alpha(150.0 * fade));
+  ellipseRGBA(surface, x, y, (int)(rx * 0.72), (int)(ry * 0.72), rim_c[0],
+              rim_c[1], rim_c[2], weapon_alpha(105.0 * fade));
+  for (int i = 0; i < 6; i++) {
+    double a = rot + i * (M_PI / 3.0);
+    double sx = x + cos(a) * rx;
+    double sy = y + sin(a) * ry;
+    lineRGBA(surface, x, y, (int)sx, (int)sy, rim_c[0], rim_c[1], rim_c[2],
+             weapon_alpha(115.0 * fade));
+    if ((i + (int)(phase / 420)) % 2 == 0) {
+      weapon_glow(surface, sx, sy, 1.3, beacon_c, 150.0 * fade);
+    }
+  }
+  filledCircleRGBA(surface, x, y, 2, 220, 235, 255, weapon_alpha(200.0 * fade));
+  // Tiny shuttle gliding toward the hub
+  double sh_off = (1.0 - progress) * size * 1.6;
+  double sh_x = x - direction * sh_off;
+  double sh_y = y + size * 0.35 * (1.0 - progress);
+  weapon_glow(surface, sh_x, sh_y, 1.2, shuttle_c, 175.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -13015,7 +13047,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     sky_event_143, sky_event_144, sky_event_145, sky_event_146, sky_event_147,
-    sky_event_148, sky_event_149,
+    sky_event_148, sky_event_149, sky_event_150,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
