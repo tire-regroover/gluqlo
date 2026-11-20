@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  100  // things that happen on the hills (see render_hill_event)
+  101  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -8056,6 +8056,47 @@ static void hill_pale_lighthouse(const HillEvent *event) {
               190.0 * event->fade);
 }
 
+// Weird maritime horror (Hodgson / Mieville): the dark, tilted hulk of an
+// ancient stranded galleon rests high on the ridge, its broken masts draped
+// in tattered rigging while cold St. Elmo's fire flickers at the yardarms.
+static void hill_derelict_galleon(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 0, 66));
+  double ground = hill_ground(event, cx);
+  double hw = s * 0.068, hh = s * 0.024;
+  Uint8 alpha = weapon_alpha(242.0 * event->fade);
+  static const Uint8 elmo[3] = {125, 205, 245};
+  // Tilted hull silhouette
+  filledTrigonRGBA(surface, (int)(cx - hw), (int)(ground - hh * 0.5),
+                   (int)(cx + hw * 0.9), (int)(ground - hh * 0.8),
+                   (int)(cx - hw * 0.45), (int)(ground + 3), 16, 18, 26, alpha);
+  filledTrigonRGBA(surface, (int)(cx + hw * 0.9), (int)(ground - hh * 0.8),
+                   (int)(cx + hw * 0.55), (int)(ground + 3),
+                   (int)(cx - hw * 0.45), (int)(ground + 3), 16, 18, 26, alpha);
+  // Two canted, broken masts and yardarms
+  for (int m = 0; m < 2; m++) {
+    double mx = cx + (m == 0 ? -hw * 0.2 : hw * 0.28);
+    double my0 = ground - hh * 0.5;
+    double mh = s * (m == 0 ? 0.11 : 0.085);
+    double lean = s * (m == 0 ? -0.016 : -0.011);
+    double top_x = mx + lean, top_y = my0 - mh;
+    thickLineRGBA(surface, (int)mx, (int)my0, (int)top_x, (int)top_y, 2, 22, 25,
+                  34, alpha);
+    double y_y = my0 - mh * 0.65;
+    double y_x = mx + lean * 0.65;
+    double yw = s * (m == 0 ? 0.032 : 0.022);
+    lineRGBA(surface, (int)(y_x - yw), (int)(y_y + yw * 0.15),
+             (int)(y_x + yw), (int)(y_y - yw * 0.15), 26, 30, 40, alpha);
+    // Faint St. Elmo's fire at the masthead & yardarm tips
+    double flick = 0.4 + 0.6 * fabs(sin(event->t * 2.4 + m * 1.9));
+    weapon_glow(surface, top_x, top_y, 1.7, elmo,
+                165.0 * flick * event->fade);
+    weapon_glow(surface, y_x - yw, y_y + yw * 0.15, 1.2, elmo,
+                115.0 * flick * event->fade);
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -8084,7 +8125,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lanterntree,   hill_forge,     hill_seedtree,    hill_stonecircle,
     hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
-    hill_pale_lighthouse,
+    hill_pale_lighthouse, hill_derelict_galleon,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
