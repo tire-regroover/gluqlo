@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  102  // things that happen on the hills (see render_hill_event)
+  103  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -8134,6 +8134,40 @@ static void hill_threshold_arch(const HillEvent *event) {
   }
 }
 
+// "The Crystal World" (J.G. Ballard): a grove of petrified, vitrified trees
+// crystallizes along the ridge, catching starlight in sharp prismatic facets
+// of pale ice-cyan and amber-rose.
+static void hill_glass_forest(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.26 + 0.48 * hill_random(event, 0, 68));
+  double spread = s * 0.22;
+  double grow = smooth_step(0.04, 0.45, event->progress);
+  static const Uint8 ice_c[3] = {170, 235, 250};
+  static const Uint8 rose_c[3] = {235, 185, 225};
+  for (int t = 0; t < 7; t++) {
+    double tx = cx + (t - 3) * (spread / 6.0) +
+                (hill_random(event, t, 1) - 0.5) * s * 0.015;
+    double ground = hill_ground(event, tx);
+    double h = s * (0.055 + 0.065 * hill_random(event, t, 2)) * grow;
+    if (h < 2.0) continue;
+    Uint8 ta = weapon_alpha(190.0 * event->fade);
+    thickLineRGBA(surface, (int)tx, (int)(ground + 2), (int)tx,
+                  (int)(ground - h), 2, 130, 185, 210, ta);
+    for (int b = 0; b < 3; b++) {
+      double by = ground - h * (0.45 + b * 0.2);
+      int dir = ((t + b) % 2 == 0) ? 1 : -1;
+      double bx = tx + dir * h * (0.36 - b * 0.08);
+      double tip_y = by - h * 0.26;
+      lineRGBA(surface, (int)tx, (int)by, (int)bx, (int)tip_y, 175, 225, 245,
+               ta);
+      double glint = 0.25 + 0.75 * fabs(sin(event->t * 1.5 + t * 1.3 + b));
+      weapon_glow(surface, bx, tip_y, 1.4, (t + b) % 3 == 0 ? rose_c : ice_c,
+                  155.0 * glint * grow * event->fade);
+    }
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -8163,6 +8197,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
+    hill_glass_forest,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
