@@ -507,7 +507,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 146
+#define RARE_SKY_KINDS 147
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -12218,6 +12218,38 @@ static void sky_event_145(const SkyEvent *event) {
   }
 }
 
+// "Rendezvous with Rama" (Arthur C. Clarke): a colossal, slowly rotating
+// cylindrical habitat with banded hull ribs, a lit aft radiator ring, and
+// faint navigation strobes drifting silently across the upper sky.
+static void sky_event_146(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double len = size * 3.4;
+  double rad = size * 0.72;
+  double cx = x;
+  double cy = y;
+  int x0 = (int)(cx - direction * len * 0.5);
+  int x1 = (int)(cx + direction * len * 0.5);
+  int left = x0 < x1 ? x0 : x1;
+  int right = x0 < x1 ? x1 : x0;
+  Uint8 hull_a = weapon_alpha(205.0 * fade);
+  boxRGBA(surface, left, (int)(cy - rad), right, (int)(cy + rad), 46, 54, 68,
+          hull_a);
+  // Rotating longitudinal hull bands
+  double spin = phase / 1400.0;
+  for (int b = 0; b < 4; b++) {
+    double by = cy + sin(spin + b * (M_PI * 0.5)) * rad * 0.85;
+    lineRGBA(surface, left, (int)by, right, (int)by, 94, 110, 132,
+             weapon_alpha(115.0 * fade));
+  }
+  // End-cap ellipses and aft radiator glow
+  filledEllipseRGBA(surface, x1, (int)cy, (int)(rad * 0.34), (int)rad, 28, 34,
+                    46, hull_a);
+  ellipseRGBA(surface, x0, (int)cy, (int)(rad * 0.34), (int)rad, 155, 195, 225,
+              weapon_alpha(150.0 * fade));
+  static const Uint8 strobe[3] = {160, 225, 255};
+  weapon_glow(surface, x0, cy, 1.5, strobe, 165.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -12288,7 +12320,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_128, sky_event_129, sky_event_130, sky_event_131, sky_event_132,
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
-    sky_event_143, sky_event_144, sky_event_145,
+    sky_event_143, sky_event_144, sky_event_145, sky_event_146,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
