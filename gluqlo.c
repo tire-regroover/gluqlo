@@ -508,11 +508,11 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 154
+#define RARE_SKY_KINDS 155
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  110  // things that happen on the hills (see render_hill_event)
+  111  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -9238,6 +9238,34 @@ static void hill_signal_pyre(const HillEvent *event) {
   }
 }
 
+// Tide-lantern pier: a dark wooden jetty jutting along the ridge hollow with
+// three hanging sea-green glass lanterns swaying gently in the night breeze.
+static void hill_tide_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.24 + 0.52 * hill_random(event, 9, 17));
+  double ground = hill_ground(event, x);
+  double deck_y = ground - s * 0.022;
+  double span = s * 0.095;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  thickLineRGBA(surface, (int)(x - span), (int)deck_y, (int)(x + span),
+                (int)deck_y, 2, 22, 26, 36, hull_a);
+  static const Uint8 lan_c[3] = {120, 235, 200};
+  for (int i = -1; i <= 1; i++) {
+    double px = x + i * span * 0.72;
+    double pg = hill_ground(event, px);
+    double top_y = deck_y - s * 0.032;
+    lineRGBA(surface, (int)px, (int)(pg + 2), (int)px, (int)top_y, 20, 24, 34,
+             hull_a);
+    double sway = sin(event->t * 1.4 + i * 1.1) * s * 0.005;
+    double lx = px + s * 0.012 + sway;
+    double ly = top_y + s * 0.014;
+    lineRGBA(surface, (int)px, (int)top_y, (int)lx, (int)ly, 65, 80, 95,
+             weapon_alpha(180.0 * event->fade));
+    weapon_glow(surface, lx, ly, 1.6, lan_c, 195.0 * event->fade);
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -9269,7 +9297,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
     hill_glass_forest, hill_tidal_bell, hill_canal_skiff,
     hill_prism_observatory, hill_aurora_turbine, hill_solar_mirror,
-    hill_ether_fountain, hill_signal_pyre,
+    hill_ether_fountain, hill_signal_pyre, hill_tide_lantern,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
@@ -13141,6 +13169,24 @@ static void sky_event_153(const SkyEvent *event) {
   weapon_glow(surface, x, y, size * 0.32, core_c, 210.0 * fade);
 }
 
+// Comet shower: a tight cluster of three icy cyan-white cometoids streaking
+// diagonally in formation with faint parallel dust tails.
+static void sky_event_154(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 head_c[3] = {205, 240, 255};
+  static const Uint8 tail_c[3] = {125, 190, 245};
+  for (int i = 0; i < 3; i++) {
+    double ox = (i - 1) * size * 0.95;
+    double oy = (i == 1 ? -0.45 : 0.35) * size;
+    double cx = x + ox, cy = y + oy;
+    double tx = cx - direction * size * 2.6;
+    double ty = cy - size * 0.75;
+    thickLineRGBA(surface, (int)cx, (int)cy, (int)tx, (int)ty, 2, tail_c[0],
+                  tail_c[1], tail_c[2], weapon_alpha(120.0 * fade));
+    weapon_glow(surface, cx, cy, 1.5, head_c, 200.0 * fade);
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -13213,7 +13259,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     sky_event_143, sky_event_144, sky_event_145, sky_event_146, sky_event_147,
     sky_event_148, sky_event_149, sky_event_150, sky_event_151, sky_event_152,
-    sky_event_153,
+    sky_event_153, sky_event_154,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
