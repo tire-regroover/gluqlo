@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  103  // things that happen on the hills (see render_hill_event)
+  104  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -8551,6 +8551,36 @@ static void hill_glass_forest(const HillEvent *event) {
   }
 }
 
+// A sunken tidal bell tower rises from the ridge mist, its bronze bell
+// swinging in slow arcs and sending golden acoustic shock-rings outward.
+static void hill_tidal_bell(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 0, 103));
+  double ground = hill_ground(event, cx);
+  double h = s * 0.135;
+  double w = s * 0.036;
+  Uint8 stone_a = weapon_alpha(215.0 * event->fade);
+  // Tapered stone spire
+  filledTrigonRGBA(surface, (int)(cx - w * 0.6), (int)(ground + 2),
+                   (int)(cx + w * 0.6), (int)(ground + 2), (int)cx,
+                   (int)(ground - h), 34, 42, 54, stone_a);
+  // Open belfry arch near the top
+  double bell_y = ground - h * 0.72;
+  filledCircleRGBA(surface, (int)cx, (int)bell_y, (int)(w * 0.28), 14, 18, 28,
+                   stone_a);
+  // Swinging bronze bell
+  double swing = sin(event->t * 1.9) * w * 0.22;
+  filledCircleRGBA(surface, (int)(cx + swing), (int)(bell_y + 2),
+                   (int)(w * 0.16) + 1, 212, 168, 86,
+                   weapon_alpha(230.0 * event->fade));
+  // Expanding acoustic rings on each peak swing
+  double toll = fmod(event->t * 0.6048, 1.0);
+  double rr = s * (0.02 + toll * 0.14);
+  circleRGBA(surface, (int)cx, (int)bell_y, (int)rr, 245, 205, 118,
+             weapon_alpha(145.0 * (1.0 - toll) * event->fade));
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -8580,7 +8610,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
-    hill_glass_forest,
+    hill_glass_forest, hill_tidal_bell,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
