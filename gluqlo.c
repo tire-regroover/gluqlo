@@ -620,7 +620,7 @@ static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     false,
                                                     900,
                                                     1700,
-                                                    2,
+                                                    3,
                                                     GROUP_SKY,
                                                     1,
                                                     NULL};
@@ -642,7 +642,7 @@ static const EffectSpec EFFECT_RARE_SKY = {"rare_sky",
                                            rare_sky_accept};
 static const EffectSpec EFFECT_BATTLE_FLYBY = {
     "battle_flyby", 60000, 1,    6, false,     0, 14000, 0, 0,
-    false,          900,   1100, 2, GROUP_SKY, 4, NULL};
+    false,          900,   1100, 3, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
     0,          true,  900, 1100, 3,     GROUP_SKY, 3,     NULL};
@@ -2585,12 +2585,14 @@ static void render_dogfight(RenderTarget *surface, const EffectWindow *window,
 //   0: classic head-on pass firing pulse bolts.
 //   1: pursuit ambush — a heavy mid-class raider chases two weaving fighters
 //      across the sky, firing plasma/flak volleys behind them.
+//   2: stealth torpedo run — a lone bomber swoops low, fires a glowing torpedo
+//      at a distant silhouette cruiser, and banks away into the upper sky.
 static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
                                 int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
   Uint32 phase = window.phase;
-  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 2);
+  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 3);
 
   int size = scale / 170;
   if (size < 4) size = 4;
@@ -2625,6 +2627,38 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
       draw_weapon_shot(surface, WEAPON_PLASMA, 0, fx, chaser_y, tx, lead_y,
                        (double)volley, scale / 95.0, 1, fade, 0,
                        fx_hash(window.seed, (int)(phase / 1800)));
+    }
+    return;
+  }
+  if (kind == 2) {
+    int dir = (window.seed >> 4) & 1 ? 1 : -1;
+    // Target cruiser drifting slowly on the far side
+    double tx = (dir > 0) ? surface->w * 0.74 - progress * scale * 0.08
+                          : surface->w * 0.26 + progress * scale * 0.08;
+    double ty = center_y - scale * 0.015;
+    draw_ship_role(surface, (int)tx, (int)ty, SHIP_MID, window.seed >> 5,
+                   (int)(length * 1.45), -dir, 1, opacity);
+    // Bomber swoops in, releases torpedo at progress ~0.35, then climbs away
+    double bx = (dir > 0)
+                    ? -length * 2.0 + progress * (surface->w + 4.0 * length)
+                    : surface->w + length * 2.0 -
+                          progress * (surface->w + 4.0 * length);
+    double climb = (progress > 0.42) ? pow((progress - 0.42) * 1.7, 2.0) : 0.0;
+    double by = center_y + scale * 0.032 - climb * scale * 0.095;
+    double pitch = (progress > 0.42) ? (progress - 0.42) * 0.85 : -0.08;
+    draw_ship_role(surface, (int)bx, (int)by, SHIP_SMALL, window.seed >> 11,
+                   (int)(length * 1.1), dir, 0, opacity, pitch);
+    if (progress > 0.30 && progress < 0.82) {
+      double torp_age = (progress - 0.30) * window.duration;
+      if (torp_age < weapon_specs[WEAPON_TORPEDO].life_ms) {
+        double launch_x =
+            (dir > 0) ? -length * 2.0 + 0.30 * (surface->w + 4.0 * length)
+                      : surface->w + length * 2.0 -
+                            0.30 * (surface->w + 4.0 * length);
+        draw_weapon_shot(surface, WEAPON_TORPEDO, 0, launch_x,
+                         center_y + scale * 0.032, tx, ty, torp_age,
+                         scale / 95.0, 0, fade, 1, fx_hash(window.seed, 77));
+      }
     }
     return;
   }
@@ -2805,11 +2839,13 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
 //   0: furball — two or three pairs fighting at once.
 //   1: convoy ambush — two mid-class ships cross the upper sky under fire from
 //      darting interceptors launching swarm missiles and flak bursts.
+//   2: orbital barrage — a pair of distant capital ships hold station on opposite
+//      flanks, trading heavy beam and railgun volleys across a fighter screen.
 static void render_background_battle(RenderTarget *surface, Uint32 ticks,
                                      int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
-  int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 2);
+  int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 3);
   if (kind == 1) {
     double progress = window.progress;
     double fade = window.fade;
@@ -2841,6 +2877,45 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
                          rx, ry, sx, sy, (double)age, scale / 90.0, 1, fade,
                          1, fx_hash(window.seed, (int)(window.phase / 2100) + c));
       }
+    }
+    return;
+  }
+  if (kind == 2) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int big_len = scale / 14;
+    if (big_len < 24) big_len = 24;
+    int sm_len = scale / 38;
+    if (sm_len < 12) sm_len = 12;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double lx = surface->w * 0.20 + sin(progress * 3.14159265) * scale * 0.03;
+    double rx = surface->w * 0.80 - sin(progress * 3.14159265) * scale * 0.03;
+    double ly = surface->h * 0.11 + cos(window.phase / 1900.0) * scale * 0.01;
+    double ry = surface->h * 0.13 + sin(window.phase / 2100.0) * scale * 0.01;
+    draw_ship_role(surface, (int)lx, (int)ly, SHIP_BIG, window.seed + 3,
+                   big_len, 1, 0, opacity);
+    draw_ship_role(surface, (int)rx, (int)ry, SHIP_BIG, window.seed + 11,
+                   big_len, -1, 1, opacity);
+    // Fighter screen weaving in the middle
+    for (int f = 0; f < 3; f++) {
+      double fx = surface->w * 0.50 +
+                  sin(window.phase / (1100.0 + f * 230) + f * 2.1) * scale * 0.15;
+      double fy = surface->h * 0.12 +
+                  cos(window.phase / (850.0 + f * 170) + f * 1.4) * scale * 0.035;
+      int fdir = cos(window.phase / (1100.0 + f * 230) + f * 2.1) >= 0 ? 1 : -1;
+      draw_ship_role(surface, (int)fx, (int)fy, SHIP_SMALL,
+                     window.seed + 50 + f, sm_len, fdir, f % 2, opacity);
+    }
+    Uint32 b_age = window.phase % 2600;
+    if (b_age < 1100 && progress > 0.08 && progress < 0.92) {
+      int side = ((int)(window.phase / 2600)) & 1;
+      double sx = side == 0 ? lx + big_len * 0.45 : rx - big_len * 0.45;
+      double sy = side == 0 ? ly : ry;
+      double tx = side == 0 ? rx : lx;
+      double ty = side == 0 ? ry : ly;
+      draw_weapon_shot(surface, side == 0 ? WEAPON_BEAM : WEAPON_RAIL, 0, sx,
+                       sy, tx, ty, (double)b_age, weapon_unit(big_len), side,
+                       fade, 1, fx_hash(window.seed, (int)(window.phase / 2600)));
     }
     return;
   }
