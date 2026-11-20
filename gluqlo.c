@@ -1680,7 +1680,8 @@ static void draw_ship_design(RenderTarget *surface, int x, int y,
           SDL_CreateTexture(surface->renderer, SDL_PIXELFORMAT_RGBA8888,
                             SDL_TEXTUREACCESS_TARGET, nw, nh);
       if (ship_target_tex) {
-        SDL_SetTextureBlendMode(ship_target_tex, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureBlendMode(ship_target_tex,
+                                SDL_BLENDMODE_BLEND_PREMULTIPLIED);
         ship_target_w = nw;
         ship_target_h = nh;
       } else {
@@ -1823,6 +1824,7 @@ static void draw_ship_design(RenderTarget *surface, int x, int y,
   if (use_offscreen) {
     SDL_SetRenderTarget(surface->renderer, prev_target);
     SDL_SetRenderClipRect(surface->renderer, had_clip ? &previous_clip : NULL);
+    SDL_SetTextureColorMod(ship_target_tex, opacity, opacity, opacity);
     SDL_SetTextureAlphaMod(ship_target_tex, opacity);
     SDL_FRect src_f = {0, 0, (float)area.w, (float)area.h};
     SDL_FRect dst_f = {(float)area.x, (float)area.y, (float)area.w,
