@@ -2778,12 +2778,12 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
     double fy = center_y - scale * 0.014;
     draw_ship_role(surface, (int)fx, (int)fy, SHIP_MID, window.seed >> 4,
                    (int)(length * 1.4), dir, 1, opacity);
-    // Decloaking attacker approaches from behind and banks upward after firing
+    // Decloaking attacker approaches from behind, fires, then banks upward
+    // and flies off-screen while remaining visible.
     double sx = fx - dir * surface->w * (0.20 - 0.06 * smooth_step(0.18, 0.52, progress));
     double climb = smooth_step(0.54, 1.0, progress);
     double sy = fy + scale * 0.025 - climb * climb * scale * 0.09;
-    double cloak = smooth_step(0.18, 0.34, progress) *
-                   (1.0 - smooth_step(0.74, 0.90, progress));
+    double cloak = smooth_step(0.18, 0.34, progress);
     Uint8 s_op = (Uint8)(opacity * cloak);
     if (s_op > 4) {
       draw_ship_role(surface, (int)sx, (int)sy, SHIP_SMALL, window.seed >> 11,
