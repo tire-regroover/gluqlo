@@ -645,7 +645,7 @@ static const EffectSpec EFFECT_BATTLE_FLYBY = {
     false,          900,   1100, 2, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
-    0,          true,  900, 1100, 0,     GROUP_SKY, 3,     NULL};
+    0,          true,  900, 1100, 3,     GROUP_SKY, 3,     NULL};
 static const EffectSpec EFFECT_HILL_EVENT = {"hill_event",
                                              120000,
                                              0,
@@ -2666,11 +2666,138 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
   }
 }
 
-// One pair of small ships chasing each other in loops, then trading places.
+// Dogfight scenarios:
+//   0: looping chase (1 pair, 2 passes).
+//   1: scissors duel — two fighters weave from opposite edges in mirrored
+//      sine-loops, exchanging fire on each crossover until one is downed.
+//   2: strafing run — an interceptor dives repeatedly on a mid-class courier
+//      crossing the upper sky while a defender tries to screen it.
 static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                                    int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
+  int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 3);
+  if (kind == 1) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int length = scale / 34;
+    if (length < 14) length = 14;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double unit = weapon_unit(length);
+    int winner = (window.seed >> 3) & 1;
+    double destroy_p = 0.82;
+    for (int side = 0; side < 2; side++) {
+      if (side != winner && progress >= destroy_p) continue;
+      double u = progress;
+      double x = (side == 0)
+                     ? -length + u * (surface->w + 2.0 * length)
+                     : surface->w + length - u * (surface->w + 2.0 * length);
+      double y = surface->h * 0.11 +
+                 sin(u * 18.84955592 + side * 3.14159265) * scale * 0.042;
+      double dx = (side == 0 ? 1.0 : -1.0) * (surface->w + 2.0 * length);
+      double dy = cos(u * 18.84955592 + side * 3.14159265) * 18.84955592 *
+                  scale * 0.042;
+      double heading = atan2(-dy, dx);
+      int dir = dx >= 0 ? 1 : -1;
+      double pitch =
+          dir > 0 ? heading
+                  : atan2(sin(3.14159265359 - heading),
+                          cos(3.14159265359 - heading));
+      draw_ship_role(surface, (int)x, (int)y, SHIP_SMALL,
+                     window.seed + side * 19, length, dir, side, opacity,
+                     pitch);
+      if (side != winner && progress > 0.52) {
+        for (int puff = 1; puff <= 7; puff++) {
+          double pu = u - puff * 0.012;
+          if (pu < 0.0) break;
+          double px = (side == 0)
+                          ? -length + pu * (surface->w + 2.0 * length)
+                          : surface->w + length -
+                                pu * (surface->w + 2.0 * length);
+          double py = surface->h * 0.11 +
+                      sin(pu * 18.84955592 + side * 3.14159265) * scale * 0.042;
+          filledCircleRGBA(surface, (int)px, (int)py, 1 + puff / 2, 150, 150,
+                           160, (Uint8)(70 * fade * (1.0 - puff / 8.0)));
+        }
+      }
+    }
+    // Exchange fire near crossovers
+    Uint32 age = window.phase % 1500;
+    if (age < 650 && progress > 0.10 && progress < destroy_p) {
+      int shooter = ((int)(window.phase / 1500) + winner) % 2;
+      int target = 1 - shooter;
+      double u = progress;
+      double sx = (shooter == 0)
+                      ? -length + u * (surface->w + 2.0 * length)
+                      : surface->w + length - u * (surface->w + 2.0 * length);
+      double sy = surface->h * 0.11 +
+                  sin(u * 18.84955592 + shooter * 3.14159265) * scale * 0.042;
+      double tx = (target == 0)
+                      ? -length + u * (surface->w + 2.0 * length)
+                      : surface->w + length - u * (surface->w + 2.0 * length);
+      double ty = surface->h * 0.11 +
+                  sin(u * 18.84955592 + target * 3.14159265) * scale * 0.042;
+      int weapon = (shooter == 0) ? WEAPON_PULSE : WEAPON_MASS_DRIVER;
+      draw_weapon_shot(surface, weapon, 0, sx, sy, tx, ty, (double)age, unit,
+                       shooter, fade, progress > 0.72 ? 1 : 0,
+                       fx_hash(window.seed, (int)(window.phase / 1500)));
+    }
+    if (progress >= destroy_p) {
+      double u = destroy_p;
+      double lx = (winner != 0)
+                      ? -length + u * (surface->w + 2.0 * length)
+                      : surface->w + length - u * (surface->w + 2.0 * length);
+      double ly =
+          surface->h * 0.11 +
+          sin(u * 18.84955592 + (1 - winner) * 3.14159265) * scale * 0.042;
+      draw_explosion(surface, lx, ly,
+                     (progress - destroy_p) * window.duration, length * 1.1,
+                     true, fx_hash(window.seed, 99), 1 - winner, fade);
+    }
+    return;
+  }
+  if (kind == 2) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int sm_len = scale / 34;
+    if (sm_len < 14) sm_len = 14;
+    int mid_len = (int)(sm_len * 1.6);
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    int dir = (window.seed >> 5) & 1 ? 1 : -1;
+    double cx = (dir > 0)
+                    ? -mid_len + progress * (surface->w + 2.0 * mid_len)
+                    : surface->w + mid_len -
+                          progress * (surface->w + 2.0 * mid_len);
+    double cy = surface->h * 0.13 + sin(progress * 5.0) * scale * 0.012;
+    draw_ship_role(surface, (int)cx, (int)cy, SHIP_MID, window.seed + 7,
+                   mid_len, dir, 0, opacity);
+    // Escort fighter weaving ahead/above the courier
+    double ex = cx + dir * mid_len * 1.5;
+    double ey = cy - scale * 0.032 + sin(progress * 14.0) * scale * 0.015;
+    draw_ship_role(surface, (int)ex, (int)ey, SHIP_SMALL, window.seed + 13,
+                   sm_len, dir, 0, opacity);
+    // Diving interceptor making 3 steep parabolic strafing runs
+    double dive_u = fmod(progress * 3.0, 1.0);
+    double ix = cx + (dive_u - 0.5) * scale * 0.36 * (-dir);
+    double iy = cy - scale * 0.11 * (1.0 - 4.0 * (dive_u - 0.5) * (dive_u - 0.5));
+    double idx = -dir * scale * 0.36;
+    double idy = 8.0 * (dive_u - 0.5) * scale * 0.11;
+    double iheading = atan2(-idy, idx);
+    int idir = idx >= 0 ? 1 : -1;
+    double ipitch =
+        idir > 0 ? iheading
+                 : atan2(sin(3.14159265359 - iheading),
+                         cos(3.14159265359 - iheading));
+    draw_ship_role(surface, (int)ix, (int)iy, SHIP_SMALL, window.seed + 29,
+                   sm_len, idir, 1, opacity, ipitch);
+    if (dive_u > 0.25 && dive_u < 0.72) {
+      double age = (dive_u - 0.25) * (window.duration / 3.0);
+      draw_weapon_shot(surface, WEAPON_RAIL, 0, ix, iy, cx, cy, age,
+                       weapon_unit(sm_len), 1, fade, 1,
+                       fx_hash(window.seed, (int)(progress * 3.0)));
+    }
+    return;
+  }
   render_dogfight(surface, &window, scale, 1, 2, 0.0);
 }
 
