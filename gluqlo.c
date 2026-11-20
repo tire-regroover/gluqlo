@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  98  // things that happen on the hills (see render_hill_event)
+  99  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -7974,6 +7974,50 @@ static void hill_abyssal_reach(const HillEvent *event) {
   }
 }
 
+// "Hyperion" (Dan Simmons): the Tree of Thorns rises in dark chrome silhouette
+// on the ridge, its metallic branches glinting with cold crimson sparks while
+// faint time-tide motes drift around its canopy.
+static void hill_shrikes_tree(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 0, 64));
+  double ground = hill_ground(event, cx);
+  double rise = smooth_step(0.05, 0.35, event->progress);
+  double h = s * 0.18 * rise;
+  Uint8 alpha = weapon_alpha(244.0 * event->fade);
+  static const Uint8 thorn_red[3] = {225, 65, 75};
+  static const Uint8 chrome_c[3] = {185, 200, 220};
+  if (h < 3.0) return;
+  // Gnarled metallic trunk
+  thickLineRGBA(surface, (int)cx, (int)(ground + 2), (int)cx,
+                (int)(ground - h * 0.55), 3, 28, 32, 42, alpha);
+  lineRGBA(surface, (int)(cx - 1), (int)ground, (int)(cx - 1),
+           (int)(ground - h * 0.55), chrome_c[0], chrome_c[1], chrome_c[2],
+           weapon_alpha(110.0 * event->fade));
+  // Jagged chrome branches & thorn-spines
+  for (int b = 0; b < 7; b++) {
+    double frac = 0.35 + (b / 6.0) * 0.55;
+    double by = ground - h * frac;
+    int side = (b % 2 == 0) ? 1 : -1;
+    double blen = h * (0.38 - frac * 0.18);
+    double bx = cx + side * blen;
+    double btip_y = by - blen * 0.48;
+    thickLineRGBA(surface, (int)cx, (int)by, (int)bx, (int)btip_y, 2, 26, 30,
+                  40, alpha);
+    lineRGBA(surface, (int)cx, (int)by, (int)bx, (int)btip_y, chrome_c[0],
+             chrome_c[1], chrome_c[2], weapon_alpha(125.0 * event->fade));
+    // Cold crimson glint at branch tips
+    double glint = 0.35 + 0.65 * fabs(sin(event->t * 1.4 + b * 1.7));
+    weapon_glow(surface, bx, btip_y, 1.8, thorn_red,
+                175.0 * glint * rise * event->fade);
+  }
+  // Crown spire
+  thickLineRGBA(surface, (int)cx, (int)(ground - h * 0.55), (int)cx,
+                (int)(ground - h), 2, 30, 34, 46, alpha);
+  weapon_glow(surface, cx, ground - h, 2.1, chrome_c,
+              150.0 * rise * event->fade);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -8001,7 +8045,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ropebridge,    hill_belltower, hill_maze,        hill_fisher,
     hill_lanterntree,   hill_forge,     hill_seedtree,    hill_stonecircle,
     hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
-    hill_monolith,      hill_abyssal_reach,
+    hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
