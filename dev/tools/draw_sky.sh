@@ -3,8 +3,8 @@
 ROOT=/workspaces/gluqlo
 OUT=${OUT:-/tmp/kindtest/out}
 mkdir -p "$OUT"
-g++ -O1 -w -x c++ $(sdl-config --cflags) -DFONT='"/usr/share/gluqlo/gluqlo.ttf"' \
-	-o /tmp/draw_sky "$ROOT/dev/tools/draw_sky.cpp" $(sdl-config --libs) -lX11 -lSDL_ttf -lSDL_gfx || exit 1
+g++ -O1 -w -x c++ $(pkg-config --cflags sdl3 sdl3-ttf) -DFONT='"/usr/share/gluqlo/gluqlo.ttf"' \
+	-o /tmp/draw_sky "$ROOT/dev/tools/draw_sky.cpp" $(pkg-config --libs sdl3 sdl3-ttf) -lm || exit 1
 /tmp/draw_sky "$1" "$2" "$OUT" || exit 1
 cd "$OUT" || exit 1
 for k in $(seq "$1" "$2"); do convert "skyharness-$k.bmp" "skyharness-$k.png"; rm -f "skyharness-$k.bmp"; done
