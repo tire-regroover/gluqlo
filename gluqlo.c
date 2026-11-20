@@ -507,7 +507,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 142
+#define RARE_SKY_KINDS 143
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -11557,6 +11557,33 @@ static void sky_event_141(const SkyEvent *event) {
                    190, weapon_alpha(200.0 * fade));
 }
 
+// "Annihilation" / Area X (Jeff VanderMeer): a shimmering, refractive
+// curtain-lens of bioluminescent gold and sea-teal spores arcs silently across
+// the sky, bending starlight into slow concentric ripples.
+static void sky_event_142(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 gold[3] = {245, 215, 115};
+  static const Uint8 teal[3] = {105, 230, 195};
+  double rx = size * 2.2;
+  double ry = size * 1.15;
+  // Concentric refractive shimmer rings
+  for (int ring = 0; ring < 3; ring++) {
+    double f = 0.55 + ring * 0.35 + 0.08 * sin(phase / 550.0 + ring);
+    const Uint8 *c = (ring % 2 == 0) ? teal : gold;
+    ellipseRGBA(surface, x, y, (int)(rx * f), (int)(ry * f), c[0], c[1], c[2],
+                weapon_alpha((125.0 - ring * 28.0) * fade));
+  }
+  // Golden-spore filaments drifting inside the shimmer
+  for (int i = 0; i < 16; i++) {
+    double a = phase / 1500.0 + i * (2.0 * M_PI / 16.0);
+    double d = 0.25 + 0.7 * fmod(i * 0.37 + phase / 3200.0, 1.0);
+    double sx = x + cos(a) * rx * d;
+    double sy = y + sin(a) * ry * d;
+    const Uint8 *c = (i % 3 == 0) ? teal : gold;
+    weapon_glow(surface, sx, sy, 1.6, c, 175.0 * fade);
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -11626,7 +11653,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_123, sky_event_124, sky_event_125, sky_event_126, sky_event_127,
     sky_event_128, sky_event_129, sky_event_130, sky_event_131, sky_event_132,
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
-    sky_event_138, sky_event_139, sky_event_140, sky_event_141,
+    sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
