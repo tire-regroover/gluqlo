@@ -10,11 +10,15 @@ int main(int argc, char **argv) {
 	int first = argc > 1 ? atoi(argv[1]) : RARE_SKY_CLASSIC_KINDS;
 	int last = argc > 2 ? atoi(argv[2]) : first;
 	const char *dir = argc > 3 ? argv[3] : "/tmp/kindtest/out";
+	if(!SDL_Init(SDL_INIT_VIDEO)) return 1;
 	for(int kind = first; kind <= last; kind++) {
-		SDL_Surface *surface = SDL_CreateRGBSurface(SDL_SWSURFACE, 640, 240, 32, 0xff0000, 0xff00, 0xff, 0);
-		SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 14, 20, 36));
+		SDL_Surface *surface = SDL_CreateSurface(640, 240, SDL_PIXELFORMAT_RGBA8888);
+		SDL_Renderer *sw_renderer = SDL_CreateSoftwareRenderer(surface);
+		SDL_SetRenderDrawColor(sw_renderer, 14, 20, 36, 255);
+		SDL_RenderClear(sw_renderer);
+		RenderTarget rt = { sw_renderer, 640, 240 };
 		SkyEvent event;
-		event.surface = surface;
+		event.surface = &rt;
 		event.ticks = 0;
 		event.scale = 768;
 		event.seed = 12345u + kind * 77u;
@@ -27,10 +31,13 @@ int main(int argc, char **argv) {
 		event.size = 20;
 		event.alpha = 150;
 		if(kind >= RARE_SKY_CLASSIC_KINDS) sky_event_kinds[kind - RARE_SKY_CLASSIC_KINDS](&event);
+		SDL_RenderPresent(sw_renderer);
 		char name[256];
 		snprintf(name, sizeof name, "%s/skyharness-%d.bmp", dir, kind);
 		SDL_SaveBMP(surface, name);
-		SDL_FreeSurface(surface);
+		SDL_DestroyRenderer(sw_renderer);
+		SDL_DestroySurface(surface);
 	}
+	SDL_Quit();
 	return 0;
 }

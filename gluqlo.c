@@ -36,15 +36,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <X11/Xlib.h>
 #include <time.h>
 #include <math.h>
 
-#include "SDL.h"
-#include "SDL_ttf.h"
-#include "SDL_syswm.h"
-#include "SDL_gfxPrimitives.h"
-#include "SDL_rotozoom.h"
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #ifndef FONT
 #define FONT "/usr/share/gluqlo/gluqlo.ttf"
@@ -63,7 +59,8 @@ bool anykeyclose = false;
 int past_h = -1, past_m = -1, past_yday = -1;
 int burnin_x = 0, burnin_y = 0;
 int date_y = 0;
-static SDL_Surface *date_surface_cache;
+static SDL_Texture *date_texture_cache = NULL;
+static int date_texture_w = 0, date_texture_h = 0;
 static int date_surface_yday = -1;
 
 int width = DEFAULT_WIDTH;
@@ -76,28 +73,244 @@ TTF_Font *font_time = NULL;
 TTF_Font *font_mode = NULL;
 TTF_Font *font_date = NULL;
 
-const SDL_Color FONT_COLOR = { 0xda, 0xda, 0xe2, 0 };
-const SDL_Color DATE_COLOR = { 0xc6, 0xc2, 0xcf, 0 };
-const SDL_Color BACKGROUND_COLOR = { 0x12, 0x14, 0x1d, 0 };
-const SDL_Color CARD_BORDER_COLOR = { 0x37, 0x3d, 0x4e, 0 };
+const SDL_Color FONT_COLOR = { 0xda, 0xda, 0xe2, 255 };
+const SDL_Color DATE_COLOR = { 0xc6, 0xc2, 0xcf, 255 };
+const SDL_Color BACKGROUND_COLOR = { 0x12, 0x14, 0x1d, 255 };
+const SDL_Color CARD_BORDER_COLOR = { 0x37, 0x3d, 0x4e, 255 };
 
-SDL_Surface *screen;
+// SDL3 RenderTarget abstraction: keeps existing draw functions clean and lets
+// both the main GPU renderer and offscreen software harnesses share one path.
+typedef struct {
+	SDL_Renderer *renderer;
+	int w;
+	int h;
+} RenderTarget;
+
+static SDL_Window *window = NULL;
+static SDL_Renderer *renderer = NULL;
+static RenderTarget screen_target = { NULL, DEFAULT_WIDTH, DEFAULT_HEIGHT };
+static RenderTarget *screen = &screen_target;
+static Uint32 user_event_type = 0;
 
 SDL_Rect hourBackground;
 SDL_Rect minBackground;
 
 SDL_Rect bgrect;
-SDL_Surface *bg;
-static SDL_Surface *backdrop_base;
+static SDL_Texture *bg_texture = NULL;
+static SDL_Texture *backdrop_base = NULL;
+static SDL_Texture *ampm_textures[2] = { NULL, NULL };
+static int ampm_w[2] = { 0, 0 }, ampm_h[2] = { 0, 0 };
 
-// draw rounded box
+// Cached digit glyph textures ('0'..'9') for fast GPU-accelerated card & flip rendering.
+static SDL_Texture *digit_glyph_tex[10] = { NULL };
+static int digit_glyph_w[10] = { 0 };
+static int digit_glyph_h[10] = { 0 };
+
+// Pre-rendered static card textures (hour, minute) + scratch flip card texture.
+static SDL_Texture *card_cache_tex[2] = { NULL, NULL };
+static char card_cache_digits[2][3] = { "", "" };
+static SDL_Texture *flip_card_tex = NULL;
+
+// --- SDL3 GPU-accelerated primitive helpers (replacing SDL_gfx) ---
+
+static inline SDL_FColor fcolor_rgba(Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	return SDL_FColor{ r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f };
+}
+
+static inline void set_draw_color(RenderTarget *dst, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	SDL_SetRenderDrawColor(dst->renderer, r, g, b, a);
+	SDL_SetRenderDrawBlendMode(dst->renderer, a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+}
+
+static void pixelRGBA(RenderTarget *dst, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0) return;
+	set_draw_color(dst, r, g, b, a);
+	SDL_RenderPoint(dst->renderer, (float)x, (float)y);
+}
+
+static void lineRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0) return;
+	set_draw_color(dst, r, g, b, a);
+	SDL_RenderLine(dst->renderer, (float)x1, (float)y1, (float)x2, (float)y2);
+}
+
+static void vlineRGBA(RenderTarget *dst, int x, int y1, int y2, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	lineRGBA(dst, x, y1, x, y2, r, g, b, a);
+}
+
+static void rectangleRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0) return;
+	if(x1 > x2) { int t = x1; x1 = x2; x2 = t; }
+	if(y1 > y2) { int t = y1; y1 = y2; y2 = t; }
+	SDL_FRect rect = { (float)x1, (float)y1, (float)(x2 - x1 + 1), (float)(y2 - y1 + 1) };
+	set_draw_color(dst, r, g, b, a);
+	SDL_RenderRect(dst->renderer, &rect);
+}
+
+static void thickLineRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, int width_px, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0 || width_px <= 0) return;
+	if(width_px == 1) {
+		lineRGBA(dst, x1, y1, x2, y2, r, g, b, a);
+		return;
+	}
+	float dx = (float)(x2 - x1);
+	float dy = (float)(y2 - y1);
+	float len = sqrtf(dx * dx + dy * dy);
+	if(len < 0.001f) {
+		SDL_FRect rect = { (float)x1 - width_px * 0.5f, (float)y1 - width_px * 0.5f, (float)width_px, (float)width_px };
+		set_draw_color(dst, r, g, b, a);
+		SDL_RenderFillRect(dst->renderer, &rect);
+		return;
+	}
+	float half = width_px * 0.5f;
+	float nx = -dy / len * half;
+	float ny = dx / len * half;
+	SDL_FColor col = fcolor_rgba(r, g, b, a);
+	SDL_Vertex verts[4];
+	verts[0].position = SDL_FPoint{ x1 + nx, y1 + ny };
+	verts[1].position = SDL_FPoint{ x1 - nx, y1 - ny };
+	verts[2].position = SDL_FPoint{ x2 - nx, y2 - ny };
+	verts[3].position = SDL_FPoint{ x2 + nx, y2 + ny };
+	for(int i = 0; i < 4; i++) {
+		verts[i].color = col;
+		verts[i].tex_coord = SDL_FPoint{ 0, 0 };
+	}
+	static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+	SDL_SetRenderDrawBlendMode(dst->renderer, a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+	SDL_RenderGeometry(dst->renderer, NULL, verts, 4, idx, 6);
+}
+
+static void boxRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0) return;
+	if(x1 > x2) { int t = x1; x1 = x2; x2 = t; }
+	if(y1 > y2) { int t = y1; y1 = y2; y2 = t; }
+	SDL_FRect rect = { (float)x1, (float)y1, (float)(x2 - x1 + 1), (float)(y2 - y1 + 1) };
+	set_draw_color(dst, r, g, b, a);
+	SDL_RenderFillRect(dst->renderer, &rect);
+}
+
+static void filledTrigonRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, int x3, int y3, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0) return;
+	SDL_FColor col = fcolor_rgba(r, g, b, a);
+	SDL_Vertex verts[3];
+	verts[0].position = SDL_FPoint{ (float)x1, (float)y1 };
+	verts[1].position = SDL_FPoint{ (float)x2, (float)y2 };
+	verts[2].position = SDL_FPoint{ (float)x3, (float)y3 };
+	for(int i = 0; i < 3; i++) {
+		verts[i].color = col;
+		verts[i].tex_coord = SDL_FPoint{ 0, 0 };
+	}
+	SDL_SetRenderDrawBlendMode(dst->renderer, a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+	SDL_RenderGeometry(dst->renderer, NULL, verts, 3, NULL, 0);
+}
+
+static inline int circle_segments(int rx, int ry) {
+	int r = rx > ry ? rx : ry;
+	if(r <= 2) return 8;
+	if(r <= 8) return 16;
+	if(r <= 24) return 28;
+	if(r <= 64) return 44;
+	return 64;
+}
+
+static void filledEllipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0 || rx < 0 || ry < 0) return;
+	if(rx == 0 && ry == 0) {
+		pixelRGBA(dst, cx, cy, r, g, b, a);
+		return;
+	}
+	if(rx == 0) {
+		lineRGBA(dst, cx, cy - ry, cx, cy + ry, r, g, b, a);
+		return;
+	}
+	if(ry == 0) {
+		lineRGBA(dst, cx - rx, cy, cx + rx, cy, r, g, b, a);
+		return;
+	}
+	int segs = circle_segments(rx, ry);
+	SDL_Vertex verts[66];
+	int indices[64 * 3];
+	SDL_FColor col = fcolor_rgba(r, g, b, a);
+	verts[0].position = SDL_FPoint{ (float)cx + 0.5f, (float)cy + 0.5f };
+	verts[0].color = col;
+	verts[0].tex_coord = SDL_FPoint{ 0, 0 };
+	for(int i = 0; i < segs; i++) {
+		float ang = (float)(2.0 * M_PI * i / segs);
+		verts[i + 1].position = SDL_FPoint{ cx + 0.5f + cosf(ang) * rx, cy + 0.5f + sinf(ang) * ry };
+		verts[i + 1].color = col;
+		verts[i + 1].tex_coord = SDL_FPoint{ 0, 0 };
+		indices[i * 3 + 0] = 0;
+		indices[i * 3 + 1] = i + 1;
+		indices[i * 3 + 2] = (i + 1 < segs) ? i + 2 : 1;
+	}
+	SDL_SetRenderDrawBlendMode(dst->renderer, a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+	SDL_RenderGeometry(dst->renderer, NULL, verts, segs + 1, indices, segs * 3);
+}
+
+static void ellipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0 || rx < 0 || ry < 0) return;
+	int segs = circle_segments(rx, ry);
+	SDL_FPoint pts[65];
+	for(int i = 0; i <= segs; i++) {
+		float ang = (float)(2.0 * M_PI * (i % segs) / segs);
+		pts[i].x = cx + 0.5f + cosf(ang) * rx;
+		pts[i].y = cy + 0.5f + sinf(ang) * ry;
+	}
+	set_draw_color(dst, r, g, b, a);
+	SDL_RenderLines(dst->renderer, pts, segs + 1);
+}
+
+static void filledCircleRGBA(RenderTarget *dst, int cx, int cy, int radius, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	filledEllipseRGBA(dst, cx, cy, radius, radius, r, g, b, a);
+}
+
+static void circleRGBA(RenderTarget *dst, int cx, int cy, int radius, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	ellipseRGBA(dst, cx, cy, radius, radius, r, g, b, a);
+}
+
+static void filledPieRGBA(RenderTarget *dst, int cx, int cy, int radius, int start_deg, int end_deg, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	if(a == 0 || radius <= 0) return;
+	int span = end_deg - start_deg;
+	while(span < 0) span += 360;
+	if(span == 0) return;
+	if(span >= 360) {
+		filledCircleRGBA(dst, cx, cy, radius, r, g, b, a);
+		return;
+	}
+	int segs = (int)(circle_segments(radius, radius) * (span / 360.0)) + 2;
+	if(segs < 3) segs = 3;
+	if(segs > 64) segs = 64;
+	SDL_Vertex verts[66];
+	int indices[64 * 3];
+	SDL_FColor col = fcolor_rgba(r, g, b, a);
+	verts[0].position = SDL_FPoint{ (float)cx + 0.5f, (float)cy + 0.5f };
+	verts[0].color = col;
+	verts[0].tex_coord = SDL_FPoint{ 0, 0 };
+	for(int i = 0; i <= segs; i++) {
+		float deg = start_deg + (float)span * i / segs;
+		float rad = deg * (float)(M_PI / 180.0);
+		verts[i + 1].position = SDL_FPoint{ cx + 0.5f + cosf(rad) * radius, cy + 0.5f + sinf(rad) * radius };
+		verts[i + 1].color = col;
+		verts[i + 1].tex_coord = SDL_FPoint{ 0, 0 };
+		if(i < segs) {
+			indices[i * 3 + 0] = 0;
+			indices[i * 3 + 1] = i + 1;
+			indices[i * 3 + 2] = i + 2;
+		}
+	}
+	SDL_SetRenderDrawBlendMode(dst->renderer, a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+	SDL_RenderGeometry(dst->renderer, NULL, verts, segs + 2, indices, segs * 3);
+}
+
+// draw rounded box onto an SDL_Surface (used once at startup for the card texture)
 // see http://lists.libsdl.org/pipermail/sdl-libsdl.org/2006-December/058868.html
 void fill_rounded_box_b(SDL_Surface* dst, SDL_Rect *coords, int r, SDL_Color color, Uint8 alpha) {
-	Uint32 pixcolor = SDL_MapRGBA(dst->format, color.r, color.g, color.b, alpha);
+	const SDL_PixelFormatDetails *fmt = SDL_GetPixelFormatDetails(dst->format);
+	Uint32 pixcolor = SDL_MapRGBA(fmt, NULL, color.r, color.g, color.b, alpha);
 
 	int i, j;
 	int rpsqrt2 = (int) (r / sqrt(2));
-	int yd = dst->pitch / dst->format->BytesPerPixel;
+	int yd = dst->pitch / fmt->bytes_per_pixel;
 	int w = coords->w / 2 - 1;
 	int h = coords->h / 2 - 1;
 	int xo = coords->x + w;
@@ -152,16 +365,27 @@ void fill_rounded_box_b(SDL_Surface* dst, SDL_Rect *coords, int r, SDL_Color col
 	SDL_UnlockSurface(dst);
 }
 
-void render_ampm(SDL_Surface *surface, SDL_Rect *rect, int pm) {
-	char mode[3];
-	SDL_Rect coords;
-	snprintf(mode, 3, "%cM", pm ? 'P' : 'A');
-	SDL_Surface *ampm = TTF_RenderText_Blended(font_mode, mode, FONT_COLOR);
-	int offset = rect->h * 0.127;
-	coords.x = rect->x + rect->h * 0.07;
-	coords.y = rect->y + (pm ? rect->h - offset - ampm->h : offset);
-	SDL_BlitSurface(ampm, 0, surface, &coords);
-	SDL_FreeSurface(ampm);
+void render_ampm(RenderTarget *surface, SDL_Rect *rect, int pm) {
+	int idx = pm ? 1 : 0;
+	if(!ampm_textures[idx]) {
+		char mode[3];
+		snprintf(mode, 3, "%cM", pm ? 'P' : 'A');
+		SDL_Surface *ampm = TTF_RenderText_Blended(font_mode, mode, 0, FONT_COLOR);
+		if(!ampm) return;
+		ampm_w[idx] = ampm->w;
+		ampm_h[idx] = ampm->h;
+		ampm_textures[idx] = SDL_CreateTextureFromSurface(surface->renderer, ampm);
+		SDL_DestroySurface(ampm);
+		if(!ampm_textures[idx]) return;
+	}
+	int offset = (int)(rect->h * 0.127);
+	SDL_FRect dst = {
+		(float)(rect->x + rect->h * 0.07),
+		(float)(rect->y + (pm ? rect->h - offset - ampm_h[idx] : offset)),
+		(float)ampm_w[idx],
+		(float)ampm_h[idx]
+	};
+	SDL_RenderTexture(surface->renderer, ampm_textures[idx], NULL, &dst);
 }
 
 static double hash_noise(int x, int y, Uint32 seed) {
@@ -450,12 +674,6 @@ static bool effect_window(const EffectSpec *spec, Uint32 ticks, EffectWindow *wi
 	return true;
 }
 
-// True while `spec` is drawing something at `ticks`.
-static bool effect_is_active(const EffectSpec *spec, Uint32 ticks) {
-	EffectWindow window;
-	return effect_window(spec, ticks, &window);
-}
-
 typedef struct {
 	double season[4];
 	double cloud;
@@ -566,7 +784,7 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
 
 // Three drifting aurora ribbons; `strength` is 0..1. Used by the aurora weather
 // and by the fullscreen aurora event.
-static void draw_aurora(SDL_Surface *surface, Uint32 ticks, int scale, double strength) {
+static void draw_aurora(RenderTarget *surface, Uint32 ticks, int scale, double strength) {
 	if(strength <= 0.01) return;
 	for(int band = 0; band < 3; band++) {
 		int previous_x = 0;
@@ -587,7 +805,7 @@ static void draw_aurora(SDL_Surface *surface, Uint32 ticks, int scale, double st
 	}
 }
 
-static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
+static void render_weather_effects(RenderTarget *surface, Uint32 ticks,
 	const SceneWeather *weather, int scale) {
 	draw_aurora(surface, ticks, scale, weather->aurora);
 
@@ -633,7 +851,7 @@ static void render_weather_effects(SDL_Surface *surface, Uint32 ticks,
 	}
 }
 
-static void render_world_jump(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_world_jump(RenderTarget *surface, Uint32 ticks, int scale) {
 		EffectWindow window;
 		if(!effect_window(&EFFECT_WORLD_JUMP, ticks, &window)) return;
 		Uint32 seed = window.seed;
@@ -705,7 +923,7 @@ static void render_world_jump(SDL_Surface *surface, Uint32 ticks, int scale) {
 		}
 	}
 
-static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_alien_weather(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_ALIEN_WEATHER, ticks, &window)) return;
 	Uint32 seed = window.seed;
@@ -770,7 +988,7 @@ static void render_alien_weather(SDL_Surface *surface, Uint32 ticks, int scale) 
 	}
 }
 
-static void draw_bird(SDL_Surface *surface, int x, int y, int size, int wing_lift) {
+static void draw_bird(RenderTarget *surface, int x, int y, int size, int wing_lift) {
 	const Uint8 shade = 23, alpha = 185;
 	int body_length = size;
 	int wing_span = size;
@@ -1038,7 +1256,7 @@ static int ship_column_spans(const int *px, const int *py, int count, int col, i
 }
 
 // Paints one polygon in four bands of light with a dark outline.
-static void ship_paint(SDL_Surface *surface, const ShipTeam *team, const int *px,
+static void ship_paint(RenderTarget *surface, const ShipTeam *team, const int *px,
 	const int *py, int count, double bias, int outline_width) {
 	int min_x = px[0], max_x = px[0];
 	for(int i = 1; i < count; i++) {
@@ -1087,13 +1305,14 @@ static void ship_paint(SDL_Surface *surface, const ShipTeam *team, const int *px
 	}
 }
 
-// Scratch copy of the screen area under the ship being drawn.
-static SDL_Surface *ship_backup;
+// Scratch render-target texture for drawing ships with opacity on GPU.
+static SDL_Texture *ship_target_tex = NULL;
+static int ship_target_w = 0, ship_target_h = 0;
 
 // Draws one ship centred on (x, y), `length` pixels long, nose towards `direction`
 // (1: right, -1: left) and tilted up by `pitch` radians, blended onto the
-// surface at `opacity` (0..255).
-static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_index,
+// target at `opacity` (0..255).
+static void draw_ship_design(RenderTarget *surface, int x, int y, int design_index,
 	int length, int direction, int team_index, Uint8 opacity, double pitch = 0.0) {
 	if(opacity == 0) return;
 	const ShipDesign *design = &ship_designs[design_index];
@@ -1107,8 +1326,6 @@ static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_inde
 	xf.cos_pitch = cos(pitch);
 	xf.sin_pitch = sin(pitch);
 
-	// Everything the ship draws stays inside this area, which is saved first.
-	// (A tilted ship still fits: nothing is further than 0.8 lengths from its centre.)
 	int reach = length + length / 4 + 12;
 	int left = x - reach < 0 ? 0 : x - reach;
 	int top = y - reach < 0 ? 0 : y - reach;
@@ -1116,30 +1333,53 @@ static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_inde
 	int bottom = y + reach + 1 > surface->h ? surface->h : y + reach + 1;
 	if(right <= left || bottom <= top) return;
 	SDL_Rect area;
-	area.x = (Sint16)left;
-	area.y = (Sint16)top;
-	area.w = (Uint16)(right - left);
-	area.h = (Uint16)(bottom - top);
-	if(opacity < 255) {
-		if(!ship_backup || ship_backup->w < area.w || ship_backup->h < area.h) {
-			int backup_w = ship_backup && ship_backup->w > area.w ? ship_backup->w : area.w;
-			int backup_h = ship_backup && ship_backup->h > area.h ? ship_backup->h : area.h;
-			if(ship_backup) SDL_FreeSurface(ship_backup);
-			ship_backup = SDL_CreateRGBSurface(SDL_SWSURFACE, backup_w, backup_h, 32,
-				surface->format->Rmask, surface->format->Gmask, surface->format->Bmask, 0);
-			if(!ship_backup) return;
-		}
-		SDL_Rect source = area;
-		SDL_Rect target;
-		target.x = 0;
-		target.y = 0;
-		target.w = 0;
-		target.h = 0;
-		SDL_BlitSurface(surface, &source, ship_backup, &target);
-	}
+	area.x = left;
+	area.y = top;
+	area.w = right - left;
+	area.h = bottom - top;
+
+	SDL_Texture *prev_target = SDL_GetRenderTarget(surface->renderer);
+	RenderTarget draw_dst = *surface;
+	RenderTarget *dst = surface;
+	bool use_offscreen = (opacity < 255);
 	SDL_Rect previous_clip;
-	SDL_GetClipRect(surface, &previous_clip);
-	SDL_SetClipRect(surface, &area);
+	bool had_clip = SDL_RenderClipEnabled(surface->renderer);
+	if(had_clip) SDL_GetRenderClipRect(surface->renderer, &previous_clip);
+
+	if(use_offscreen) {
+		if(!ship_target_tex || ship_target_w < area.w || ship_target_h < area.h) {
+			int nw = ship_target_w > area.w ? ship_target_w : area.w;
+			int nh = ship_target_h > area.h ? ship_target_h : area.h;
+			if(ship_target_tex) SDL_DestroyTexture(ship_target_tex);
+			ship_target_tex = SDL_CreateTexture(surface->renderer, SDL_PIXELFORMAT_RGBA8888,
+				SDL_TEXTUREACCESS_TARGET, nw, nh);
+			if(ship_target_tex) {
+				SDL_SetTextureBlendMode(ship_target_tex, SDL_BLENDMODE_BLEND);
+				ship_target_w = nw;
+				ship_target_h = nh;
+			} else {
+				use_offscreen = false;
+			}
+		}
+	}
+
+	if(use_offscreen) {
+		SDL_SetRenderTarget(surface->renderer, ship_target_tex);
+		SDL_SetRenderDrawColor(surface->renderer, 0, 0, 0, 0);
+		SDL_SetRenderDrawBlendMode(surface->renderer, SDL_BLENDMODE_NONE);
+		SDL_FRect clear_rect = { 0, 0, (float)area.w, (float)area.h };
+		SDL_RenderFillRect(surface->renderer, &clear_rect);
+		xf.x = x - area.x;
+		xf.y = y - area.y;
+		draw_dst.renderer = surface->renderer;
+		draw_dst.w = area.w;
+		draw_dst.h = area.h;
+		dst = &draw_dst;
+		SDL_Rect local_clip = { 0, 0, area.w, area.h };
+		SDL_SetRenderClipRect(surface->renderer, &local_clip);
+	} else {
+		SDL_SetRenderClipRect(surface->renderer, &area);
+	}
 
 	int outline_width = xf.scale * 10.0 >= 16.0 ? 2 : 1;
 	int engine_radius = (int)(SHIP_ENGINE_SIZE * xf.scale + 0.5);
@@ -1157,13 +1397,13 @@ static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_inde
 			// The plume points straight back from the nose; its width is across the ship.
 			double tail_x = -direction * xf.cos_pitch, tail_y = xf.sin_pitch;
 			double side_x = direction * xf.sin_pitch, side_y = xf.cos_pitch;
-			filledTrigonRGBA(surface,
+			filledTrigonRGBA(dst,
 				nozzle_x[engine] + (int)(side_x * plume_width), nozzle_y[engine] + (int)(side_y * plume_width),
 				nozzle_x[engine] - (int)(side_x * plume_width), nozzle_y[engine] - (int)(side_y * plume_width),
 				nozzle_x[engine] + (int)(tail_x * plume), nozzle_y[engine] + (int)(tail_y * plume),
 				team->glow[0], team->glow[1], team->glow[2], 36 + layer * 30);
 		}
-		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine], engine_radius * 2,
+		filledCircleRGBA(dst, nozzle_x[engine], nozzle_y[engine], engine_radius * 2,
 			team->glow[0], team->glow[1], team->glow[2], 46);
 	}
 
@@ -1175,24 +1415,24 @@ static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_inde
 			ship_to_pixels(&xf, spike_x, side * 7, &px[0], &py[0]);
 			ship_to_pixels(&xf, spike_x - 5, side * spike_height, &px[1], &py[1]);
 			ship_to_pixels(&xf, spike_x - 10, side * 7, &px[2], &py[2]);
-			ship_paint(surface, team, px, py, 3, -0.30, outline_width);
+			ship_paint(dst, team, px, py, 3, -0.30, outline_width);
 		}
 	}
 	int count = ship_build_polygon(&xf, &design->hull, px, py);
-	ship_paint(surface, team, px, py, count, 0.0, outline_width);
+	ship_paint(dst, team, px, py, count, 0.0, outline_width);
 	for(int plate = 0; plate < 2; plate++) {
 		if(design->plates[plate].count == 0) continue;
 		count = ship_build_polygon(&xf, &design->plates[plate], px, py);
-		ship_paint(surface, team, px, py, count, 0.16 * (plate + 1), 1);
+		ship_paint(dst, team, px, py, count, 0.16 * (plate + 1), 1);
 	}
 
 	if(design->accent_on) {
 		int x1, y1, x2, y2;
 		ship_to_pixels(&xf, design->accent[0][0], design->accent[0][1], &x1, &y1);
 		ship_to_pixels(&xf, design->accent[1][0], design->accent[1][1], &x2, &y2);
-		thickLineRGBA(surface, x1, y1, x2, y2, 3,
+		thickLineRGBA(dst, x1, y1, x2, y2, 3,
 			team->accent[0], team->accent[1], team->accent[2], 70);
-		thickLineRGBA(surface, x1, y1, x2, y2, 1,
+		thickLineRGBA(dst, x1, y1, x2, y2, 1,
 			team->accent[0], team->accent[1], team->accent[2], 255);
 	}
 	// Gun turrets: a round mount with barrels that look different for each weapon.
@@ -1207,57 +1447,54 @@ static void draw_ship_design(SDL_Surface *surface, int x, int y, int design_inde
 		double barrel = base * (weapon == WEAPON_FLAK ? 1.7 : 2.5);
 		int barrels = weapon == WEAPON_MASS_DRIVER ? 2 : 1;
 		int barrel_width = (weapon == WEAPON_FLAK || base >= 4) ? 3 : 2;
-		filledCircleRGBA(surface, cx, cy, base + 1, 8, 10, 18, 255);
+		filledCircleRGBA(dst, cx, cy, base + 1, 8, 10, 18, 255);
 		for(int b = 0; b < barrels; b++) {
 			double shift = barrels == 2 ? (b ? 0.5 : -0.5) * base : 0.0;
 			int sx = cx + (int)(across_x * shift), sy = cy + (int)(across_y * shift);
 			int ex = sx + (int)(forward_x * barrel), ey = sy + (int)(forward_y * barrel);
-			thickLineRGBA(surface, sx, sy, ex, ey, barrel_width + 2, 8, 10, 18, 255);
-			thickLineRGBA(surface, sx, sy, ex, ey, barrel_width,
+			thickLineRGBA(dst, sx, sy, ex, ey, barrel_width + 2, 8, 10, 18, 255);
+			thickLineRGBA(dst, sx, sy, ex, ey, barrel_width,
 				team->tone[2][0], team->tone[2][1], team->tone[2][2], 255);
 			if(weapon == WEAPON_BEAM || weapon == WEAPON_PULSE) {
-				filledCircleRGBA(surface, ex, ey, 1,
+				filledCircleRGBA(dst, ex, ey, 1,
 					team->accent[0], team->accent[1], team->accent[2], 255);
 			}
 		}
-		filledCircleRGBA(surface, cx, cy, base, team->tone[2][0], team->tone[2][1],
+		filledCircleRGBA(dst, cx, cy, base, team->tone[2][0], team->tone[2][1],
 			team->tone[2][2], 255);
-		filledCircleRGBA(surface, cx - base / 3, cy - base / 3, (base + 2) / 3,
+		filledCircleRGBA(dst, cx - base / 3, cy - base / 3, (base + 2) / 3,
 			team->tone[3][0], team->tone[3][1], team->tone[3][2], 255);
 	}
 	if(design->eye) {
 		int eye_x, eye_y;
 		ship_to_pixels(&xf, 0, 0, &eye_x, &eye_y);
 		int eye_unit = (int)(xf.scale * 10.0 + 0.5);
-		filledCircleRGBA(surface, eye_x, eye_y, eye_unit * 6 / 10 + 2,
+		filledCircleRGBA(dst, eye_x, eye_y, eye_unit * 6 / 10 + 2,
 			team->accent[0], team->accent[1], team->accent[2], 60);
-		filledEllipseRGBA(surface, eye_x, eye_y, 3 * eye_unit / 10 + 2, eye_unit / 10 + 1,
+		filledEllipseRGBA(dst, eye_x, eye_y, 3 * eye_unit / 10 + 2, eye_unit / 10 + 1,
 			team->accent[0], team->accent[1], team->accent[2], 255);
-		filledCircleRGBA(surface, eye_x, eye_y, eye_unit / 10 < 1 ? 1 : eye_unit / 10,
+		filledCircleRGBA(dst, eye_x, eye_y, eye_unit / 10 < 1 ? 1 : eye_unit / 10,
 			255, 255, 255, 255);
 	}
 	// Hot engine cores sit on top of the hull.
 	for(int engine = 0; engine < design->engine_count; engine++) {
-		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine], engine_radius + 1,
+		filledCircleRGBA(dst, nozzle_x[engine], nozzle_y[engine], engine_radius + 1,
 			ship_mix(team->glow[0], 255, 0.5), ship_mix(team->glow[1], 255, 0.5),
 			ship_mix(team->glow[2], 255, 0.5), 255);
-		filledCircleRGBA(surface, nozzle_x[engine], nozzle_y[engine],
+		filledCircleRGBA(dst, nozzle_x[engine], nozzle_y[engine],
 			engine_radius / 2 < 1 ? 1 : engine_radius / 2, 255, 255, 255, 255);
 	}
 
-	if(opacity < 255) {
-		// Blend the saved background back over the ship: ship * opacity + scene * (1 - opacity).
-		SDL_SetAlpha(ship_backup, SDL_SRCALPHA, (Uint8)(255 - opacity));
-		SDL_Rect source;
-		source.x = 0;
-		source.y = 0;
-		source.w = area.w;
-		source.h = area.h;
-		SDL_Rect target = area;
-		SDL_BlitSurface(ship_backup, &source, surface, &target);
-		SDL_SetAlpha(ship_backup, 0, 255);
+	if(use_offscreen) {
+		SDL_SetRenderTarget(surface->renderer, prev_target);
+		SDL_SetRenderClipRect(surface->renderer, had_clip ? &previous_clip : NULL);
+		SDL_SetTextureAlphaMod(ship_target_tex, opacity);
+		SDL_FRect src_f = { 0, 0, (float)area.w, (float)area.h };
+		SDL_FRect dst_f = { (float)area.x, (float)area.y, (float)area.w, (float)area.h };
+		SDL_RenderTexture(surface->renderer, ship_target_tex, &src_f, &dst_f);
+	} else {
+		SDL_SetRenderClipRect(surface->renderer, had_clip ? &previous_clip : NULL);
 	}
-	SDL_SetClipRect(surface, &previous_clip);
 }
 
 // The design that `variety` picks among the ships of a role.
@@ -1275,7 +1512,7 @@ static int ship_design_index(int role, unsigned int variety) {
 }
 
 // Draws a ship of the given role. `variety` picks one of the designs of that role.
-static void draw_ship_role(SDL_Surface *surface, int x, int y, int role,
+static void draw_ship_role(RenderTarget *surface, int x, int y, int role,
 	unsigned int variety, int length, int direction, int team_index, Uint8 opacity,
 	double pitch = 0.0) {
 	draw_ship_design(surface, x, y, ship_design_index(role, variety), length,
@@ -1323,7 +1560,7 @@ static double weapon_unit(int length) {
 }
 
 // A soft round glow: a faint halo, a brighter body and a hot core.
-static void weapon_glow(SDL_Surface *surface, double x, double y, double radius,
+static void weapon_glow(RenderTarget *surface, double x, double y, double radius,
 	const Uint8 *color, double alpha) {
 	int r = (int)(radius + 0.5);
 	if(r < 1) r = 1;
@@ -1338,7 +1575,7 @@ static void weapon_glow(SDL_Surface *surface, double x, double y, double radius,
 // blobs that cools from yellow through orange to grey smoke, a shockwave ring,
 // glowing debris, and for a destroyed ship tumbling hull fragments and two
 // smaller blasts after the first.
-static void draw_explosion(SDL_Surface *surface, double x, double y, double age,
+static void draw_explosion(RenderTarget *surface, double x, double y, double age,
 	double radius, bool big, unsigned int seed, int team, double fade) {
 	if(radius < 2.0) radius = 2.0;
 	double life = big ? 1700.0 : 380.0 + radius * 10.0;
@@ -1443,7 +1680,7 @@ static void weapon_route(double fx, double fy, double dx, double dy, double nx, 
  * `unit` is the size of a shot in pixels (see weapon_unit), `shot` the index
  * of the shot within its volley.
  */
-static void draw_weapon_shot(SDL_Surface *surface, int weapon, int shot, double fx, double fy,
+static void draw_weapon_shot(RenderTarget *surface, int weapon, int shot, double fx, double fy,
 	double tx, double ty, double age, double unit, int team, double fade, int outcome,
 	unsigned int seed) {
 	const WeaponSpec *spec = &weapon_specs[weapon];
@@ -1661,7 +1898,7 @@ static void draw_weapon_shot(SDL_Surface *surface, int weapon, int shot, double 
 	}
 }
 
-static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scale,
+static void render_fullscreen_event(RenderTarget *surface, Uint32 ticks, int scale,
 	const SceneWeather *weather) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_FULLSCREEN, ticks, &window)) return;
@@ -1737,7 +1974,7 @@ static void render_fullscreen_event(SDL_Surface *surface, Uint32 ticks, int scal
 #define DOG_HIT_BURST 3         // the volley that hits (the middle shot of it)
 
 typedef struct {
-	SDL_Surface *surface;
+	RenderTarget *surface;
 	int scale;
 	Uint32 seed;
 	int pair_count;
@@ -1817,7 +2054,7 @@ static double dog_hit_time(const Dogfight *fight, int weapon) {
 		+ weapon_specs[weapon].impact_ms;
 }
 
-static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, int scale,
+static void render_dogfight(RenderTarget *surface, const EffectWindow *window, int scale,
 	int pair_count, int pass_count, double stagger) {
 	Dogfight fight;
 	fight.surface = surface;
@@ -1942,7 +2179,7 @@ static void render_dogfight(SDL_Surface *surface, const EffectWindow *window, in
 
 // The old flyby: one ship from each side crosses the sky, firing pulse bolts at the
 // other and passing it in the middle. Nothing is hit.
-static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_battle_flyby(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
 	Uint32 phase = window.phase;
@@ -1995,14 +2232,14 @@ static void render_battle_flyby(SDL_Surface *surface, Uint32 ticks, int scale) {
 }
 
 // One pair of small ships chasing each other in loops, then trading places.
-static void render_dogfight_effect(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
 	render_dogfight(surface, &window, scale, 1, 2, 0.0);
 }
 
 // A furball: two or three pairs fighting at once.
-static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_background_battle(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
 	render_dogfight(surface, &window, scale, 2 + (window.seed >> 5) % 2, 3, 0.35);
@@ -2019,7 +2256,7 @@ static void render_background_battle(SDL_Surface *surface, Uint32 ticks, int sca
  * destruction is preceded by hits.
  */
 typedef struct {
-	SDL_Surface *surface;
+	RenderTarget *surface;
 	int scale;
 	Uint32 seed;
 	double start;               // scene time the battle began
@@ -2173,7 +2410,7 @@ static void fleet_fire(const Fleet *fleet, int side, int ship, double now, doubl
 	}
 }
 
-static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_fleet_battle(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_FLEET_BATTLE, ticks, &window)) return;
 	Fleet fleet;
@@ -2263,7 +2500,7 @@ static void render_fleet_battle(SDL_Surface *surface, Uint32 ticks, int scale) {
 }
 
 // Screen row of ridge `layer` at pixel column x.
-static double ground_y(SDL_Surface *surface, int layer, double x) {
+static double ground_y(RenderTarget *surface, int layer, double x) {
 	double nx = x / surface->w;
 	if(nx < 0.0) nx = 0.0;
 	if(nx > 0.999) nx = 0.999;
@@ -2277,7 +2514,7 @@ static double ground_y(SDL_Surface *surface, int layer, double x) {
  * sprouting between them. Saplings shoot up, canopies fill out, trees sway in
  * the wind, and late in the event the bushes flower and the trees bear fruit.
  */
-static void draw_hill_garden(SDL_Surface *surface, Uint32 ticks, int scale, Uint32 seed,
+static void draw_hill_garden(RenderTarget *surface, Uint32 ticks, int scale, Uint32 seed,
 	double progress, double fade) {
 	static const Uint8 themes[3][3][3] = {
 		{ { 44, 84, 60 }, { 96, 154, 88 }, { 245, 238, 200 } },     // lush
@@ -2414,7 +2651,7 @@ static void draw_hill_garden(SDL_Surface *surface, Uint32 ticks, int scale, Uint
 	}
 }
 
-static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_long_scene(RenderTarget *surface, Uint32 ticks, int scale) {
 		EffectWindow window;
 		if(!effect_window(&EFFECT_LONG_SCENE, ticks, &window)) return;
 		Uint32 seed = window.seed;
@@ -2498,7 +2735,7 @@ static void render_long_scene(SDL_Surface *surface, Uint32 ticks, int scale) {
  * append it to hill_event_kinds[] and bump HILL_EVENT_KINDS.
  */
 typedef struct {
-	SDL_Surface *surface;
+	RenderTarget *surface;
 	Uint32 ticks;
 	int scale;
 	Uint32 seed;
@@ -2514,7 +2751,7 @@ static double hill_random(const HillEvent *event, int a, int b) {
 }
 
 // A small walking figure with a lantern on a pole.
-static void hill_walker(SDL_Surface *surface, double x, double ground, double height,
+static void hill_walker(RenderTarget *surface, double x, double ground, double height,
 	int direction, double step, bool lantern, double fade, double t, int index) {
 	Uint8 alpha = weapon_alpha(235.0 * fade);
 	double hip = ground - height * 0.45;
@@ -2542,7 +2779,7 @@ static void hill_walker(SDL_Surface *surface, double x, double ground, double he
 // A village of small houses: windows light up one by one, chimneys smoke, and a
 // church tower stands in the middle.
 static void hill_village(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int houses = 8;
 	for(int house = 0; house < houses; house++) {
 		double r = hill_random(event, house, 1), r2 = hill_random(event, house, 2);
@@ -2588,7 +2825,7 @@ static void hill_village(const HillEvent *event) {
 
 // A line of travellers with lanterns walks along the ridge.
 static void hill_caravan(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int walkers = 7;
 	double spacing = event->scale * 0.05;
 	double margin = event->scale * 0.1;
@@ -2608,7 +2845,7 @@ static void hill_caravan(const HillEvent *event) {
 
 // Wind turbines rise on the ridge and begin to turn, with red lights blinking on top.
 static void hill_turbines(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int turbines = 5;
 	Uint8 alpha = weapon_alpha(235.0 * event->fade);
 	for(int i = 0; i < turbines; i++) {
@@ -2638,7 +2875,7 @@ static void hill_turbines(const HillEvent *event) {
 
 // Paper lanterns float up from the hills, swaying as they climb and fading near the top.
 static void hill_lanterns(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int lanterns = 28;
 	for(int i = 0; i < lanterns; i++) {
 		double rx = hill_random(event, i, 1), ph = hill_random(event, i, 2), rs = hill_random(event, i, 3);
@@ -2669,7 +2906,7 @@ static void hill_lanterns(const HillEvent *event) {
 // A tent and a campfire at the edge of the screen; two figures sit by the fire and
 // sparks and smoke rise from it.
 static void hill_campfire(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double x = event->direction > 0 ? surface->w * 0.075 : surface->w * 0.925;
 	double ground = ground_y(surface, RIDGE_NEAR, x) + 2.0;
 	double s = event->scale * 1.4;
@@ -2732,7 +2969,7 @@ static void hill_campfire(const HillEvent *event) {
 // Glowing plants along the ridge: waves of light pass through them, with a few
 // that are much bigger than the rest.
 static void hill_bloom(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int plants = 34;
 	static const Uint8 colors[3][3] = { { 90, 235, 215 }, { 175, 125, 255 }, { 255, 125, 205 } };
 	for(int i = 0; i < plants; i++) {
@@ -2768,7 +3005,7 @@ static void hill_bloom(const HillEvent *event) {
 
 // A herd of four-legged animals walks along the ridge, a calf at the back.
 static void hill_herd(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int animals = 6;
 	double spacing = event->scale * 0.115;
 	double margin = event->scale * 0.1;
@@ -2818,7 +3055,7 @@ static void hill_herd(const HillEvent *event) {
 // to glow, and it erupts: lava is thrown in arcs, lava runs down the cone and an ash
 // cloud rises and drifts.
 static void hill_volcano(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double x = event->direction > 0 ? surface->w * 0.075 : surface->w * 0.925;
 	double base = ground_y(surface, RIDGE_NEAR, x) + s * 0.012;
@@ -2888,7 +3125,7 @@ static void hill_volcano(const HillEvent *event) {
 // A chain of signal towers on the ridge lights up one after another, each sending
 // a searchlight beam into the sky that sweeps slowly from side to side.
 static void hill_beacons(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int towers = 6;
 	double s = event->scale;
 	for(int i = 0; i < towers; i++) {
@@ -2924,7 +3161,7 @@ static void hill_beacons(const HillEvent *event) {
 
 // Fireflies drift over the ridge and blink on and off at their own pace.
 static void hill_fireflies(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int flies = 70;
 	static const Uint8 glow[3] = { 200, 255, 120 };
 	double s = event->scale;
@@ -2946,7 +3183,7 @@ static void hill_fireflies(const HillEvent *event) {
 // Kites on strings: small figures stand on the ridge and let kites climb, sway and
 // trail ribbons.
 static void hill_kites(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int kites = 4;
 	double s = event->scale;
 	int d = event->direction;
@@ -3004,7 +3241,7 @@ static void hill_kites(const HillEvent *event) {
 
 // Fireworks: shells climb from the ridge, burst into rings of sparks that fall and fade.
 static void hill_fireworks(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int shells = 6;
 	static const Uint8 palette[5][3] = {
 		{ 255, 90, 80 }, { 255, 205, 90 }, { 110, 200, 255 }, { 170, 255, 140 }, { 230, 130, 255 } };
@@ -3058,7 +3295,7 @@ static void hill_fireworks(const HillEvent *event) {
 // A train with lit windows follows the ridge, its engine puffing smoke and shining a
 // headlight ahead.
 static void hill_train(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int cars = 6;
 	double s = event->scale;
 	int d = event->direction;
@@ -3119,7 +3356,7 @@ static void hill_train(const HillEvent *event) {
 // A rocket on a gantry vents steam, ignites and climbs out of the top of the screen
 // on a column of smoke.
 static void hill_rocket(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double x = surface->w * (d > 0 ? 0.2 : 0.8);
@@ -3199,7 +3436,7 @@ static void hill_rocket(const HillEvent *event) {
 
 // A flying saucer glides in, hovers and beams up a cow, then leaves.
 static void hill_abduction(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double target_x = surface->w * (0.3 + 0.4 * hill_random(event, 1, 1));
@@ -3263,7 +3500,7 @@ static void hill_abduction(const HillEvent *event) {
 
 // Geysers erupt one after another: a water column, arcing drops and steam.
 static void hill_geysers(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int geysers = 4;
 	double s = event->scale;
 	for(int i = 0; i < geysers; i++) {
@@ -3303,7 +3540,7 @@ static void hill_geysers(const HillEvent *event) {
 // A circle of standing stones: runes wake up on them one by one, then a pillar of
 // light rises from the middle with motes spiralling up it.
 static void hill_stones(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int stones = 7;
 	double s = event->scale;
 	double span = s * 0.5;
@@ -3371,7 +3608,7 @@ static double hill_side(const HillEvent *event, double fraction) {
 
 // A lit Ferris wheel rises on the ridge and turns, its gondolas and rim lights blinking.
 static void hill_ferris(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = hill_side(event, 0.1);
 	double ground = hill_ground(event, cx);
@@ -3408,7 +3645,7 @@ static void hill_ferris(const HillEvent *event) {
 
 // A small observatory: the dome slit opens and a laser guide star beam climbs into the sky.
 static void hill_observatory(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = hill_side(event, 0.13);
 	double ground = hill_ground(event, cx);
@@ -3451,7 +3688,7 @@ static void hill_observatory(const HillEvent *event) {
 
 // Old windmills grow on the ridge and their lattice sails start to turn.
 static void hill_windmills(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int mills = 3;
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -3546,7 +3783,7 @@ static void hill_lighttree(const HillEvent *event) {
 
 // One meteorite hitting the near ridge: streak, flash, shock ring, debris, dust and a crater that cools.
 static void hill_impact(const HillEvent *event, int id, double start, double x, int from) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double duration = event->progress > 0.001 ? event->t / event->progress : 47.0;
 	double age = (event->progress - start) * duration;
@@ -3619,7 +3856,7 @@ static void hill_meteorite(const HillEvent *event) {
 
 // Dust devils: whirling funnels of sand wander along the ridge.
 static void hill_dustdevils(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int devils = 3, slices = 16;
 	for(int i = 0; i < devils; i++) {
@@ -3653,7 +3890,7 @@ static void hill_dustdevils(const HillEvent *event) {
 
 // A laser show: emitters along the ridge sweep fans of coloured beams across the sky.
 static void hill_lasers(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	static const Uint8 colors[4][3] = {
 		{ 255, 70, 200 }, { 70, 230, 255 }, { 120, 255, 120 }, { 255, 200, 70 } };
@@ -3683,7 +3920,7 @@ static void hill_lasers(const HillEvent *event) {
 }
 
 // A jagged arc of lightning between two points, drawn as a glow and a white core.
-static void hill_arc(SDL_Surface *surface, double x0, double y0, double x1, double y1, int segments,
+static void hill_arc(RenderTarget *surface, double x0, double y0, double x1, double y1, int segments,
 	double jitter, unsigned int seed, const Uint8 *color, double alpha) {
 	double px = x0, py = y0;
 	for(int k = 1; k <= segments; k++) {
@@ -3703,7 +3940,7 @@ static void hill_arc(SDL_Surface *surface, double x0, double y0, double x1, doub
 
 // Tesla towers charge up and throw lightning between their spheres and down to the ground.
 static void hill_tesla(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int towers = 4;
 	static const Uint8 blue[3] = { 140, 180, 255 };
@@ -3751,7 +3988,7 @@ static void hill_tesla(const HillEvent *event) {
 
 // Hot air balloons are inflated on the ridge, their burners roar and they lift off one by one.
 static void hill_balloons(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	static const Uint8 palette[4][2][3] = {
 		{ { 150, 70, 70 }, { 225, 195, 150 } }, { { 60, 110, 150 }, { 215, 215, 195 } },
@@ -3794,7 +4031,7 @@ static void hill_balloons(const HillEvent *event) {
 
 // A giant walking figure strides slowly along the middle ridge, its eye and chest glowing.
 static void hill_giant(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double H = s * 0.26;
@@ -3838,7 +4075,7 @@ static void hill_giant(const HillEvent *event) {
 
 // A clock tower rises and its lit face spins fast; every few seconds the bell sends out rings.
 static void hill_clocktower(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = hill_side(event, 0.1);
 	double ground = hill_ground(event, cx);
@@ -3915,7 +4152,7 @@ static void drone_shape(int shape, double u, double *px, double *py) {
 
 // A swarm of drone lights lifts off the ridge and forms a ring, a star, a heart and a wave.
 static void hill_drones(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	const int drones = 48;
 	static const Uint8 palette[4][3] = {
 		{ 255, 200, 110 }, { 120, 220, 255 }, { 255, 120, 160 }, { 150, 255, 160 } };
@@ -3945,7 +4182,7 @@ static void hill_drones(const HillEvent *event) {
 
 // A cave mouth in a mound: a stream of bats pours out and fans over the sky.
 static void hill_bats(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = hill_side(event, 0.12);
@@ -3980,7 +4217,7 @@ static void hill_bats(const HillEvent *event) {
 
 // A stone gate wakes: the arch fills with a swirling light and travellers step out of it.
 static void hill_gate(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = hill_side(event, 0.12);
@@ -4021,7 +4258,7 @@ static void hill_gate(const HillEvent *event) {
 
 // A striped lighthouse rises on the ridge; its lamp turns, sweeping two beams across the sky.
 static void hill_lighthouse(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = hill_side(event, 0.1);
 	double ground = hill_ground(event, cx);
@@ -4054,7 +4291,7 @@ static void hill_lighthouse(const HillEvent *event) {
 
 // A cherry tree grows and comes into blossom, then lets its petals fall in a slow drift.
 static void hill_cherry(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = hill_side(event, 0.13);
@@ -4088,7 +4325,7 @@ static void hill_cherry(const HillEvent *event) {
 
 // A wolf on a rock howls at a rising moon; rings of sound spread from its muzzle.
 static void hill_wolf(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = hill_side(event, 0.14);
@@ -4126,7 +4363,7 @@ static void hill_wolf(const HillEvent *event) {
 
 // A pumpkin patch: round pumpkins swell out of the ground and their carved faces light up.
 static void hill_pumpkins(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int count = 9;
 	for(int i = 0; i < count; i++) {
@@ -4159,7 +4396,7 @@ static void hill_pumpkins(const HillEvent *event) {
 
 // A small castle with crenellated towers, lit windows, flickering gate torches and waving flags.
 static void hill_castle(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = hill_side(event, 0.14);
@@ -4204,7 +4441,7 @@ static void hill_castle(const HillEvent *event) {
 
 // A space elevator: a thin cable climbs from a base station to the top of the sky, with lit climbers running along it.
 static void hill_spaceelevator(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = hill_side(event, 0.17);
 	double ground = hill_ground(event, cx);
@@ -4234,7 +4471,7 @@ static void hill_spaceelevator(const HillEvent *event) {
 
 // A small airstrip: runway lights come on in a row and a little plane lands, taxis and lifts off again.
 static void hill_airstrip(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	static const Uint8 white[3] = { 255, 245, 210 };
@@ -4261,7 +4498,7 @@ static void hill_airstrip(const HillEvent *event) {
 
 // Hot springs: pools of glowing water on the ridge breathe slow clouds of steam.
 static void hill_hotsprings(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int pools = 4;
 	double warm = smooth_step(0.0, 0.12, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
@@ -4284,7 +4521,7 @@ static void hill_hotsprings(const HillEvent *event) {
 
 // A night market: stalls under striped awnings, strings of bulbs between poles, and a few shoppers.
 static void hill_market(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int stalls = 6;
 	double lit = smooth_step(0.05, 0.16, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
@@ -4319,7 +4556,7 @@ static void hill_market(const HillEvent *event) {
 
 // A pond of floating lotus lights: little flames drift across dark water and ripples spread around them.
 static void hill_lotus(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * 0.5, ground = hill_ground(event, cx) + s * 0.008;
 	double rw = s * 0.28, rh = s * 0.014;
@@ -4341,7 +4578,7 @@ static void hill_lotus(const HillEvent *event) {
 
 // A bonfire festival: a big fire in the middle, a ring of dancers circling it, sparks rising.
 static void hill_bonfire(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * 0.5, ground = hill_ground(event, cx);
 	double build = smooth_step(0.0, 0.12, event->progress) * (1.0 - smooth_step(0.9, 0.97, event->progress));
@@ -4374,7 +4611,7 @@ static void hill_bonfire(const HillEvent *event) {
 
 // A waterfall spills down the near ridge, with mist at the bottom and a pale stream running away.
 static void hill_waterfall(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = hill_side(event, 0.16), ground = hill_ground(event, cx);
 	double flow = smooth_step(0.0, 0.1, event->progress) * (1.0 - smooth_step(0.92, 0.98, event->progress));
@@ -4403,7 +4640,7 @@ static void hill_waterfall(const HillEvent *event) {
 
 // Scarecrows stand in a field; crows land on them, flap off, and settle again.
 static void hill_scarecrows(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int count = 4;
 	Uint8 alpha = weapon_alpha(236.0 * event->fade);
@@ -4436,7 +4673,7 @@ static void hill_scarecrows(const HillEvent *event) {
 
 // A tiered pagoda rises on the ridge, floor by floor, its eaves hung with swaying lanterns.
 static void hill_pagoda(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = hill_side(event, 0.13), ground = hill_ground(event, cx);
 	const int tiers = 5;
@@ -4462,7 +4699,7 @@ static void hill_pagoda(const HillEvent *event) {
 
 // A frozen pond: figures glide in loops, leaving pale curved tracks on the ice.
 static void hill_skaters(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * 0.5, ground = hill_ground(event, cx) + s * 0.006;
 	double rw = s * 0.26, rh = s * 0.016;
@@ -4486,7 +4723,7 @@ static void hill_skaters(const HillEvent *event) {
 
 // A flock of sheep is walked along the ridge by a shepherd with a lantern and a small dog.
 static void hill_shepherd(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double margin = s * 0.1, travel = surface->w + 2.0 * margin + s * 0.4;
@@ -4515,7 +4752,7 @@ static void hill_shepherd(const HillEvent *event) {
 
 // An arched stone bridge over a stream; a lantern-carrying traveller crosses and the water glints beneath.
 static void hill_bridge(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = surface->w * 0.5, span = s * 0.2;
@@ -4547,7 +4784,7 @@ static void hill_bridge(const HillEvent *event) {
 
 // Carved totem poles stand in a row; their eyes open one after another and glow.
 static void hill_totems(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int poles = 5;
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -4574,7 +4811,7 @@ static void hill_totems(const HillEvent *event) {
 
 // Snowmen build themselves ball by ball, then wave their twig arms as snow drifts down around them.
 static void hill_snowmen(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int count = 4;
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -4608,7 +4845,7 @@ static void hill_snowmen(const HillEvent *event) {
 
 // A row of sunflowers grows up and every head slowly turns to follow the sun across the sky.
 static void hill_sunflowers(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int count = 9;
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -4634,7 +4871,7 @@ static void hill_sunflowers(const HillEvent *event) {
 
 // Crystals push up out of the hillside, glowing in slow shifting colours, and sparkle at their tips.
 static void hill_crystals(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int clusters = 6;
 	for(int c = 0; c < clusters; c++) {
@@ -4667,7 +4904,7 @@ static void hill_crystals(const HillEvent *event) {
 
 // Giant glowing mushrooms bloom on the hill and puff drifting spores into the air.
 static void hill_mushrooms(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int count = 7;
 	Uint8 alpha = weapon_alpha(235.0 * event->fade);
@@ -4696,7 +4933,7 @@ static void hill_mushrooms(const HillEvent *event) {
 
 // Three tents pitch themselves around a camp; each lights up from inside and a plume of smoke rises between them.
 static void hill_tents(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	static const Uint8 cloth[3][3] = { { 150, 78, 60 }, { 70, 100, 140 }, { 96, 120, 78 } };
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -4726,7 +4963,7 @@ static void hill_tents(const HillEvent *event) {
 
 // A tiered fountain on the hill throws jets of water in slow shifting colours that fall back into the basin.
 static void hill_fountain(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 7));
 	double ground = hill_ground(event, cx);
@@ -4757,7 +4994,7 @@ static void hill_fountain(const HillEvent *event) {
 
 // A harvester crawls along the ridge in the dark, its headlights lighting the crop and dust trailing behind.
 static void hill_harvester(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double u = smooth_step(0.0, 1.0, event->progress);
@@ -4790,7 +5027,7 @@ static void hill_harvester(const HillEvent *event) {
 
 // Small stone cairns stack themselves stone by stone; the top one of each lights up when it is done.
 static void hill_cairns(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int count = 6;
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -4821,7 +5058,7 @@ static void hill_cairns(const HillEvent *event) {
 
 // A little watermill beside a stream: the wheel turns, its paddles drip, and the window is lit.
 static void hill_watermill(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.4 + 0.2 * hill_random(event, 0, 8));
 	double ground = hill_ground(event, cx);
@@ -4854,7 +5091,7 @@ static void hill_watermill(const HillEvent *event) {
 
 // A reedy pond: cattails sway, ripples spread from rising fish, and two frog eyes glint at the edge.
 static void hill_marsh(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.35 + 0.3 * hill_random(event, 0, 9));
 	double ground = hill_ground(event, cx);
@@ -4886,7 +5123,7 @@ static void hill_marsh(const HillEvent *event) {
 
 // Three stargazers lie on the hill beside a telescope while shooting stars streak across the sky above them.
 static void hill_stargazers(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 10));
 	double ground = hill_ground(event, cx);
@@ -4918,7 +5155,7 @@ static void hill_stargazers(const HillEvent *event) {
 
 // A lit carousel turns slowly, its painted horses rising and falling and its rim bulbs chasing round.
 static void hill_carousel(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 13));
 	double ground = hill_ground(event, cx);
@@ -4948,7 +5185,7 @@ static void hill_carousel(const HillEvent *event) {
 
 // A trebuchet hurls glowing stones in high arcs that burst into sparks where they land.
 static void hill_trebuchet(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double bx = d > 0 ? surface->w * 0.22 : surface->w * 0.78;
@@ -4989,7 +5226,7 @@ static void hill_trebuchet(const HillEvent *event) {
 
 // An orchard: apple trees fill with fruit and a few apples fall with a little glint.
 static void hill_orchard(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int trees = 5;
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -5018,7 +5255,7 @@ static void hill_orchard(const HillEvent *event) {
 
 // A tall radio mast blinks its red lights and sends rings of signal rippling up into the sky.
 static void hill_radiomast(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.25 + 0.5 * hill_random(event, 0, 16));
 	double ground = hill_ground(event, cx);
@@ -5044,7 +5281,7 @@ static void hill_radiomast(const HillEvent *event) {
 
 // A glass greenhouse glows from within, its plants swaying and a little steam venting from the roof.
 static void hill_greenhouse(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 17));
 	double ground = hill_ground(event, cx);
@@ -5076,7 +5313,7 @@ static void hill_greenhouse(const HillEvent *event) {
 
 // A swing set: two swings sway out of step, a child's silhouette on one of them.
 static void hill_swings(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.25 + 0.5 * hill_random(event, 0, 19));
 	double ground = hill_ground(event, cx);
@@ -5105,7 +5342,7 @@ static void hill_swings(const HillEvent *event) {
 
 // Beehives in a flowery meadow: glowing bees weave figure-eights around the boxes.
 static void hill_beehives(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	const int count = 4;
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -5136,7 +5373,7 @@ static void hill_beehives(const HillEvent *event) {
 
 // A cableway: two pylons hold a long cable and lit gondolas glide up and down it past each other.
 static void hill_cableway(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double x1 = surface->w * 0.18, x2 = surface->w * 0.82;
 	double g1 = hill_ground(event, x1), g2 = hill_ground(event, x2);
@@ -5160,7 +5397,7 @@ static void hill_cableway(const HillEvent *event) {
 
 // Old stone ruins: pillars light up with runes one after another and a few fragments float above them.
 static void hill_ruins(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 21));
 	Uint8 alpha = weapon_alpha(238.0 * event->fade);
@@ -5187,7 +5424,7 @@ static void hill_ruins(const HillEvent *event) {
 
 // A geodesic dome whose panels light up in drifting patterns of colour.
 static void hill_geodome(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 23));
 	double ground = hill_ground(event, cx);
@@ -5213,7 +5450,7 @@ static void hill_geodome(const HillEvent *event) {
 
 // A log cabin: its windows light up one by one and smoke curls from the chimney.
 static void hill_cabin(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 24));
 	double ground = hill_ground(event, cx);
@@ -5242,7 +5479,7 @@ static void hill_cabin(const HillEvent *event) {
 
 // Wind chimes hang from three poles; the tubes swing and a faint ring spreads when they strike.
 static void hill_windchimes(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	Uint8 alpha = weapon_alpha(240.0 * event->fade);
 	for(int pole = 0; pole < 3; pole++) {
@@ -5267,7 +5504,7 @@ static void hill_windchimes(const HillEvent *event) {
 
 // A picnic blanket with a basket and two friends; a lantern at the middle lights their faces.
 static void hill_picnic(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 26));
 	double ground = hill_ground(event, cx);
@@ -5292,7 +5529,7 @@ static void hill_picnic(const HillEvent *event) {
 
 // A wishing tree: ribbons and glowing paper tags hang from its branches and flutter in a breeze.
 static void hill_wishtree(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 27));
 	double ground = hill_ground(event, cx);
@@ -5320,7 +5557,7 @@ static void hill_wishtree(const HillEvent *event) {
 
 // A mine mouth in the hillside: loaded ore carts roll out of the dark, their lamps sweeping the rails.
 static void hill_mine(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 29));
@@ -5347,7 +5584,7 @@ static void hill_mine(const HillEvent *event) {
 
 // Large glowing eggs lie in a nest; they crack in turn and small bright wyrmlings climb out and flutter up.
 static void hill_eggs(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 30));
 	double ground = hill_ground(event, cx);
@@ -5379,7 +5616,7 @@ static void hill_eggs(const HillEvent *event) {
 
 // Two trees hold a hammock that sways gently, a sleeper in it and a lantern glowing on a branch.
 static void hill_hammock(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 31));
 	double span = s * 0.09;
@@ -5412,7 +5649,7 @@ static void hill_hammock(const HillEvent *event) {
 
 // A line of telegraph poles runs along the ridge; pulses of light race down the wires between them.
 static void hill_telegraph(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	Uint8 alpha = weapon_alpha(240.0 * event->fade);
 	const int poles = 7;
@@ -5446,7 +5683,7 @@ static void hill_telegraph(const HillEvent *event) {
 
 // A chimney-lit village of tiny houses on a hillside: windows blink on at random, and a church bell swings.
 static void hill_hamlet(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	Uint8 alpha = weapon_alpha(240.0 * event->fade);
 	static const Uint8 lamp[3] = { 255, 205, 120 };
@@ -5478,7 +5715,7 @@ static void hill_hamlet(const HillEvent *event) {
 
 // A row of glowing stepping stones lights up across a dark pond, one after another, as a traveller hops along them.
 static void hill_stepstones(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * 0.5;
 	double ground = hill_ground(event, cx);
@@ -5509,7 +5746,7 @@ static void hill_stepstones(const HillEvent *event) {
 
 // A seesaw rocks on the hill with two small figures; a gentle ripple of dust puffs at each landing.
 static void hill_seesaw(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 42));
 	double ground = hill_ground(event, cx);
@@ -5538,7 +5775,7 @@ static void hill_seesaw(const HillEvent *event) {
 
 // A line of laundry strung between two poles: sheets and shirts billow in the wind and a lantern glows beneath.
 static void hill_laundry(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 43));
 	double span = s * 0.1;
@@ -5574,7 +5811,7 @@ static void hill_laundry(const HillEvent *event) {
 
 // A gentle wooden water-wheel pump by a well: a bucket rises on a rope, tips, and a silver trickle runs off down the hill.
 static void hill_well(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 44));
 	double ground = hill_ground(event, cx);
@@ -5608,7 +5845,7 @@ static void hill_well(const HillEvent *event) {
 
 // A kiln on the hillside glows hot; potters carry glowing pots out one by one and set them in a row to cool.
 static void hill_kiln(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = surface->w * (d > 0 ? 0.25 : 0.75);
@@ -5646,7 +5883,7 @@ static void hill_kiln(const HillEvent *event) {
 
 // A rope bridge sags between two rises; lanterns hang along it and sway as a traveller crosses.
 static void hill_ropebridge(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double x1 = surface->w * 0.2, x2 = surface->w * 0.8;
 	double g1 = hill_ground(event, x1), g2 = hill_ground(event, x2);
@@ -5683,7 +5920,7 @@ static void hill_ropebridge(const HillEvent *event) {
 
 // A pottery-wheel-sized bell tower chimes: bells of different sizes swing in turn and each ring sends a pulse of light.
 static void hill_belltower(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 45));
 	double ground = hill_ground(event, cx);
@@ -5715,7 +5952,7 @@ static void hill_belltower(const HillEvent *event) {
 
 // A hedge maze of dark walls; a tiny lantern wanders its paths and, at the end, the centre blooms with light.
 static void hill_maze(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 46));
 	double ground = hill_ground(event, cx);
@@ -5752,7 +5989,7 @@ static void hill_maze(const HillEvent *event) {
 
 // A fisherman sits on a rock beside a dark pool, casting a line; a fish rises, rings spread and the float bobs.
 static void hill_fisher(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 47));
@@ -5787,7 +6024,7 @@ static void hill_fisher(const HillEvent *event) {
 
 // A lone cactus-like crystal tree blooms with tiny lanterns, each one lighting up and floating gently away.
 static void hill_lanterntree(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 48));
 	double ground = hill_ground(event, cx);
@@ -5814,7 +6051,7 @@ static void hill_lanterntree(const HillEvent *event) {
 
 // A blacksmith's forge: the anvil rings, a hammer rises and falls, and a fan of orange sparks leaps from each strike.
 static void hill_forge(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	int d = event->direction;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 52));
@@ -5850,7 +6087,7 @@ static void hill_forge(const HillEvent *event) {
 
 // A great bonsai-like tree on a rock holds a nest of glowing fireflies-free "star seeds" that drift up one by one into the sky.
 static void hill_seedtree(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 54));
 	double ground = hill_ground(event, cx);
@@ -5877,7 +6114,7 @@ static void hill_seedtree(const HillEvent *event) {
 
 // A stone circle on the hilltop: each standing stone takes a turn glowing with a vertical beam, then all pulse together.
 static void hill_stonecircle(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 57));
 	double ground = hill_ground(event, cx);
@@ -5909,7 +6146,7 @@ static void hill_stonecircle(const HillEvent *event) {
 
 // A sandcastle by a tide pool: turrets rise grain by grain, a tiny flag waves, and a wave washes in and trims one tower.
 static void hill_sandcastle(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 58));
 	double ground = hill_ground(event, cx);
@@ -5939,7 +6176,7 @@ static void hill_sandcastle(const HillEvent *event) {
 
 // A music box on a stump opens: a tiny dancer turns on its lid and notes float up from it in glowing wisps.
 static void hill_musicbox(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 59));
 	double ground = hill_ground(event, cx);
@@ -5971,7 +6208,7 @@ static void hill_musicbox(const HillEvent *event) {
 
 // A tall spiral staircase of light winds up from a hilltop dais into the sky, steps lighting one after another.
 static void hill_lightstairs(const HillEvent *event) {
-	SDL_Surface *surface = event->surface;
+	RenderTarget *surface = event->surface;
 	double s = event->scale;
 	double cx = surface->w * (0.3 + 0.4 * hill_random(event, 0, 60));
 	double ground = hill_ground(event, cx);
@@ -6073,7 +6310,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
 	"HILL_EVENT_KINDS does not match hill_event_kinds[]");
 
-static void render_hill_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_hill_event(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_HILL_EVENT, ticks, &window)) return;
 	HillEvent event;
@@ -6099,7 +6336,7 @@ static void render_hill_event(SDL_Surface *surface, Uint32 ticks, int scale) {
  * bump RARE_SKY_KINDS.
  */
 typedef struct {
-	SDL_Surface *surface;
+	RenderTarget *surface;
 	Uint32 ticks;
 	int scale;             // shorter screen side
 	Uint32 seed;
@@ -6113,7 +6350,7 @@ typedef struct {
 } SkyEvent;
 
 #define SKY_EVENT_UNPACK(e) \
-	SDL_Surface *surface = (e)->surface; \
+	RenderTarget *surface = (e)->surface; \
 	Uint32 ticks = (e)->ticks; \
 	int scale = (e)->scale; \
 	Uint32 seed = (e)->seed; \
@@ -8777,7 +9014,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0])
 	== RARE_SKY_KINDS, "RARE_SKY_KINDS does not match sky_event_kinds[]");
 
-static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_rare_sky_event(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_RARE_SKY, ticks, &window)) return;
 
@@ -8808,7 +9045,7 @@ static void render_rare_sky_event(SDL_Surface *surface, Uint32 ticks, int scale)
 	}
 }
 
-static void render_foreground_event(SDL_Surface *surface, Uint32 ticks, int scale) {
+static void render_foreground_event(RenderTarget *surface, Uint32 ticks, int scale) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_FOREGROUND, ticks, &window)) return;
 	Uint32 seed = window.seed;
@@ -8859,7 +9096,7 @@ static void render_foreground_event(SDL_Surface *surface, Uint32 ticks, int scal
 	}
 }
 
-static void render_rare_screen_fade(SDL_Surface *surface, Uint32 ticks) {
+static void render_rare_screen_fade(RenderTarget *surface, Uint32 ticks) {
 	EffectWindow window;
 	if(!effect_window(&EFFECT_SCREEN_FADE, ticks, &window)) return;
 	Uint8 color = (window.seed & 0x80) ? 255 : 0;
@@ -8867,33 +9104,35 @@ static void render_rare_screen_fade(SDL_Surface *surface, Uint32 ticks) {
 		color, color, color, (Uint8)(255 * window.fade));
 }
 
-void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
+static int backdrop_base_w = 0, backdrop_base_h = 0;
+
+void render_backdrop(RenderTarget *surface, Uint32 ticks) {
 	int scale = surface->h < surface->w ? surface->h : surface->w;
 	if(scale < 1) scale = 1;
-	if(surface->format->BytesPerPixel != 4) {
-		fprintf(stderr, "Unsupported screen pixel format: expected 32-bit pixels\n");
-		return;
-	}
-	if(backdrop_base && (backdrop_base->w != surface->w || backdrop_base->h != surface->h)) {
-		SDL_FreeSurface(backdrop_base);
+	if(backdrop_base && (backdrop_base_w != surface->w || backdrop_base_h != surface->h)) {
+		SDL_DestroyTexture(backdrop_base);
 		backdrop_base = NULL;
 	}
 
-	bool cached = backdrop_base && SDL_BlitSurface(backdrop_base, NULL, surface, NULL) == 0;
-	if(backdrop_base && !cached) {
-		fprintf(stderr, "Unable to restore backdrop cache: %s\n", SDL_GetError());
-	}
-	if(!cached) {
-		if(SDL_MUSTLOCK(surface) && SDL_LockSurface(surface) < 0) {
-			fprintf(stderr, "Unable to lock screen surface: %s\n", SDL_GetError());
+	if(!backdrop_base) {
+		int bw = (surface->w + 3) / 4;
+		int bh = (surface->h + 3) / 4;
+		SDL_Surface *base_surf = SDL_CreateSurface(bw, bh, SDL_PIXELFORMAT_RGBA8888);
+		if(!base_surf) {
+			fprintf(stderr, "Unable to allocate backdrop surface: %s\n", SDL_GetError());
 			return;
 		}
+		const SDL_PixelFormatDetails *fmt = SDL_GetPixelFormatDetails(base_surf->format);
+		SDL_LockSurface(base_surf);
 
 		double drift = ticks * 0.000018;
-		for(int y = 0; y < surface->h; y += 4) {
+		for(int by = 0; by < bh; by++) {
+			int y = by * 4;
 			double ny = (double)(y + 2) / surface->h;
 			double sky_blend = ny / 0.68;
-			for(int x = 0; x < surface->w; x += 4) {
+			Uint32 *row = (Uint32 *)((Uint8 *)base_surf->pixels + by * base_surf->pitch);
+			for(int bx = 0; bx < bw; bx++) {
+				int x = bx * 4;
 				double nx = (double)(x + 2) / surface->w;
 				double fine = smooth_noise(nx * 25.0 + drift * 0.35, ny * 21.0, 41);
 				Uint8 red = blend_channel(5, 35, sky_blend);
@@ -8952,23 +9191,27 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 				green = blend_channel(green, (Uint8)(17 + 10 * ground_noise), near_cover);
 				blue = blend_channel(blue, (Uint8)(25 + 12 * ground_noise), near_cover);
 
-				Uint32 pixel = SDL_MapRGB(surface->format, red, green, blue);
-				int block_width = surface->w - x < 4 ? surface->w - x : 4;
-				int block_height = surface->h - y < 4 ? surface->h - y : 4;
-				for(int row_index = 0; row_index < block_height; row_index++) {
-					Uint32 *row = (Uint32 *)((Uint8 *)surface->pixels + (y + row_index) * surface->pitch);
-					for(int column = 0; column < block_width; column++) {
-						row[x + column] = pixel;
-					}
-				}
+				row[bx] = SDL_MapRGBA(fmt, NULL, red, green, blue, 255);
 			}
 		}
-		if(SDL_MUSTLOCK(surface)) SDL_UnlockSurface(surface);
+		SDL_UnlockSurface(base_surf);
 
-		backdrop_base = SDL_ConvertSurface(surface, surface->format, SDL_SWSURFACE);
-		if(!backdrop_base) {
-			fprintf(stderr, "Unable to cache backdrop: %s\n", SDL_GetError());
+		backdrop_base = SDL_CreateTextureFromSurface(surface->renderer, base_surf);
+		SDL_DestroySurface(base_surf);
+		if(backdrop_base) {
+			SDL_SetTextureScaleMode(backdrop_base, SDL_SCALEMODE_NEAREST);
+			SDL_SetTextureBlendMode(backdrop_base, SDL_BLENDMODE_NONE);
+			backdrop_base_w = surface->w;
+			backdrop_base_h = surface->h;
+		} else {
+			fprintf(stderr, "Unable to cache backdrop texture: %s\n", SDL_GetError());
 		}
+	}
+
+	if(backdrop_base) {
+		SDL_FRect src_f = { 0, 0, (float)surface->w / 4.0f, (float)surface->h / 4.0f };
+		SDL_FRect dst_f = { 0, 0, (float)surface->w, (float)surface->h };
+		SDL_RenderTexture(surface->renderer, backdrop_base, &src_f, &dst_f);
 	}
 
 	SceneWeather weather = get_scene_weather(ticks);
@@ -9116,90 +9359,122 @@ void render_backdrop(SDL_Surface *surface, Uint32 ticks) {
 
 
 
-void blit_digits(SDL_Surface *surface, SDL_Rect *rect, int spc, char digits[], SDL_Color color) {
-	SDL_Surface *glyph;
-	SDL_Rect coords;
+static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h) {
+	if(ch < '0' || ch > '9') return NULL;
+	int idx = ch - '0';
+	if(!digit_glyph_tex[idx]) {
+		SDL_Surface *surf = TTF_RenderGlyph_Blended(font_time, (Uint32)ch, FONT_COLOR);
+		if(!surf) {
+			fprintf(stderr, "Unable to render clock digit '%c': %s\n", ch, SDL_GetError());
+			return NULL;
+		}
+		digit_glyph_w[idx] = surf->w;
+		digit_glyph_h[idx] = surf->h;
+		digit_glyph_tex[idx] = SDL_CreateTextureFromSurface(renderer, surf);
+		SDL_DestroySurface(surf);
+		if(!digit_glyph_tex[idx]) return NULL;
+		SDL_SetTextureBlendMode(digit_glyph_tex[idx], SDL_BLENDMODE_BLEND);
+	}
+	*w = digit_glyph_w[idx];
+	*h = digit_glyph_h[idx];
+	return digit_glyph_tex[idx];
+}
 
+void blit_digits(RenderTarget *surface, SDL_Rect *rect, int spc, char digits[], Uint8 mod_r, Uint8 mod_g, Uint8 mod_b) {
 	if(digits[1]) {
 		int gap = spc + spc / 2;
-		SDL_Surface *first_glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
-		SDL_Surface *second_glyph = TTF_RenderGlyph_Blended(font_time, digits[1], color);
-		if(!first_glyph || !second_glyph) {
-			fprintf(stderr, "Unable to render clock digits: %s\n", TTF_GetError());
-			if(first_glyph) SDL_FreeSurface(first_glyph);
-			if(second_glyph) SDL_FreeSurface(second_glyph);
-			return;
-		}
-		int total_width = first_glyph->w + gap + second_glyph->w;
-		coords.x = rect->x + (rect->w - total_width) / 2;
-		coords.y = rect->y + (rect->h - first_glyph->h) / 2;
-		SDL_BlitSurface(first_glyph, 0, surface, &coords);
-		coords.x += first_glyph->w + gap;
-		SDL_FreeSurface(first_glyph);
-		coords.y = rect->y + (rect->h - second_glyph->h) / 2;
-		SDL_BlitSurface(second_glyph, 0, surface, &coords);
-		SDL_FreeSurface(second_glyph);
+		int w0 = 0, h0 = 0, w1 = 0, h1 = 0;
+		SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0);
+		SDL_Texture *t1 = get_digit_glyph_texture(digits[1], &w1, &h1);
+		if(!t0 || !t1) return;
+		int total_width = w0 + gap + w1;
+		float x = (float)(rect->x + (rect->w - total_width) / 2);
+		SDL_FRect dst0 = { x, (float)(rect->y + (rect->h - h0) / 2), (float)w0, (float)h0 };
+		SDL_SetTextureColorMod(t0, mod_r, mod_g, mod_b);
+		SDL_RenderTexture(surface->renderer, t0, NULL, &dst0);
+		SDL_FRect dst1 = { x + w0 + gap, (float)(rect->y + (rect->h - h1) / 2), (float)w1, (float)h1 };
+		SDL_SetTextureColorMod(t1, mod_r, mod_g, mod_b);
+		SDL_RenderTexture(surface->renderer, t1, NULL, &dst1);
 	} else {
-		// single digit
-		glyph = TTF_RenderGlyph_Blended(font_time, digits[0], color);
-		coords.x = rect->x + (rect->w - glyph->w) / 2;
-		coords.y = rect->y + (rect->h - glyph->h) / 2;
-		SDL_BlitSurface(glyph, 0, surface, &coords);
-		SDL_FreeSurface(glyph);
+		int w0 = 0, h0 = 0;
+		SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0);
+		if(!t0) return;
+		SDL_FRect dst0 = { (float)(rect->x + (rect->w - w0) / 2), (float)(rect->y + (rect->h - h0) / 2), (float)w0, (float)h0 };
+		SDL_SetTextureColorMod(t0, mod_r, mod_g, mod_b);
+		SDL_RenderTexture(surface->renderer, t0, NULL, &dst0);
 	}
 }
 
-
-void render_digits(SDL_Surface *surface, SDL_Rect *background, char digits[], char prevdigits[], int maxsteps, int step) {
-	SDL_Rect rect, dstrect;
-	SDL_Color color;
-	double scale;
-	double intensity;
-
-	// int spc = surface->h * .0125;
+static void draw_card_divider(RenderTarget *surface, SDL_Rect *background) {
+	if(!animate) return;
 	bool is_h = surface->h < surface->w;
-	int spc = is_h ? surface->h * .0125 : surface->w * .0125;
+	float div_h = (float)((int)((is_h ? surface->h : surface->w) * 0.005));
+	if(div_h < 1.0f) div_h = 1.0f;
+	float div_y = (float)(background->y + (background->h - (int)div_h) / 2);
+	SDL_SetRenderDrawBlendMode(surface->renderer, SDL_BLENDMODE_NONE);
+	SDL_SetRenderDrawColor(surface->renderer, 7, 9, 15, 255);
+	SDL_FRect r1 = { (float)background->x, div_y, (float)background->w, div_h };
+	SDL_RenderFillRect(surface->renderer, &r1);
+	SDL_SetRenderDrawColor(surface->renderer, 0x35, 0x3a, 0x49, 255);
+	SDL_FRect r2 = { (float)background->x, div_y + div_h, (float)background->w, 1.0f };
+	SDL_RenderFillRect(surface->renderer, &r2);
+}
+
+void render_digits(RenderTarget *surface, SDL_Rect *background, int card_idx, char digits[], char prevdigits[], int maxsteps, int step) {
+	bool is_h = surface->h < surface->w;
+	int spc = (int)(is_h ? surface->h * .0125 : surface->w * .0125);
+	SDL_FRect bg_dst = { (float)background->x, (float)background->y, (float)background->w, (float)background->h };
 
 	if(step == maxsteps - 1) {
-		rect = *background;
-		SDL_SetClipRect(surface, &rect);
-		SDL_BlitSurface(bg, NULL, surface, &rect);
-		blit_digits(surface, background, spc, digits, FONT_COLOR);
-		SDL_SetClipRect(surface, NULL);
-		if(!animate) return;
-
-		rect.h = (is_h ? surface->h : surface->w) * 0.005;
-		rect.w = background->w;
-		rect.x = background->x;
-		rect.y = background->y + (background->h - rect.h) / 2;
-		SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 7, 9, 15));
-		rect.y += rect.h;
-		rect.h = 1;
-		SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 0x35, 0x3a, 0x49));
+		if(!card_cache_tex[card_idx] || strcmp(card_cache_digits[card_idx], digits) != 0) {
+			if(!card_cache_tex[card_idx]) {
+				card_cache_tex[card_idx] = SDL_CreateTexture(surface->renderer, SDL_PIXELFORMAT_RGBA8888,
+					SDL_TEXTUREACCESS_TARGET, background->w, background->h);
+				if(card_cache_tex[card_idx]) SDL_SetTextureBlendMode(card_cache_tex[card_idx], SDL_BLENDMODE_BLEND);
+			}
+			if(card_cache_tex[card_idx]) {
+				SDL_Texture *prev_target = SDL_GetRenderTarget(surface->renderer);
+				SDL_SetRenderTarget(surface->renderer, card_cache_tex[card_idx]);
+				SDL_SetRenderDrawColor(surface->renderer, 0, 0, 0, 0);
+				SDL_SetRenderDrawBlendMode(surface->renderer, SDL_BLENDMODE_NONE);
+				SDL_RenderClear(surface->renderer);
+				SDL_FRect local_rect = { 0, 0, (float)background->w, (float)background->h };
+				SDL_SetTextureBlendMode(bg_texture, SDL_BLENDMODE_NONE);
+				SDL_RenderTexture(surface->renderer, bg_texture, NULL, &local_rect);
+				SDL_SetTextureBlendMode(bg_texture, SDL_BLENDMODE_BLEND);
+				SDL_Rect local_i = { 0, 0, background->w, background->h };
+				blit_digits(surface, &local_i, spc, digits, 255, 255, 255);
+				SDL_SetRenderTarget(surface->renderer, prev_target);
+				snprintf(card_cache_digits[card_idx], sizeof(card_cache_digits[card_idx]), "%s", digits);
+			}
+		}
+		if(card_cache_tex[card_idx]) {
+			SDL_RenderTexture(surface->renderer, card_cache_tex[card_idx], NULL, &bg_dst);
+		} else {
+			SDL_RenderTexture(surface->renderer, bg_texture, NULL, &bg_dst);
+			blit_digits(surface, background, spc, digits, 255, 255, 255);
+		}
+		draw_card_divider(surface, background);
 		return;
 	}
 
-	// Rebuild the card each frame because the back buffer is not preserved by SDL_Flip.
-	rect = *background;
-	SDL_SetClipRect(surface, &rect);
-	SDL_BlitSurface(bg, 0, surface, &rect);
-	rect.h = background->h / 2;
-	SDL_SetClipRect(surface, &rect);
-	blit_digits(surface, background, spc, digits, FONT_COLOR);
-	SDL_SetClipRect(surface, NULL);
+	// Flip animation frame: draw static card background + top half of new digits
+	SDL_RenderTexture(surface->renderer, bg_texture, NULL, &bg_dst);
+	SDL_Rect top_clip = { background->x, background->y, background->w, background->h / 2 };
+	SDL_SetRenderClipRect(surface->renderer, &top_clip);
+	blit_digits(surface, background, spc, digits, 255, 255, 255);
+	SDL_SetRenderClipRect(surface->renderer, NULL);
 
 	int halfsteps = maxsteps / 2;
-	int upperhalf = (step+1) <= halfsteps;
+	int upperhalf = (step + 1) <= halfsteps;
 	if(upperhalf) {
-		rect.x = background->x;
-		rect.y = background->y + background->h / 2;
-		rect.w = background->w;
-		rect.h = background->h - background->h / 2;
-		SDL_SetClipRect(surface, &rect);
-		blit_digits(surface, background, spc, prevdigits, FONT_COLOR);
-		SDL_SetClipRect(surface, NULL);
+		SDL_Rect bot_clip = { background->x, background->y + background->h / 2, background->w, background->h - background->h / 2 };
+		SDL_SetRenderClipRect(surface->renderer, &bot_clip);
+		blit_digits(surface, background, spc, prevdigits, 255, 255, 255);
+		SDL_SetRenderClipRect(surface->renderer, NULL);
 	}
 
+	double scale, intensity;
 	if(upperhalf) {
 		scale = 1.0 - (1.0 * step) / (halfsteps - 1);
 		intensity = 1.0 - (1.0 * step) / (halfsteps - 1);
@@ -9207,52 +9482,56 @@ void render_digits(SDL_Surface *surface, SDL_Rect *background, char digits[], ch
 		scale = ((1.0 * step) - halfsteps + 1) / halfsteps;
 		intensity = ((1.0 * step) - halfsteps + 1) / halfsteps;
 	}
-	color.r = FONT_COLOR.r * intensity;
-	color.g = FONT_COLOR.g * intensity;
-	color.b = FONT_COLOR.b * intensity;
+	Uint8 mod = (Uint8)(255.0 * intensity);
 
-	// create surface to scale from filled background surface
-	SDL_Surface *bgcopy = SDL_ConvertSurface(bg, bg->format, bg->flags);
-	rect.x = 0;
-	rect.y = 0;
-	rect.w = bgcopy->w;
-	rect.h = bgcopy->h;
-	blit_digits(bgcopy, &rect, spc, upperhalf ? prevdigits : digits, color);
+	// Render flipping flap onto reusable GPU target texture, then draw scaled half!
+	if(!flip_card_tex) {
+		flip_card_tex = SDL_CreateTexture(surface->renderer, SDL_PIXELFORMAT_RGBA8888,
+			SDL_TEXTUREACCESS_TARGET, background->w, background->h);
+		if(flip_card_tex) SDL_SetTextureBlendMode(flip_card_tex, SDL_BLENDMODE_BLEND);
+	}
+	if(flip_card_tex) {
+		SDL_Texture *prev_target = SDL_GetRenderTarget(surface->renderer);
+		SDL_SetRenderTarget(surface->renderer, flip_card_tex);
+		SDL_SetRenderDrawColor(surface->renderer, 0, 0, 0, 0);
+		SDL_SetRenderDrawBlendMode(surface->renderer, SDL_BLENDMODE_NONE);
+		SDL_RenderClear(surface->renderer);
+		SDL_FRect local_rect = { 0, 0, (float)background->w, (float)background->h };
+		SDL_SetTextureBlendMode(bg_texture, SDL_BLENDMODE_NONE);
+		SDL_RenderTexture(surface->renderer, bg_texture, NULL, &local_rect);
+		SDL_SetTextureBlendMode(bg_texture, SDL_BLENDMODE_BLEND);
+		SDL_Rect local_i = { 0, 0, background->w, background->h };
+		blit_digits(surface, &local_i, spc, upperhalf ? prevdigits : digits, mod, mod, mod);
+		SDL_SetRenderTarget(surface->renderer, prev_target);
 
-	// scale and blend it to dest
-	SDL_Surface *scaled = zoomSurface(bgcopy, 1.0, scale, 1);
-	rect.x = 0;
-	rect.y = upperhalf ? 0 : scaled->h / 2;
-	rect.w = scaled->w;
-	rect.h = scaled->h / 2;
-	dstrect.x = background->x;
-	dstrect.y = background->y + ( upperhalf ? ((background->h - scaled->h) / 2) : background->h / 2);
-	dstrect.w = rect.w;
-	dstrect.h = rect.h;
-	SDL_SetClipRect(surface, &dstrect);
-	SDL_BlitSurface(scaled, &rect, surface, &dstrect);
-	SDL_SetClipRect(surface, NULL);
-	SDL_FreeSurface(scaled);
-	SDL_FreeSurface(bgcopy);
+		float half_h = (float)(background->h / 2);
+		SDL_FRect src_half = {
+			0.0f,
+			upperhalf ? 0.0f : half_h,
+			(float)background->w,
+			half_h
+		};
+		float scaled_h = (float)(background->h * scale);
+		float dst_half_h = scaled_h * 0.5f;
+		SDL_FRect dst_half = {
+			(float)background->x,
+			(float)background->y + (upperhalf ? ((background->h - scaled_h) * 0.5f) : (background->h * 0.5f)),
+			(float)background->w,
+			dst_half_h
+		};
+		SDL_RenderTexture(surface->renderer, flip_card_tex, &src_half, &dst_half);
+	}
 
-	if(!animate) return;
-	// draw divider
-	rect.h = (is_h ? surface->h : surface->w) * 0.005;
-	rect.w = background->w;
-	rect.x = background->x;
-	rect.y = background->y + (background->h - rect.h) / 2;
-	SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 7, 9, 15));
-	rect.y += rect.h;
-	rect.h = 1;
-	SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 0x35, 0x3a, 0x49));
+	draw_card_divider(surface, background);
 }
 
 // Backdrop picture reused by the frames of one flip while an overlay is showing.
-static SDL_Surface *flip_backdrop;
+static SDL_Texture *flip_backdrop = NULL;
+static int flip_backdrop_w = 0, flip_backdrop_h = 0;
 static bool flip_backdrop_valid = false;
 
 void render_clock(int maxsteps, int step, bool ambient_frame) {
-	static Uint32 last_profile_report;
+	static Uint64 last_profile_report = 0;
 	char buffer[3], buffer2[3];
 	struct tm *_time;
 	time_t rawtime;
@@ -9260,8 +9539,8 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 	static const int offset_y[] = { 0, -1, -1, 0, 1, 1, 0, -1 };
 	int phase, new_burnin_x, new_burnin_y;
 	bool moved = false;
-	Uint32 frame_start = profile_rendering ? SDL_GetTicks() : 0;
-	Uint32 backdrop_elapsed = 0;
+	Uint64 frame_start = profile_rendering ? SDL_GetTicks() : 0;
+	Uint64 backdrop_elapsed = 0;
 
 	time(&rawtime);
 	_time = localtime(&rawtime);
@@ -9278,51 +9557,54 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 		moved = true;
 	}
 	Uint32 now = scene_time();
-	// The screen buffer is not preserved between frames, so anything drawn over
-	// the cards (foreground particles, screen fades) must start from a freshly
-	// drawn backdrop, or its alpha would pile up on the previous frame.
-	bool overlay_active = effect_is_active(&EFFECT_FOREGROUND, now)
-		|| effect_is_active(&EFFECT_SCREEN_FADE, now);
-	bool backdrop_redrawn = moved || ambient_frame || overlay_active;
-	if(moved || ambient_frame) {
-		Uint32 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
+	// In SDL3 with GPU rendering, we always render the full frame cleanly each
+	// present (backbuffers are not preserved across SDL_RenderPresent).
+	// For flip frames, we cache the backdrop in flip_backdrop texture so
+	// 20-fps flip animations don't re-draw the entire scenery every step.
+	bool is_flip_step = !ambient_frame && (step > 0 && step < maxsteps - 1);
+	if(moved || ambient_frame || !is_flip_step) {
+		Uint64 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
 		render_backdrop(screen, now);
 		if(profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
-		flip_backdrop_valid = false;
-	} else if(overlay_active) {
-		// Flip frame with an overlay: render the backdrop once, then reuse that
-		// picture for the rest of the flip so frames stay cheap.
-		if(!(flip_backdrop_valid && flip_backdrop
-			&& SDL_BlitSurface(flip_backdrop, NULL, screen, NULL) == 0)) {
-			Uint32 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
-			render_backdrop(screen, now);
-			if(profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
-			if(flip_backdrop && (flip_backdrop->w != screen->w || flip_backdrop->h != screen->h)) {
-				SDL_FreeSurface(flip_backdrop);
+		if(!ambient_frame && step == 0) {
+			if(flip_backdrop && (flip_backdrop_w != screen->w || flip_backdrop_h != screen->h)) {
+				SDL_DestroyTexture(flip_backdrop);
 				flip_backdrop = NULL;
 			}
 			if(!flip_backdrop) {
-				flip_backdrop = SDL_ConvertSurface(screen, screen->format, SDL_SWSURFACE);
-				flip_backdrop_valid = flip_backdrop != NULL;
-			} else {
-				flip_backdrop_valid = SDL_BlitSurface(screen, NULL, flip_backdrop, NULL) == 0;
+				flip_backdrop = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+					SDL_TEXTUREACCESS_TARGET, screen->w, screen->h);
+				if(flip_backdrop) {
+					flip_backdrop_w = screen->w;
+					flip_backdrop_h = screen->h;
+				}
 			}
+			if(flip_backdrop) {
+				SDL_SetRenderTarget(renderer, flip_backdrop);
+				render_backdrop(screen, now);
+				SDL_SetRenderTarget(renderer, NULL);
+				flip_backdrop_valid = true;
+			}
+		} else if(ambient_frame) {
+			flip_backdrop_valid = false;
 		}
+	} else if(flip_backdrop_valid && flip_backdrop) {
+		SDL_RenderTexture(renderer, flip_backdrop, NULL, NULL);
+	} else {
+		render_backdrop(screen, now);
 	}
+
 	bool time_changed = _time->tm_hour != past_h || _time->tm_min != past_m;
-	bool redraw = ambient_frame || (backdrop_redrawn && !time_changed);
+	bool redraw = ambient_frame || !time_changed;
 	int render_steps = redraw ? 20 : maxsteps;
 	int render_step = redraw ? 19 : step;
 	bool card_drawn[2] = { false, false };
 
 	// draw hours
-	if(_time->tm_hour != past_h || backdrop_redrawn) {
+	{
 		int h = twentyfourh ? _time->tm_hour : (_time->tm_hour + 11) % 12 + 1;
-		// past_h is stored in 24-hour form; convert it the same way as h
-		// so the flip animation shows the previous 12-hour value.
 		int prev_h = twentyfourh ? past_h : (past_h + 11) % 12 + 1;
-		// A card the backdrop just painted over is redrawn as it is, not mid-flip.
-		bool hour_static = backdrop_redrawn && (redraw || _time->tm_hour == past_h);
+		bool hour_static = redraw || _time->tm_hour == past_h;
 		int hour_steps = hour_static ? 20 : render_steps;
 		int hour_step = hour_static ? 19 : render_step;
 		if(leadingzero) {
@@ -9332,18 +9614,17 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			snprintf(buffer, 3, "%d", h);
 			snprintf(buffer2, 3, "%d", hour_static ? h : prev_h);
 		}
-		render_digits(screen, &hourBackground, buffer, buffer2, hour_steps, hour_step);
-		// draw am/pm
+		render_digits(screen, &hourBackground, 0, buffer, buffer2, hour_steps, hour_step);
 		if(!twentyfourh) render_ampm(screen, &hourBackground, _time->tm_hour >= 12);
 		card_drawn[0] = true;
 	}
 
 	// draw minutes
-	if(_time->tm_min != past_m || backdrop_redrawn) {
-		bool min_static = backdrop_redrawn && (redraw || _time->tm_min == past_m);
+	{
+		bool min_static = redraw || _time->tm_min == past_m;
 		snprintf(buffer, 3, "%02d", _time->tm_min);
 		snprintf(buffer2, 3, "%02d", min_static ? _time->tm_min : past_m);
-		render_digits(screen, &minBackground, buffer, buffer2,
+		render_digits(screen, &minBackground, 1, buffer, buffer2,
 			min_static ? 20 : render_steps, min_static ? 19 : render_step);
 		card_drawn[1] = true;
 	}
@@ -9352,21 +9633,29 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 		char date[128];
 		strftime(date, sizeof(date), "%A, %B", _time);
 		snprintf(date + strlen(date), sizeof(date) - strlen(date), " %d, %d", _time->tm_mday, _time->tm_year + 1900);
-		SDL_Surface *new_date_surface = TTF_RenderText_Blended(font_date, date, DATE_COLOR);
+		SDL_Surface *new_date_surface = TTF_RenderText_Blended(font_date, date, 0, DATE_COLOR);
 		if(!new_date_surface) {
-			fprintf(stderr, "Unable to render date: %s\n", TTF_GetError());
+			fprintf(stderr, "Unable to render date: %s\n", SDL_GetError());
 		} else {
-			if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
-			date_surface_cache = new_date_surface;
-			date_surface_yday = _time->tm_yday;
+			if(date_texture_cache) SDL_DestroyTexture(date_texture_cache);
+			date_texture_w = new_date_surface->w;
+			date_texture_h = new_date_surface->h;
+			date_texture_cache = SDL_CreateTextureFromSurface(renderer, new_date_surface);
+			SDL_DestroySurface(new_date_surface);
+			if(date_texture_cache) {
+				SDL_SetTextureBlendMode(date_texture_cache, SDL_BLENDMODE_BLEND);
+				date_surface_yday = _time->tm_yday;
+			}
 		}
 	}
-	if((backdrop_redrawn || _time->tm_yday != past_yday)
-		&& date_surface_cache && date_surface_yday == _time->tm_yday) {
-		SDL_Rect date_coords;
-		date_coords.x = (screen->w - date_surface_cache->w) / 2 + burnin_x;
-		date_coords.y = date_y + burnin_y;
-		SDL_BlitSurface(date_surface_cache, NULL, screen, &date_coords);
+	if(date_texture_cache && date_surface_yday == _time->tm_yday) {
+		SDL_FRect date_coords = {
+			(float)((screen->w - date_texture_w) / 2 + burnin_x),
+			(float)(date_y + burnin_y),
+			(float)date_texture_w,
+			(float)date_texture_h
+		};
+		SDL_RenderTexture(renderer, date_texture_cache, NULL, &date_coords);
 		past_yday = _time->tm_yday;
 	}
 
@@ -9374,9 +9663,8 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 	SDL_Rect *clock_cards[] = { &hourBackground, &minBackground };
 	for(size_t card_index = 0; card_index < sizeof(clock_cards) / sizeof(clock_cards[0]); card_index++) {
 		SDL_Rect *card = clock_cards[card_index];
-		// Only weather over cards drawn this frame, or it would build up on stale ones.
 		if(!card_drawn[card_index]) continue;
-		SDL_SetClipRect(screen, card);
+		SDL_SetRenderClipRect(renderer, card);
 		int drops = (int)(card->w / 42.0 * weather.rain);
 		for(int i = 0; i < drops; i++) {
 			Uint32 seed = (Uint32)(i + card_index * 97) * 2246822519u + 3266489917u;
@@ -9398,18 +9686,18 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 			pixelRGBA(screen, flake_x, flake_y, 208, 221, 236, 110);
 		}
 	}
-	SDL_SetClipRect(screen, NULL);
+	SDL_SetRenderClipRect(renderer, NULL);
 	int scene_scale = screen->h < screen->w ? screen->h : screen->w;
 	render_foreground_event(screen, now, scene_scale);
 	render_rare_screen_fade(screen, now);
 
-	// flip backbuffer
-	SDL_Flip(screen);
+	// present frame
+	SDL_RenderPresent(renderer);
 	if(profile_rendering) {
-		Uint32 frame_elapsed = SDL_GetTicks() - frame_start;
+		Uint64 frame_elapsed = SDL_GetTicks() - frame_start;
 		if(frame_elapsed >= 50 && frame_start - last_profile_report >= 1000) {
-			fprintf(stderr, "Gluqlo slow frame: %u ms (backdrop: %u ms)\n",
-				frame_elapsed, backdrop_elapsed);
+			fprintf(stderr, "Gluqlo slow frame: %llu ms (backdrop: %llu ms)\n",
+				(unsigned long long)frame_elapsed, (unsigned long long)backdrop_elapsed);
 			last_profile_report = frame_start;
 		}
 	}
@@ -9428,30 +9716,33 @@ void render_animation() {
 
 	const int DURATION = 260;
 	const int FRAME_COUNT = 20;
-	int start_tick = SDL_GetTicks();
+	Uint64 start_tick = SDL_GetTicks();
 	for(int frame = 0; frame < FRAME_COUNT; frame++) {
 		render_clock(FRAME_COUNT, frame, false);
-		int elapsed = SDL_GetTicks() - start_tick;
-		int next_frame = DURATION * (frame + 1) / FRAME_COUNT;
-		if(elapsed < next_frame) SDL_Delay(next_frame - elapsed);
+		Uint64 elapsed = SDL_GetTicks() - start_tick;
+		Uint64 next_frame = (Uint64)DURATION * (frame + 1) / FRAME_COUNT;
+		if(elapsed < next_frame) SDL_Delay((Uint32)(next_frame - elapsed));
 	}
 }
 
-Uint32 update_time(Uint32 interval, void *param) {
+Uint32 SDLCALL update_time(void *userdata, SDL_TimerID timerID, Uint32 interval) {
+	(void)userdata;
+	(void)timerID;
 	SDL_Event e;
 	SDL_Event pending_event;
 	int pending = SDL_PeepEvents(&pending_event, 1, SDL_PEEKEVENT,
-		SDL_EVENTMASK(SDL_USEREVENT));
+		user_event_type, user_event_type);
 	if(pending < 0) {
 		fprintf(stderr, "Unable to check pending clock events: %s\n", SDL_GetError());
 		return interval;
 	}
 	if(pending == 0) {
-		e.type = SDL_USEREVENT;
+		SDL_zero(e);
+		e.type = user_event_type;
 		e.user.code = 0;
 		e.user.data1 = NULL;
 		e.user.data2 = NULL;
-		if(SDL_PushEvent(&e) < 0) {
+		if(!SDL_PushEvent(&e)) {
 			fprintf(stderr, "Unable to queue clock event: %s\n", SDL_GetError());
 		}
 	}
@@ -9477,17 +9768,125 @@ static bool parse_int_in_range(const char *text, long min, long max, long *value
 	return true;
 }
 
-int main(int argc, char** argv ) {
+static void destroy_clock_caches(void) {
+	for(int i = 0; i < 10; i++) {
+		if(digit_glyph_tex[i]) { SDL_DestroyTexture(digit_glyph_tex[i]); digit_glyph_tex[i] = NULL; }
+	}
+	for(int i = 0; i < 2; i++) {
+		if(card_cache_tex[i]) { SDL_DestroyTexture(card_cache_tex[i]); card_cache_tex[i] = NULL; }
+		card_cache_digits[i][0] = '\0';
+		if(ampm_textures[i]) { SDL_DestroyTexture(ampm_textures[i]); ampm_textures[i] = NULL; }
+	}
+	if(flip_card_tex) { SDL_DestroyTexture(flip_card_tex); flip_card_tex = NULL; }
+	if(bg_texture) { SDL_DestroyTexture(bg_texture); bg_texture = NULL; }
+}
+
+static void layout_clock(double display_scale_factor) {
+	int out_w = width, out_h = height;
+	SDL_GetCurrentRenderOutputSize(renderer, &out_w, &out_h);
+	screen_target.w = out_w;
+	screen_target.h = out_h;
+
+	int scaled_w = (int)(out_w * display_scale_factor);
+	int scaled_h = (int)(out_h * display_scale_factor);
+	bool is_horizontal = scaled_w > scaled_h;
+
+	if(font_time) TTF_CloseFont(font_time);
+	if(font_mode) TTF_CloseFont(font_mode);
+	if(font_date) TTF_CloseFont(font_date);
+	font_time = TTF_OpenFont(FONT, (float)((is_horizontal ? scaled_h : scaled_w) / 1.68));
+	font_mode = TTF_OpenFont(FONT, (float)((is_horizontal ? scaled_h : scaled_w) / 16.5));
+	if(!font_time || !font_mode) {
+		fprintf(stderr, "TTF_OpenFont: %s\n", SDL_GetError());
+		exit(1);
+	}
+	static const char *date_font_paths[] = {
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+		"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+		"/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+	};
+	float date_font_size = (float)((is_horizontal ? scaled_h : scaled_w) / 24.0);
+	font_date = NULL;
+	for(size_t i = 0; i < sizeof(date_font_paths) / sizeof(date_font_paths[0]) && !font_date; i++) {
+		font_date = TTF_OpenFont(date_font_paths[i], date_font_size);
+	}
+	if(!font_date) {
+		fprintf(stderr, "TTF_OpenFont: %s\n", SDL_GetError());
+		exit(1);
+	}
+
+	destroy_clock_caches();
+	if(date_texture_cache) { SDL_DestroyTexture(date_texture_cache); date_texture_cache = NULL; }
+	date_surface_yday = -1;
+	past_yday = -1;
+
+	int rectsize, spacing, radius;
+	int date_h = TTF_GetFontHeight(font_date);
+	int date_gap = date_h / 2;
+
+	if(is_horizontal) {
+		rectsize = (int)(scaled_h * 0.6);
+		spacing = (int)(scaled_w * .031);
+		radius = (int)(rectsize * .0952);
+	} else {
+		spacing = (int)(scaled_h * .031);
+		int max_rectsize = (scaled_h - date_h - date_gap * 2 - spacing) / 2;
+		rectsize = scaled_w * 0.6 < max_rectsize ? (int)(scaled_w * 0.6) : max_rectsize;
+		radius = (int)(rectsize * .0952);
+	}
+
+	int jitter_width = 1, jitter_height = 1;
+	if(display_scale_factor != 1.0) {
+		jitter_width = (int)((out_w - scaled_w) * 0.5);
+		jitter_height = (int)((out_h - scaled_h) * 0.5);
+	}
+
+	hourBackground.w = rectsize;
+	hourBackground.h = rectsize;
+	minBackground.w = rectsize;
+	minBackground.h = rectsize;
+
+	if(is_horizontal) {
+		hourBackground.x = (int)(0.5 * (scaled_w - (2 * rectsize) - spacing) + jitter_width);
+		hourBackground.y = (scaled_h - rectsize - date_gap - date_h) / 2 + jitter_height;
+		minBackground.x = hourBackground.x + rectsize + spacing;
+		minBackground.y = hourBackground.y;
+		date_y = hourBackground.y + rectsize + date_gap;
+	} else {
+		hourBackground.y = (scaled_h - (2 * rectsize) - spacing - date_gap - date_h) / 2 + jitter_height;
+		hourBackground.x = (scaled_w - rectsize) / 2 + jitter_width;
+		minBackground.y = hourBackground.y + rectsize + spacing;
+		minBackground.x = hourBackground.x;
+		date_y = minBackground.y + rectsize + date_gap;
+	}
+
+	bgrect.x = 0;
+	bgrect.y = 0;
+	bgrect.w = rectsize;
+	bgrect.h = rectsize;
+	SDL_Surface *bg_surf = SDL_CreateSurface(rectsize, rectsize, SDL_PIXELFORMAT_RGBA8888);
+	if(bg_surf) {
+		fill_rounded_box_b(bg_surf, &bgrect, radius, CARD_BORDER_COLOR, 232);
+		int border_width = rectsize / 120;
+		if(border_width < 1) border_width = 1;
+		SDL_Rect cardrect = { border_width, border_width, rectsize - 2 * border_width, rectsize - 2 * border_width };
+		int inner_radius = radius > border_width ? radius - border_width : 1;
+		fill_rounded_box_b(bg_surf, &cardrect, inner_radius, BACKGROUND_COLOR, 190);
+		bg_texture = SDL_CreateTextureFromSurface(renderer, bg_surf);
+		SDL_DestroySurface(bg_surf);
+		if(bg_texture) SDL_SetTextureBlendMode(bg_texture, SDL_BLENDMODE_BLEND);
+	}
+}
+
+int main(int argc, char** argv) {
 	char *wid_env;
-	static char sdlwid[100];
 	double display_scale_factor = 1;
 	bool seed_given = false;
 	Uint32 scene_seed = 0;
 	profile_rendering = getenv("GLUQLO_PROFILE") != NULL;
 
 	Uint32 wid = 0;
-	Display *display;
-	XWindowAttributes windowAttributes;
 
 	for(int i = 1; i < argc; i++) {
 		if(strcmp("--help",argv[i]) == 0 || strcmp("-help", argv[i]) == 0) {
@@ -9623,153 +10022,65 @@ int main(int argc, char** argv ) {
 	else if(seed_given) scene_offset = scene_offset_from_seed(scene_seed);
 	else scene_offset = random_scene_offset();
 
-	/* If no window argument, check environment */
 	if(wid == 0) {
-		if ((wid_env = getenv("XSCREENSAVER_WINDOW")) != NULL ) {
-			wid = strtol(wid_env, (char **) NULL, 0); /* Base 0 autodetects hex/dec */
+		if((wid_env = getenv("XSCREENSAVER_WINDOW")) != NULL) {
+			wid = (Uint32)strtol(wid_env, NULL, 0);
 		}
 	}
 
-	/* Get win attrs if we've been given a window, otherwise we'll use our own */
-	if(wid != 0) {
-		if ((display = XOpenDisplay(NULL)) != NULL) { /* Use the default display */
-			Status attributes_status = XGetWindowAttributes(display, (Window) wid, &windowAttributes);
-			XCloseDisplay(display);
-			if(attributes_status) {
-				snprintf(sdlwid, 100, "SDL_WINDOWID=0x%X", wid);
-				putenv(sdlwid); /* Tell SDL to use this window */
-				width = windowAttributes.width;
-				height = windowAttributes.height;
-			} else {
-				fprintf(stderr, "Unable to read attributes of window 0x%X\n", wid);
-				wid = 0;
-			}
-		}
-	}
-
-	if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER) < 0) {
+	if(!SDL_Init(SDL_INIT_VIDEO)) {
 		fprintf(stderr, "Unable to init SDL: %s\n", SDL_GetError());
 		return 1;
 	}
 	atexit(SDL_Quit);
 
-	if(fullscreen && (!wid)) {
-		screen = SDL_SetVideoMode(0, 0, 32, SDL_HWSURFACE|SDL_DOUBLEBUF|SDL_FULLSCREEN);
-	} else {
-		screen = SDL_SetVideoMode(width, height, 32, SDL_HWSURFACE|SDL_DOUBLEBUF);
-	}
-
-	if (!screen) {
-		fprintf(stderr, "Unable to set video mode: %s\n", SDL_GetError());
+	if(!TTF_Init()) {
+		fprintf(stderr, "Unable to init SDL_ttf: %s\n", SDL_GetError());
 		return 1;
 	}
+	atexit(TTF_Quit);
+
+	SDL_PropertiesID props = SDL_CreateProperties();
+	SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, TITLE);
+	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width);
+	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height);
+	SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, !fullscreen && wid == 0);
+	SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
+	if(fullscreen && wid == 0) {
+		SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, true);
+	}
+	if(wid != 0) {
+		SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X11_WINDOW_NUMBER, (Sint64)wid);
+	}
+	window = SDL_CreateWindowWithProperties(props);
+	SDL_DestroyProperties(props);
+	if(!window) {
+		fprintf(stderr, "Unable to create window: %s\n", SDL_GetError());
+		return 1;
+	}
+
+	renderer = SDL_CreateRenderer(window, NULL);
+	if(!renderer) {
+		fprintf(stderr, "Unable to create renderer: %s\n", SDL_GetError());
+		SDL_DestroyWindow(window);
+		return 1;
+	}
+	SDL_SetRenderVSync(renderer, 1);
+	screen_target.renderer = renderer;
 
 	if(fullscreen || wid) {
-		SDL_ShowCursor(SDL_DISABLE);
+		SDL_HideCursor();
 	}
 
-	SDL_WM_SetCaption(TITLE, TITLE);
-
-	width = screen->w * display_scale_factor;
-	height = screen->h * display_scale_factor;
-
-	bool is_horizontal = width > height;
-
-	TTF_Init();
-	atexit(TTF_Quit);
-	font_time = TTF_OpenFont(FONT, (is_horizontal ? height : width) / 1.68 );
-	font_mode = TTF_OpenFont(FONT, (is_horizontal ? height : width) / 16.5);
-	if (!font_time || !font_mode) {
-		fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
-		return 1;
-	}
-	static const char *date_font_paths[] = {
-		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-		"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-		"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-		"/usr/share/fonts/truetype/freefont/FreeSans.ttf"
-	};
-	int date_font_size = (is_horizontal ? height : width) / 24;
-	for(size_t i = 0; i < sizeof(date_font_paths) / sizeof(date_font_paths[0]) && !font_date; i++) {
-		font_date = TTF_OpenFont(date_font_paths[i], date_font_size);
-	}
-	if (!font_date) {
-		fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
+	user_event_type = SDL_RegisterEvents(1);
+	if(user_event_type == 0) {
+		fprintf(stderr, "Unable to register timer event: %s\n", SDL_GetError());
+		SDL_DestroyRenderer(renderer);
+		SDL_DestroyWindow(window);
 		return 1;
 	}
 
-	// Draw the layered forest before placing the clock over it.
-	render_backdrop(screen, scene_time());
-
-	// calculate box coordinates
-	int rectsize;
-	int spacing;
-	int radius;
-	int date_gap = TTF_FontHeight(font_date) / 2;
-
-	if (is_horizontal) {
-		rectsize = height * 0.6;
-		spacing = width * .031;
-		radius = rectsize * .0952;
-	}
-	else {
-		spacing = height * .031;
-		int max_rectsize = (height - TTF_FontHeight(font_date) - date_gap * 2 - spacing) / 2;
-		rectsize = width * 0.6 < max_rectsize ? width * 0.6 : max_rectsize;
-		radius = rectsize * .0952;
-	}
-
-	int jitter_width  = 1;
-	int jitter_height = 1;
-	if (display_scale_factor != 1) {
-		jitter_width  = (screen->w - width) * 0.5;
-		jitter_height = (screen->h - height) * 0.5;
-	}
-
-	hourBackground.w = rectsize;
-	hourBackground.h = rectsize;
-	minBackground.w = rectsize;
-	minBackground.h = rectsize;
-
-	if (is_horizontal) {
-		hourBackground.x = 0.5 * (width - (2 * rectsize) - spacing)
-										+ jitter_width;
-		hourBackground.y = (height - rectsize - date_gap - TTF_FontHeight(font_date)) / 2 + jitter_height;
-
-		minBackground.x = hourBackground.x + rectsize + spacing;
-		minBackground.y = hourBackground.y;
-		date_y = hourBackground.y + rectsize + date_gap;
-	}
-	else {
-		hourBackground.y = (height - (2 * rectsize) - spacing - date_gap - TTF_FontHeight(font_date)) / 2
-										+ jitter_height;
-		hourBackground.x = (width - rectsize) / 2 + jitter_width;
-
-		minBackground.y = hourBackground.y + rectsize + spacing;
-		minBackground.x = hourBackground.x;
-		date_y = minBackground.y + rectsize + date_gap;
-	}
-
-	// create background surface
-	bgrect.x = 0;
-	bgrect.y = 0;
-	bgrect.w = rectsize;
-	bgrect.h = rectsize;
-	Uint32 alpha_mask = ~(screen->format->Rmask | screen->format->Gmask | screen->format->Bmask);
-	bg = SDL_CreateRGBSurface(SDL_SWSURFACE|SDL_SRCALPHA, rectsize, rectsize, 32,
-		screen->format->Rmask, screen->format->Gmask, screen->format->Bmask, alpha_mask);
-	fill_rounded_box_b(bg, &bgrect, radius, CARD_BORDER_COLOR, 232);
-	int border_width = rectsize / 120;
-	if(border_width < 1) border_width = 1;
-	SDL_Rect cardrect;
-	cardrect.x = border_width;
-	cardrect.y = border_width;
-	cardrect.w = rectsize - 2 * border_width;
-	cardrect.h = rectsize - 2 * border_width;
-	int inner_radius = radius > border_width ? radius - border_width : 1;
-	fill_rounded_box_b(bg, &cardrect, inner_radius, BACKGROUND_COLOR, 190);
-
-	// draw current time
+	layout_clock(display_scale_factor);
 	render_clock(20, 19, false);
 
 	// main loop
@@ -9778,44 +10089,52 @@ int main(int argc, char** argv ) {
 	SDL_TimerID timer = SDL_AddTimer(AMBIENT_FRAME_INTERVAL, update_time, NULL);
 	if(!timer) {
 		fprintf(stderr, "Unable to start clock timer: %s\n", SDL_GetError());
-		SDL_FreeSurface(bg);
-		if(backdrop_base) SDL_FreeSurface(backdrop_base);
-		if(flip_backdrop) SDL_FreeSurface(flip_backdrop);
-		if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
+		destroy_clock_caches();
+		if(backdrop_base) SDL_DestroyTexture(backdrop_base);
+		if(flip_backdrop) SDL_DestroyTexture(flip_backdrop);
+		if(date_texture_cache) SDL_DestroyTexture(date_texture_cache);
+		if(ship_target_tex) SDL_DestroyTexture(ship_target_tex);
 		TTF_CloseFont(font_time);
 		TTF_CloseFont(font_mode);
 		TTF_CloseFont(font_date);
+		SDL_DestroyRenderer(renderer);
+		SDL_DestroyWindow(window);
 		return 1;
 	}
 
-	int mouse_x = -1;
-	int mouse_y = -1;
+	float mouse_x = -1.0f;
+	float mouse_y = -1.0f;
 
 	while(!done && SDL_WaitEvent(&event)) {
-		switch(event.type) {
-			case SDL_USEREVENT:
-			{
-				time_t rawtime;
-				struct tm current_time;
-				time(&rawtime);
-				localtime_r(&rawtime, &current_time);
-				bool time_changed = current_time.tm_hour != past_h
-					|| current_time.tm_min != past_m;
-				if(time_changed) {
-					render_animation();
-				} else {
-					render_clock(20, 19, true);
-				}
-				break;
+		if(event.type == user_event_type) {
+			time_t rawtime;
+			struct tm current_time;
+			time(&rawtime);
+			localtime_r(&rawtime, &current_time);
+			bool time_changed = current_time.tm_hour != past_h
+				|| current_time.tm_min != past_m;
+			if(time_changed) {
+				render_animation();
+			} else {
+				render_clock(20, 19, true);
 			}
-			case SDL_KEYDOWN:
-				if(anykeyclose){
+			continue;
+		}
+		switch(event.type) {
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+			case SDL_EVENT_WINDOW_RESIZED:
+				layout_clock(display_scale_factor);
+				render_clock(20, 19, true);
+				break;
+
+			case SDL_EVENT_KEY_DOWN:
+				if(anykeyclose) {
 					done = true;
 					break;
 				}
-				switch(event.key.keysym.sym) {
+				switch(event.key.key) {
 					case SDLK_ESCAPE:
-					case SDLK_q:
+					case SDLK_Q:
 						done = true;
 						break;
 					default:
@@ -9823,19 +10142,16 @@ int main(int argc, char** argv ) {
 				}
 				break;
 
-			case SDL_MOUSEMOTION:
-				if ( (mouse_x == -1) || (mouse_y == -1) ) //lifehack
-					{
-						mouse_x = event.motion.x;
-						mouse_y = event.motion.y;
-
-					}
-
+			case SDL_EVENT_MOUSE_MOTION:
+				if((mouse_x < 0.0f) || (mouse_y < 0.0f)) {
+					mouse_x = event.motion.x;
+					mouse_y = event.motion.y;
+				}
 				if(((mouse_x != event.motion.x) || (mouse_y != event.motion.y)) && anykeyclose)
 					done = true;
 				break;
 
-			case SDL_QUIT:
+			case SDL_EVENT_QUIT:
 				done = true;
 				break;
 		}
@@ -9843,15 +10159,17 @@ int main(int argc, char** argv ) {
 
 	SDL_RemoveTimer(timer);
 
-	SDL_FreeSurface(bg);
-	if(backdrop_base) SDL_FreeSurface(backdrop_base);
-	if(flip_backdrop) SDL_FreeSurface(flip_backdrop);
-	if(ship_backup) SDL_FreeSurface(ship_backup);
-	if(date_surface_cache) SDL_FreeSurface(date_surface_cache);
+	destroy_clock_caches();
+	if(backdrop_base) SDL_DestroyTexture(backdrop_base);
+	if(flip_backdrop) SDL_DestroyTexture(flip_backdrop);
+	if(ship_target_tex) SDL_DestroyTexture(ship_target_tex);
+	if(date_texture_cache) SDL_DestroyTexture(date_texture_cache);
 
 	TTF_CloseFont(font_time);
 	TTF_CloseFont(font_mode);
 	TTF_CloseFont(font_date);
+	SDL_DestroyRenderer(renderer);
+	SDL_DestroyWindow(window);
 
 	return 0;
 }

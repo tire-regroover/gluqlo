@@ -17,16 +17,15 @@ turn up now and then, in the sky and on the hills. See `NOTES.md` if you want th
 
 ## Requirements
 
-- SDL 1.2
-- SDL_gfx 1.2
-- SDL_ttf 2.0
-- XScreensaver (optional)
+- SDL3
+- SDL3_ttf
+- XScreensaver (optional, X11)
 
 ## Building from source
 
-Install the build-time dependencies (Ubuntu/Debian):
+Install the build-time dependencies (with SDL3 and SDL3_ttf development packages or built from source):
 
-    $ sudo apt-get install build-essential libsdl1.2-dev libsdl-ttf2.0-dev libsdl-gfx1.2-dev libx11-dev
+    $ sudo apt-get install build-essential pkg-config libsdl3-dev libsdl3-ttf-dev
 
 Then compile and install as usual:
 
@@ -34,16 +33,13 @@ Then compile and install as usual:
 
 ### Arch Linux
 
-    $ sudo pacman -S --needed base-devel sdl12-compat sdl_ttf sdl_gfx libx11
+    $ sudo pacman -S --needed base-devel pkgconf sdl3 sdl3_ttf
     $ make && sudo make install
 
 ### openSUSE (Leap and Tumbleweed)
 
-    $ sudo zypper install gcc-c++ make libSDL-devel libSDL_ttf-devel libSDL_gfx-devel libX11-devel
+    $ sudo zypper install gcc-c++ make pkg-config SDL3-devel SDL3_ttf-devel
     $ make && sudo make install
-
-If a package is not found, look for the current name with `zypper search SDL_gfx` (and likewise for `SDL_ttf`).
-On Tumbleweed the SDL 1.2 headers come from `sdl12_compat`, which provides `sdl-config`.
 
 `make install` puts the program in `/usr/libexec/xscreensaver`. If your XScreenSaver looks for its programs
 somewhere else (for example `/usr/lib64/xscreensaver`), copy `gluqlo` there, or put the full path in
