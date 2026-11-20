@@ -15,8 +15,8 @@
 * Copyright (c) 2014 Alexander Kovalenko
 * Copyright (c) 2026 tire-regroover (L-Space scenery, weather and events)
 *
-* L-Space was written with the help of AI coding assistants: GitHub Copilot
-* (Anthropic Claude), GPT, DeepSeek and Qwen. Their output was directed and reviewed
+* L-Space was written with the help of AI coding assistants: GitHub Copilot using agents from
+* Anthropic Claude, Google Gemini, OpenAI GPT, Hangzhou DeepSeek and Alibaba Qwen. Their output was directed and reviewed
 * by tire-regroover.
 *
 * Permission to use, copy, modify, and distribute this software for any
