@@ -642,7 +642,7 @@ static const EffectSpec EFFECT_RARE_SKY = {"rare_sky",
                                            rare_sky_accept};
 static const EffectSpec EFFECT_BATTLE_FLYBY = {
     "battle_flyby", 60000, 1,    6, false,     0, 14000, 0, 0,
-    false,          900,   1100, 3, GROUP_SKY, 4, NULL};
+    false,          900,   1100, 4, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
     0,          true,  900, 1100, 3,     GROUP_SKY, 3,     NULL};
@@ -2587,12 +2587,14 @@ static void render_dogfight(RenderTarget *surface, const EffectWindow *window,
 //      across the sky, firing plasma/flak volleys behind them.
 //   2: stealth torpedo run — a lone bomber swoops low, fires a glowing torpedo
 //      at a distant silhouette cruiser, and banks away into the upper sky.
+//   3: FTL slingshot — a cruiser drops out of hyperspace in a bright flash,
+//      fires a broadside salvo at a patrolling picket, then accelerates to warp.
 static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
                                 int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
   Uint32 phase = window.phase;
-  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 3);
+  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 4);
 
   int size = scale / 170;
   if (size < 4) size = 4;
@@ -2658,6 +2660,45 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
         draw_weapon_shot(surface, WEAPON_TORPEDO, 0, launch_x,
                          center_y + scale * 0.032, tx, ty, torp_age,
                          scale / 95.0, 0, fade, 1, fx_hash(window.seed, 77));
+      }
+    }
+    return;
+  }
+  if (kind == 3) {
+    int dir = (window.seed >> 3) & 1 ? 1 : -1;
+    // Patrolling picket ship
+    double px = (dir > 0) ? surface->w * 0.72 - progress * scale * 0.14
+                          : surface->w * 0.28 + progress * scale * 0.14;
+    double py = center_y + scale * 0.025;
+    draw_ship_role(surface, (int)px, (int)py, SHIP_SMALL, window.seed >> 5,
+                   length, -dir, 1, opacity);
+    // Cruiser decelerates in (0.0..0.28), coasts (0.28..0.68), then streaks
+    // away in warp (0.68..1.0).
+    double u = 0.28 * smooth_step(0.0, 0.28, progress) +
+               0.28 * (progress > 0.28 ? (progress < 0.68 ? (progress - 0.28) : 0.40) : 0.0) +
+               (progress > 0.68 ? pow((progress - 0.68) / 0.32, 2.5) * 0.44 : 0.0);
+    double cx = (dir > 0) ? surface->w * 0.12 + u * surface->w * 0.95
+                          : surface->w * 0.88 - u * surface->w * 0.95;
+    double cy = center_y - scale * 0.015;
+    if (progress < 0.22) {
+      double flash = 1.0 - progress / 0.22;
+      static const Uint8 warp_c[3] = {155, 225, 255};
+      weapon_glow(surface, cx, cy, size * 2.5 * flash, warp_c,
+                  190.0 * flash * fade);
+    }
+    if (progress > 0.68) {
+      double streak = (progress - 0.68) / 0.32;
+      thickLineRGBA(surface, (int)cx, (int)cy,
+                    (int)(cx - dir * streak * scale * 0.22), (int)cy, 2, 165,
+                    225, 255, (Uint8)(160 * (1.0 - streak * 0.5) * fade));
+    }
+    draw_ship_role(surface, (int)cx, (int)cy, SHIP_MID, window.seed >> 9,
+                   (int)(length * 1.5), dir, 0, opacity);
+    if (progress > 0.25 && progress < 0.70) {
+      double age = (progress - 0.25) * window.duration;
+      if (age < weapon_specs[WEAPON_BEAM].life_ms) {
+        draw_weapon_shot(surface, WEAPON_BEAM, 0, cx, cy, px, py, age,
+                         scale / 95.0, 0, fade, 1, fx_hash(window.seed, 51));
       }
     }
     return;
