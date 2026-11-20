@@ -507,7 +507,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 148
+#define RARE_SKY_KINDS 149
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -12741,6 +12741,31 @@ static void sky_event_147(const SkyEvent *event) {
   }
 }
 
+// Pulsar lighthouse: a rapidly spinning magnetized neutron star sweeping twin
+// relativistic cyan-violet beams across an elliptical accretion halo.
+static void sky_event_148(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 core_c[3] = {195, 240, 255};
+  static const Uint8 beam_c[3] = {125, 210, 255};
+  static const Uint8 halo_c[3] = {175, 130, 245};
+  double sweep = phase / 340.0;
+  double beam_len = size * 3.4;
+  // Equator accretion ring
+  ellipseRGBA(surface, x, y, (int)(size * 1.45), (int)(size * 0.42),
+              halo_c[0], halo_c[1], halo_c[2], weapon_alpha(115.0 * fade));
+  // Twin rotating relativistic jets
+  for (int j = 0; j < 2; j++) {
+    double a = sweep + j * M_PI;
+    double dx = cos(a), dy = sin(a) * 0.65;
+    double ex = x + dx * beam_len, ey = y + dy * beam_len;
+    thickLineRGBA(surface, x, y, (int)ex, (int)ey, 4, beam_c[0], beam_c[1],
+                  beam_c[2], weapon_alpha(55.0 * fade));
+    thickLineRGBA(surface, x, y, (int)ex, (int)ey, 2, 240, 250, 255,
+                  weapon_alpha(185.0 * fade));
+  }
+  weapon_glow(surface, x, y, size * 0.42, core_c, 225.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -12812,6 +12837,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     sky_event_143, sky_event_144, sky_event_145, sky_event_146, sky_event_147,
+    sky_event_148,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
