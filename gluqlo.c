@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  106  // things that happen on the hills (see render_hill_event)
+  107  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -9071,6 +9071,33 @@ static void hill_prism_observatory(const HillEvent *event) {
   weapon_glow(surface, x, ground - r * 1.15, 2.2, slit, 175.0 * event->fade);
 }
 
+// Aurora windmill: a tall, slender ridge-top collector tower with three
+// bioluminescent emerald-tipped blades that trace faint glowing arcs as they
+// turn.
+static void hill_aurora_turbine(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.22 + 0.56 * hill_random(event, 3, 7));
+  double ground = hill_ground(event, x);
+  double h = s * 0.095;
+  double blade = s * 0.048;
+  double hub_y = ground - h;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  thickLineRGBA(surface, (int)x, (int)(ground + 2), (int)x, (int)hub_y, 3, 18,
+                22, 32, hull_a);
+  static const Uint8 tip_c[3] = {95, 240, 185};
+  double rot = event->t * 1.35;
+  for (int b = 0; b < 3; b++) {
+    double a = rot + b * (2.0 * M_PI / 3.0);
+    double tx = x + cos(a) * blade;
+    double ty = hub_y + sin(a) * blade;
+    thickLineRGBA(surface, (int)x, (int)hub_y, (int)tx, (int)ty, 2, 36, 46, 62,
+                  hull_a);
+    weapon_glow(surface, tx, ty, 1.4, tip_c, 165.0 * event->fade);
+  }
+  weapon_glow(surface, x, hub_y, 1.8, tip_c, 185.0 * event->fade);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -9101,7 +9128,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
     hill_glass_forest, hill_tidal_bell, hill_canal_skiff,
-    hill_prism_observatory,
+    hill_prism_observatory, hill_aurora_turbine,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
