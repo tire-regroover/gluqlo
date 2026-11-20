@@ -512,7 +512,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  108  // things that happen on the hills (see render_hill_event)
+  109  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -9184,6 +9184,31 @@ static void hill_solar_mirror(const HillEvent *event) {
   }
 }
 
+// Ether fountain: a tiered stone basin on the ridge sending up twin arcs of
+// softly glowing lavender-blue luminous droplets.
+static void hill_ether_fountain(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.25 + 0.50 * hill_random(event, 7, 13));
+  double ground = hill_ground(event, x);
+  double w = s * 0.032;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  boxRGBA(surface, (int)(x - w), (int)(ground - s * 0.010), (int)(x + w),
+          (int)(ground + 2), 20, 24, 34, hull_a);
+  boxRGBA(surface, (int)(x - w * 0.35), (int)(ground - s * 0.025),
+          (int)(x + w * 0.35), (int)(ground - s * 0.010), 26, 32, 44, hull_a);
+  static const Uint8 drop_c[3] = {165, 195, 255};
+  for (int i = 0; i < 14; i++) {
+    double u = fmod(event->t * 0.72 + i / 14.0, 1.0);
+    double side = (i % 2 == 0) ? -1.0 : 1.0;
+    double spread = (0.4 + 0.5 * ((i / 2) % 3)) * w * 0.9;
+    double px = x + side * spread * u;
+    double py = ground - s * 0.025 - (4.0 * u * (1.0 - u)) * s * 0.055;
+    double a = (1.0 - u * 0.65) * 185.0 * event->fade;
+    weapon_glow(surface, px, py, 1.1, drop_c, a);
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -9215,6 +9240,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
     hill_glass_forest, hill_tidal_bell, hill_canal_skiff,
     hill_prism_observatory, hill_aurora_turbine, hill_solar_mirror,
+    hill_ether_fountain,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
