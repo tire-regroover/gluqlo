@@ -607,7 +607,7 @@ static const EffectSpec EFFECT_FULLSCREEN = {"fullscreen",
                                              fullscreen_accept};
 static const EffectSpec EFFECT_FLEET_BATTLE = {
     "fleet_battle", 240000, 1,    6, false,     0, 60000, 0, 0,
-    false,          1400,   2200, 4, GROUP_SKY, 0, NULL};
+    false,          1400,   2200, 5, GROUP_SKY, 0, NULL};
 static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     90000,
                                                     1,
@@ -3108,6 +3108,25 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
     }
     return;
   }
+  if (fleet->kind == 4) {
+    // Pincer crossfire: the winning fleet splits into two flanking wings
+    // (top-left and bottom-right) closing around a retreating center column.
+    if (side == fleet->winner) {
+      int wing = ship % 2;
+      double wx = wing == 0 ? width * (0.24 + 0.08 * approach)
+                            : width * (0.76 - 0.08 * approach);
+      double wy = fleet->center_y + (wing == 0 ? -1 : 1) * fleet->scale * 0.045;
+      *x = wx + (ship / 2) * (wing == 0 ? -1 : 1) * fleet->size * 2.4 +
+           sin(t / (540.0 + ship * 95)) * fleet->size * 0.5;
+      *y = wy + cos(t / (480.0 + ship * 70)) * fleet->size * 0.5;
+    } else {
+      double cy = fleet->center_y - retreat * fleet->scale * 0.18;
+      *x = width * 0.50 + lane * fleet->size * 2.2 +
+           sin(t / (450.0 + ship * 80)) * fleet->size * 0.6;
+      *y = cy + (ship - fleet->count[side] / 2.0) * fleet->size * 1.4;
+    }
+    return;
+  }
   double weave = sin(t / (510.0 + ship * 127) + ship * 1.8 + side * 2.4) *
                  fleet->scale * 0.009;
   double arc = sin(t / 1900.0 + progress * 8.0) * fleet->scale * 0.010;
@@ -3245,7 +3264,7 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks,
   fleet.surface = surface;
   fleet.scale = scale;
   fleet.seed = window.seed;
-  fleet.kind = effect_kind(&EFFECT_FLEET_BATTLE, (window.seed >> 7) % 4);
+  fleet.kind = effect_kind(&EFFECT_FLEET_BATTLE, (window.seed >> 7) % 5);
   fleet.start = (double)ticks - window.phase;
   fleet.duration = window.duration;
   fleet.winner = (window.seed ^ (window.seed >> 13) ^ (window.seed >> 23)) & 1;
@@ -3277,6 +3296,8 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks,
         double nx, ny;
         fleet_pose(&fleet, side, ship, now + 60.0, &nx, &ny);
         direction = (nx >= x) ? 1 : -1;
+      } else if (fleet.kind == 4 && side == fleet.winner) {
+        direction = (ship % 2 == 0) ? 1 : -1;
       }
       int role = fleet_role(&fleet, side, ship);
       int length = fleet_length(&fleet, ship, role);
