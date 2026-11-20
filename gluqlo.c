@@ -9533,7 +9533,8 @@ static bool flip_backdrop_valid = false;
 void render_clock(int maxsteps, int step, bool ambient_frame) {
 	static Uint64 last_profile_report = 0;
 	char buffer[3], buffer2[3];
-	struct tm *_time;
+	struct tm _time_val;
+	struct tm *_time = &_time_val;
 	time_t rawtime;
 	static const int offset_x[] = { -1, 0, 1, 1, 1, 0, -1, -1 };
 	static const int offset_y[] = { 0, -1, -1, 0, 1, 1, 0, -1 };
@@ -9543,7 +9544,7 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
 	Uint64 backdrop_elapsed = 0;
 
 	time(&rawtime);
-	_time = localtime(&rawtime);
+	localtime_r(&rawtime, _time);
 	phase = (rawtime / 300) % 8;
 	new_burnin_x = offset_x[phase] * (screen->w / 80);
 	new_burnin_y = offset_y[phase] * (screen->h / 80);
@@ -9787,6 +9788,8 @@ static void destroy_clock_caches(void) {
 static void layout_clock(double display_scale_factor) {
 	int out_w = width, out_h = height;
 	SDL_GetCurrentRenderOutputSize(renderer, &out_w, &out_h);
+	if(out_w < 1) out_w = 1;
+	if(out_h < 1) out_h = 1;
 	screen_target.w = out_w;
 	screen_target.h = out_h;
 
@@ -9841,6 +9844,7 @@ static void layout_clock(double display_scale_factor) {
 		rectsize = scaled_w * 0.6 < max_rectsize ? (int)(scaled_w * 0.6) : max_rectsize;
 		radius = (int)(rectsize * .0952);
 	}
+	if(rectsize < 4) rectsize = 4;
 
 	int jitter_width = 1, jitter_height = 1;
 	if(display_scale_factor != 1.0) {
