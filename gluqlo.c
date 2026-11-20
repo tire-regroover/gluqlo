@@ -607,7 +607,7 @@ static const EffectSpec EFFECT_FULLSCREEN = {"fullscreen",
                                              fullscreen_accept};
 static const EffectSpec EFFECT_FLEET_BATTLE = {
     "fleet_battle", 240000, 1,    6, false,     0, 60000, 0, 0,
-    false,          1400,   2200, 5, GROUP_SKY, 0, NULL};
+    false,          1400,   2200, 6, GROUP_SKY, 0, NULL};
 static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     90000,
                                                     1,
@@ -3241,6 +3241,26 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
     }
     return;
   }
+  if (fleet->kind == 5) {
+    // V-wedge charge: the winning fleet forms a sharp spearhead wedge that
+    // drives straight through a staggered defensive screen.
+    if (side == fleet->winner) {
+      double vx = -fleet->size * 6 + approach * (width * 0.55 + fleet->size * 6) +
+                  smooth_step(0.55, 0.96, progress) * width * 0.35;
+      int rank = (ship + 1) / 2;
+      *x = (side == 0 ? vx - rank * fleet->size * 2.8
+                      : (width - vx) + rank * fleet->size * 2.8);
+      *y = fleet->center_y + lane * fleet->size * 1.9 +
+           sin(t / (520.0 + ship * 90)) * fleet->size * 0.4;
+    } else {
+      double hold = (side == 0 ? width * 0.35 : width * 0.65) +
+                    (side == 0 ? -retreat * width * 0.5 : retreat * width * 0.5);
+      *x = hold + (ship % 2 ? -1 : 1) * fleet->size * 2.2;
+      *y = fleet->center_y + lane * fleet->scale / 30.0 +
+           sin(t / (440.0 + ship * 75)) * fleet->size * 0.5;
+    }
+    return;
+  }
   double weave = sin(t / (510.0 + ship * 127) + ship * 1.8 + side * 2.4) *
                  fleet->scale * 0.009;
   double arc = sin(t / 1900.0 + progress * 8.0) * fleet->scale * 0.010;
@@ -3378,7 +3398,7 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks,
   fleet.surface = surface;
   fleet.scale = scale;
   fleet.seed = window.seed;
-  fleet.kind = effect_kind(&EFFECT_FLEET_BATTLE, (window.seed >> 7) % 5);
+  fleet.kind = effect_kind(&EFFECT_FLEET_BATTLE, (window.seed >> 7) % 6);
   fleet.start = (double)ticks - window.phase;
   fleet.duration = window.duration;
   fleet.winner = (window.seed ^ (window.seed >> 13) ^ (window.seed >> 23)) & 1;
