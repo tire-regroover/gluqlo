@@ -607,7 +607,7 @@ static const EffectSpec EFFECT_FULLSCREEN = {"fullscreen",
                                              fullscreen_accept};
 static const EffectSpec EFFECT_FLEET_BATTLE = {
     "fleet_battle", 240000, 1,    6, false,     0, 60000, 0, 0,
-    false,          1400,   2200, 2, GROUP_SKY, 0, NULL};
+    false,          1400,   2200, 4, GROUP_SKY, 0, NULL};
 static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     90000,
                                                     1,
@@ -2913,6 +2913,39 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
          sin(t / (420.0 + ship * 83) + ship * 1.3) * fleet->size * 0.65;
     return;
   }
+  if (fleet->kind == 2) {
+    // Parallel broadside: both lines steam across the sky side-by-side at
+    // different altitudes, trading broadsides before the loser peels off.
+    double sweep = -width * 0.1 + progress * (width * 1.2);
+    double sep = fleet->scale * (0.048 + 0.014 * sin(progress * 6.2831853));
+    double line_y = fleet->center_y + (side == 0 ? -sep : sep);
+    double retreat_y =
+        (side != fleet->winner) ? retreat * fleet->scale * 0.14 : 0.0;
+    *x = sweep - ship * fleet->size * 3.4 +
+         sin(t / (600.0 + ship * 90) + side * 2.0) * fleet->size * 0.8;
+    *y = line_y - retreat_y +
+         sin(t / (480.0 + ship * 110) + ship * 1.5) * fleet->size * 0.55;
+    return;
+  }
+  if (fleet->kind == 3) {
+    // Dreadnought siege: one side anchors around a central flagship while
+    // the attackers orbit in a tight flanking column.
+    if (side == fleet->winner) {
+      double hold = width * 0.62;
+      double bx = -fleet->size * 6 + approach * (hold + fleet->size * 6);
+      *x = bx + (ship == 0 ? 0.0 : -fleet->size * 2.6 * ((ship + 1) / 2)) +
+           sin(t / (700.0 + ship * 80)) * fleet->size * 0.4;
+      *y = fleet->center_y + lane * fleet->scale / 30.0;
+    } else {
+      double ang = progress * 5.2 + ship * 0.55;
+      double rad_x = fleet->scale * 0.22;
+      double rad_y = fleet->scale * 0.055;
+      double cx = width * 0.44 - retreat * width * 0.55;
+      *x = cx + cos(ang) * rad_x;
+      *y = fleet->center_y + sin(ang) * rad_y;
+    }
+    return;
+  }
   double weave = sin(t / (510.0 + ship * 127) + ship * 1.8 + side * 2.4) *
                  fleet->scale * 0.009;
   double arc = sin(t / 1900.0 + progress * 8.0) * fleet->scale * 0.010;
@@ -2922,6 +2955,10 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
 }
 
 static int fleet_role(const Fleet *fleet, int side, int ship) {
+  if (fleet->kind == 3) {
+    if (side == fleet->winner && ship == 0) return SHIP_BIG;
+    return (ship % 2 == 0) ? SHIP_MID : SHIP_SMALL;
+  }
   unsigned int type = fleet->seed >> ((ship * 3 + side * 7) % 24);
   if (ship == 0 && ((fleet->seed >> (side + 2)) & 1)) return SHIP_BIG;
   if (type % 3 == 0) return SHIP_MID;
@@ -3046,7 +3083,7 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks,
   fleet.surface = surface;
   fleet.scale = scale;
   fleet.seed = window.seed;
-  fleet.kind = effect_kind(&EFFECT_FLEET_BATTLE, (window.seed >> 7) % 2);
+  fleet.kind = effect_kind(&EFFECT_FLEET_BATTLE, (window.seed >> 7) % 4);
   fleet.start = (double)ticks - window.phase;
   fleet.duration = window.duration;
   fleet.winner = (window.seed ^ (window.seed >> 13) ^ (window.seed >> 23)) & 1;
@@ -3065,12 +3102,20 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks,
 
   // The ships. One that is about to be destroyed burns and trails smoke.
   for (int side = 0; side < 2; side++) {
-    int direction = side == 0 ? 1 : -1;
+    int base_dir = side == 0 ? 1 : -1;
     for (int ship = 0; ship < fleet.count[side]; ship++) {
       double death = fleet_death(&fleet, side, ship);
       if (death >= 0.0 && now >= death) continue;
       double x, y;
       fleet_pose(&fleet, side, ship, now, &x, &y);
+      int direction = base_dir;
+      if (fleet.kind == 2) {
+        direction = 1;
+      } else if (fleet.kind == 3 && side != fleet.winner) {
+        double nx, ny;
+        fleet_pose(&fleet, side, ship, now + 60.0, &nx, &ny);
+        direction = (nx >= x) ? 1 : -1;
+      }
       int role = fleet_role(&fleet, side, ship);
       int length = fleet_length(&fleet, ship, role);
       if (death >= 0.0 && now > death - 3500.0) {
