@@ -645,7 +645,7 @@ static const EffectSpec EFFECT_BATTLE_FLYBY = {
     false,          900,   1100, 5, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
-    0,          true,  900, 1100, 4,     GROUP_SKY, 3,     NULL};
+    0,          true,  900, 1100, 5,     GROUP_SKY, 3,     NULL};
 static const EffectSpec EFFECT_HILL_EVENT = {"hill_event",
                                              120000,
                                              0,
@@ -2780,11 +2780,14 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
 //      crossing the upper sky while a defender tries to screen it.
 //   3: vertical climb & stall — two fighters pull into steep twin climbing
 //      arcs, stall near the top of the sky, and dive back down trading shots.
+//   4: wingman rescue — a damaged fighter flees with a pursuer on its tail
+//      until a friendly wingman dives in from above, downs the pursuer, and
+//      escorts the survivor off-screen.
 static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                                    int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
-  int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 4);
+  int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 5);
   if (kind == 1) {
     double progress = window.progress;
     double fade = window.fade;
@@ -2943,6 +2946,45 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
       draw_weapon_shot(surface, WEAPON_PULSE, 0, x1, y1, x0, y0, (double)age,
                        unit, 1, fade, progress > 0.65 ? 1 : 0,
                        fx_hash(window.seed, (int)(window.phase / 1400)));
+    }
+    return;
+  }
+  if (kind == 4) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int length = scale / 34;
+    if (length < 14) length = 14;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double unit = weapon_unit(length);
+    int dir = (window.seed >> 4) & 1 ? 1 : -1;
+    // Fleeing damaged lead fighter (team 0)
+    double lx = (dir > 0)
+                    ? -length + progress * (surface->w + 2.0 * length)
+                    : surface->w + length -
+                          progress * (surface->w + 2.0 * length);
+    double ly = surface->h * 0.13 + sin(progress * 7.0) * scale * 0.016;
+    draw_ship_role(surface, (int)lx, (int)ly, SHIP_SMALL, window.seed + 11,
+                   length, dir, 0, opacity);
+    // Pursuing enemy (team 1), destroyed at progress 0.68
+    double px = lx - dir * scale * 0.10;
+    double py = ly + cos(progress * 9.0) * scale * 0.012;
+    if (progress < 0.68) {
+      draw_ship_role(surface, (int)px, (int)py, SHIP_SMALL, window.seed + 23,
+                     length, dir, 1, opacity);
+    } else {
+      draw_explosion(surface, px, py, (progress - 0.68) * window.duration,
+                     length * 1.1, true, fx_hash(window.seed, 88), 1, fade);
+    }
+    // Rescuing wingman (team 0) swoops down from above to intercept
+    double wx = lx - dir * scale * (0.28 - 0.22 * smooth_step(0.15, 0.72, progress));
+    double wy = ly - scale * 0.11 * (1.0 - smooth_step(0.20, 0.72, progress));
+    draw_ship_role(surface, (int)wx, (int)wy, SHIP_SMALL, window.seed + 37,
+                   length, dir, 0, opacity,
+                   progress < 0.70 ? -0.25 : 0.0);
+    if (progress > 0.48 && progress < 0.68) {
+      double age = (progress - 0.48) * window.duration;
+      draw_weapon_shot(surface, WEAPON_MASS_DRIVER, 0, wx, wy, px, py, age,
+                       unit, 0, fade, 2, fx_hash(window.seed, 42));
     }
     return;
   }
