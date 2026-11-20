@@ -2610,9 +2610,9 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
 
   if (kind == 1) {
     int dir = (window.seed >> 3) & 1 ? 1 : -1;
-    double lead_x = dir > 0 ? -length * 2.0 + progress * (surface->w + 4.0 * length)
-                            : surface->w + length * 2.0 -
-                                  progress * (surface->w + 4.0 * length);
+    double span = surface->w + 4.0 * length + surface->w * 0.14;
+    double lead_x = dir > 0 ? -length * 2.0 + progress * span
+                            : surface->w + length * 2.0 - progress * span;
     double chaser_x = lead_x - dir * surface->w * 0.14;
     double lead_y = center_y + sin(progress * 9.0) * scale * 0.022;
     double wing_y = center_y - sin(progress * 9.0 + 0.8) * scale * 0.024;
@@ -2625,12 +2625,25 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
     draw_ship_role(surface, (int)chaser_x, (int)chaser_y, SHIP_MID,
                    window.seed >> 13, (int)(length * 1.55), dir, 1, opacity);
     Uint32 volley = phase % 1800;
-    if (volley < 720 && progress > 0.08 && progress < 0.92) {
-      double fx = chaser_x + dir * length * 0.75;
-      double tx = lead_x - dir * length * 0.3;
-      draw_weapon_shot(surface, WEAPON_PLASMA, 0, fx, chaser_y, tx, lead_y,
-                       (double)volley, scale / 95.0, 1, fade, 0,
-                       fx_hash(window.seed, (int)(phase / 1800)));
+    if (volley < weapon_specs[WEAPON_PLASMA].life_ms && phase >= volley) {
+      double fire_p = (double)(phase - volley) / window.duration;
+      if (fire_p > 0.08 && fire_p < 0.88) {
+        double f_lead_x = dir > 0 ? -length * 2.0 + fire_p * span
+                                  : surface->w + length * 2.0 - fire_p * span;
+        double f_chaser_x = f_lead_x - dir * surface->w * 0.14;
+        double f_chaser_y = center_y + cos(fire_p * 5.0) * scale * 0.012;
+        double hit_p =
+            (double)(phase - volley + weapon_specs[WEAPON_PLASMA].impact_ms) /
+            window.duration;
+        double h_lead_x = dir > 0 ? -length * 2.0 + hit_p * span
+                                  : surface->w + length * 2.0 - hit_p * span;
+        double h_lead_y = center_y + sin(hit_p * 9.0) * scale * 0.022;
+        draw_weapon_shot(surface, WEAPON_PLASMA, 0,
+                         f_chaser_x + dir * length * 0.75, f_chaser_y,
+                         h_lead_x - dir * length * 0.3, h_lead_y,
+                         (double)volley, scale / 95.0, 1, fade, 0,
+                         fx_hash(window.seed, (int)(phase / 1800)));
+      }
     }
     return;
   }
@@ -2642,14 +2655,15 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
     double ty = center_y - scale * 0.015;
     draw_ship_role(surface, (int)tx, (int)ty, SHIP_MID, window.seed >> 5,
                    (int)(length * 1.45), -dir, 1, opacity);
-    // Bomber swoops in, releases torpedo at progress ~0.35, then climbs away
+    // Bomber swoops in, releases torpedo at progress ~0.30, then climbs away
     double bx = (dir > 0)
                     ? -length * 2.0 + progress * (surface->w + 4.0 * length)
                     : surface->w + length * 2.0 -
                           progress * (surface->w + 4.0 * length);
-    double climb = (progress > 0.42) ? pow((progress - 0.42) * 1.7, 2.0) : 0.0;
+    double climb_t = smooth_step(0.42, 1.0, progress);
+    double climb = climb_t * climb_t;
     double by = center_y + scale * 0.032 - climb * scale * 0.095;
-    double pitch = (progress > 0.42) ? (progress - 0.42) * 0.85 : -0.08;
+    double pitch = -0.08 + climb_t * 0.58;
     draw_ship_role(surface, (int)bx, (int)by, SHIP_SMALL, window.seed >> 11,
                    (int)(length * 1.1), dir, 0, opacity, pitch);
     if (progress > 0.30 && progress < 0.82) {
@@ -2675,23 +2689,27 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
     draw_ship_role(surface, (int)px, (int)py, SHIP_SMALL, window.seed >> 5,
                    length, -dir, 1, opacity);
     // Cruiser decelerates in (0.0..0.28), coasts (0.28..0.68), then streaks
-    // away in warp (0.68..1.0).
-    double u = 0.28 * smooth_step(0.0, 0.28, progress) +
-               0.28 * (progress > 0.28 ? (progress < 0.68 ? (progress - 0.28) : 0.40) : 0.0) +
-               (progress > 0.68 ? pow((progress - 0.68) / 0.32, 2.5) * 0.44 : 0.0);
-    double cx = (dir > 0) ? surface->w * 0.12 + u * surface->w * 0.95
-                          : surface->w * 0.88 - u * surface->w * 0.95;
+    // away in warp off-screen (0.68..1.0).
+    double warp_in =
+        (progress < 0.28) ? 0.22 * (1.0 - pow(1.0 - progress / 0.28, 2.2))
+                          : 0.22;
+    double coast = 0.22 * progress;
+    double warp_out =
+        (progress > 0.68) ? 0.75 * pow((progress - 0.68) / 0.32, 2.5) : 0.0;
+    double u = warp_in + coast + warp_out;
+    double entry_x = (dir > 0) ? surface->w * 0.12 : surface->w * 0.88;
+    double cx = entry_x + dir * u * surface->w * 0.95;
     double cy = center_y - scale * 0.015;
     if (progress < 0.22) {
       double flash = 1.0 - progress / 0.22;
       static const Uint8 warp_c[3] = {155, 225, 255};
-      weapon_glow(surface, cx, cy, size * 2.5 * flash, warp_c,
+      weapon_glow(surface, entry_x, cy, size * 2.5 * flash, warp_c,
                   190.0 * flash * fade);
     }
     if (progress > 0.68) {
       double streak = (progress - 0.68) / 0.32;
       thickLineRGBA(surface, (int)cx, (int)cy,
-                    (int)(cx - dir * streak * scale * 0.22), (int)cy, 2, 165,
+                    (int)(cx - dir * streak * scale * 0.28), (int)cy, 2, 165,
                     225, 255, (Uint8)(160 * (1.0 - streak * 0.5) * fade));
     }
     draw_ship_role(surface, (int)cx, (int)cy, SHIP_MID, window.seed >> 9,
@@ -2707,9 +2725,11 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
   }
   if (kind == 4) {
     int dir = (window.seed >> 5) & 1 ? 1 : -1;
-    // Two stationary/slow-drifting blockade gunboats above and below
+    // Two blockade gunboats above and below that drift across and fade cleanly
+    // with the window.
+    double drift = (progress - 0.5) * scale * 0.06;
     for (int g = 0; g < 2; g++) {
-      double gx = surface->w * (g == 0 ? 0.38 : 0.62);
+      double gx = surface->w * (g == 0 ? 0.38 : 0.62) - dir * drift;
       double gy = center_y + (g == 0 ? -scale * 0.042 : scale * 0.042);
       draw_ship_role(surface, (int)gx, (int)gy, SHIP_MID,
                      window.seed + g * 19, (int)(length * 1.25), -dir, 1,
@@ -2724,13 +2744,25 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
     draw_ship_role(surface, (int)rx, (int)ry, SHIP_SMALL, window.seed >> 6,
                    length, dir, 0, opacity);
     Uint32 volley = phase % 1600;
-    if (volley < 750 && progress > 0.10 && progress < 0.90) {
-      int g = ((int)(phase / 1600)) & 1;
-      double gx = surface->w * (g == 0 ? 0.38 : 0.62);
-      double gy = center_y + (g == 0 ? -scale * 0.042 : scale * 0.042);
-      draw_weapon_shot(surface, WEAPON_FLAK, 0, gx, gy, rx, ry, (double)volley,
-                       scale / 95.0, 1, fade, 0,
-                       fx_hash(window.seed, (int)(phase / 1600)));
+    if (volley < weapon_specs[WEAPON_FLAK].life_ms && phase >= volley) {
+      double fire_p = (double)(phase - volley) / window.duration;
+      if (fire_p > 0.10 && fire_p < 0.85) {
+        int g = ((int)(phase / 1600)) & 1;
+        double fire_drift = (fire_p - 0.5) * scale * 0.06;
+        double gx = surface->w * (g == 0 ? 0.38 : 0.62) - dir * fire_drift;
+        double gy = center_y + (g == 0 ? -scale * 0.042 : scale * 0.042);
+        double burst_p =
+            (double)(phase - volley + weapon_specs[WEAPON_FLAK].impact_ms) /
+            window.duration;
+        double bx = (dir > 0)
+                        ? -length * 2.0 + burst_p * (surface->w + 4.0 * length)
+                        : surface->w + length * 2.0 -
+                              burst_p * (surface->w + 4.0 * length);
+        double by = center_y + sin(burst_p * 10.0) * scale * 0.022;
+        draw_weapon_shot(surface, WEAPON_FLAK, 0, gx, gy, bx, by,
+                         (double)volley, scale / 95.0, 1, fade, 0,
+                         fx_hash(window.seed, (int)(phase / 1600)));
+      }
     }
     return;
   }
@@ -2834,24 +2866,34 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
     }
     // Exchange fire near crossovers
     Uint32 age = window.phase % 1500;
-    if (age < 650 && progress > 0.10 && progress < destroy_p) {
-      int shooter = ((int)(window.phase / 1500) + winner) % 2;
-      int target = 1 - shooter;
-      double u = progress;
-      double sx = (shooter == 0)
-                      ? -length + u * (surface->w + 2.0 * length)
-                      : surface->w + length - u * (surface->w + 2.0 * length);
-      double sy = surface->h * 0.11 +
-                  sin(u * 18.84955592 + shooter * 3.14159265) * scale * 0.042;
-      double tx = (target == 0)
-                      ? -length + u * (surface->w + 2.0 * length)
-                      : surface->w + length - u * (surface->w + 2.0 * length);
-      double ty = surface->h * 0.11 +
-                  sin(u * 18.84955592 + target * 3.14159265) * scale * 0.042;
-      int weapon = (shooter == 0) ? WEAPON_PULSE : WEAPON_MASS_DRIVER;
-      draw_weapon_shot(surface, weapon, 0, sx, sy, tx, ty, (double)age, unit,
-                       shooter, fade, progress > 0.72 ? 1 : 0,
-                       fx_hash(window.seed, (int)(window.phase / 1500)));
+    int shot_idx = (int)(window.phase / 1500);
+    int shooter = (shot_idx + winner) % 2;
+    int weapon = (shooter == 0) ? WEAPON_PULSE : WEAPON_MASS_DRIVER;
+    if (age < weapon_specs[weapon].life_ms && window.phase >= age) {
+      double fire_u = (double)(window.phase - age) / window.duration;
+      double hit_u =
+          (double)(window.phase - age + weapon_specs[weapon].impact_ms) /
+          window.duration;
+      if (fire_u > 0.10 && hit_u < destroy_p) {
+        int target = 1 - shooter;
+        double sx = (shooter == 0)
+                        ? -length + fire_u * (surface->w + 2.0 * length)
+                        : surface->w + length -
+                              fire_u * (surface->w + 2.0 * length);
+        double sy =
+            surface->h * 0.11 +
+            sin(fire_u * 18.84955592 + shooter * 3.14159265) * scale * 0.042;
+        double tx = (target == 0)
+                        ? -length + hit_u * (surface->w + 2.0 * length)
+                        : surface->w + length -
+                              hit_u * (surface->w + 2.0 * length);
+        double ty =
+            surface->h * 0.11 +
+            sin(hit_u * 18.84955592 + target * 3.14159265) * scale * 0.042;
+        draw_weapon_shot(surface, weapon, 0, sx, sy, tx, ty, (double)age, unit,
+                         shooter, fade, fire_u > 0.68 ? 1 : 0,
+                         fx_hash(window.seed, shot_idx));
+      }
     }
     if (progress >= destroy_p) {
       double u = destroy_p;
@@ -2935,17 +2977,25 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                      window.seed + side * 31, length, 1, side, opacity, pitch);
     }
     Uint32 age = window.phase % 1400;
-    if (age < 600 && progress > 0.15 && progress < 0.85) {
-      double u0 = progress;
-      double u1 = progress - 0.06;
-      double x0 = surface->w * (0.18 + u0 * 0.64);
-      double y0 = surface->h * 0.20 - sin(u0 * M_PI) * scale * 0.14;
-      double x1 = surface->w * (0.18 + u1 * 0.64);
-      double y1 = surface->h * 0.20 - sin(u1 * M_PI) * scale * 0.14 +
-                  scale * 0.015;
-      draw_weapon_shot(surface, WEAPON_PULSE, 0, x1, y1, x0, y0, (double)age,
-                       unit, 1, fade, progress > 0.65 ? 1 : 0,
-                       fx_hash(window.seed, (int)(window.phase / 1400)));
+    if (age < weapon_specs[WEAPON_PULSE].life_ms && window.phase >= age) {
+      double fire_p = (double)(window.phase - age) / window.duration;
+      double hit_p =
+          (double)(window.phase - age + weapon_specs[WEAPON_PULSE].impact_ms) /
+          window.duration;
+      if (fire_p > 0.15 && hit_p < 0.90) {
+        double u1 = fire_p - 0.06;
+        double u0 = hit_p;
+        double x1 = surface->w * (0.18 + u1 * 0.64) +
+                    sin(u1 * 12.566 + 1.4) * scale * 0.02;
+        double y1 = surface->h * 0.20 - sin(u1 * M_PI) * scale * 0.14 +
+                    scale * 0.015;
+        double x0 = surface->w * (0.18 + u0 * 0.64) +
+                    sin(u0 * 12.566) * scale * 0.02;
+        double y0 = surface->h * 0.20 - sin(u0 * M_PI) * scale * 0.14;
+        draw_weapon_shot(surface, WEAPON_PULSE, 0, x1, y1, x0, y0, (double)age,
+                         unit, 1, fade, fire_p > 0.60 ? 1 : 0,
+                         fx_hash(window.seed, (int)(window.phase / 1400)));
+      }
     }
     return;
   }
@@ -2981,10 +3031,31 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
     draw_ship_role(surface, (int)wx, (int)wy, SHIP_SMALL, window.seed + 37,
                    length, dir, 0, opacity,
                    progress < 0.70 ? -0.25 : 0.0);
-    if (progress > 0.48 && progress < 0.68) {
-      double age = (progress - 0.48) * window.duration;
-      draw_weapon_shot(surface, WEAPON_MASS_DRIVER, 0, wx, wy, px, py, age,
-                       unit, 0, fade, 2, fx_hash(window.seed, 42));
+    Uint32 volley = window.phase % 900;
+    if (volley < weapon_specs[WEAPON_MASS_DRIVER].life_ms &&
+        window.phase >= volley) {
+      double fire_p = (double)(window.phase - volley) / window.duration;
+      double hit_p = (double)(window.phase - volley +
+                              weapon_specs[WEAPON_MASS_DRIVER].impact_ms) /
+                     window.duration;
+      if (fire_p > 0.44 && fire_p < 0.68) {
+        double flx = (dir > 0) ? -length + fire_p * (surface->w + 2.0 * length)
+                               : surface->w + length -
+                                     fire_p * (surface->w + 2.0 * length);
+        double fly = surface->h * 0.13 + sin(fire_p * 7.0) * scale * 0.016;
+        double fwx =
+            flx - dir * scale * (0.28 - 0.22 * smooth_step(0.15, 0.72, fire_p));
+        double fwy = fly - scale * 0.11 * (1.0 - smooth_step(0.20, 0.72, fire_p));
+        double hlx = (dir > 0) ? -length + hit_p * (surface->w + 2.0 * length)
+                               : surface->w + length -
+                                     hit_p * (surface->w + 2.0 * length);
+        double hly = surface->h * 0.13 + sin(hit_p * 7.0) * scale * 0.016;
+        double hpx = hlx - dir * scale * 0.10;
+        double hpy = hly + cos(hit_p * 9.0) * scale * 0.012;
+        draw_weapon_shot(surface, WEAPON_MASS_DRIVER, 0, fwx, fwy, hpx, hpy,
+                         (double)volley, unit, 0, fade, 1,
+                         fx_hash(window.seed, (int)(window.phase / 900)));
+      }
     }
     return;
   }
@@ -3032,10 +3103,30 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
       draw_ship_role(surface, (int)rx, (int)ry, SHIP_SMALL,
                      window.seed + 41 + c, sm_len, rdir, 1, opacity);
       Uint32 age = window.phase % 2100;
-      if (age < 1030 && progress > 0.06 && progress < 0.94) {
-        draw_weapon_shot(surface, c == 0 ? WEAPON_SWARM : WEAPON_FLAK, 0,
-                         rx, ry, sx, sy, (double)age, scale / 90.0, 1, fade,
-                         1, fx_hash(window.seed, (int)(window.phase / 2100) + c));
+      int weapon = (c == 0) ? WEAPON_SWARM : WEAPON_FLAK;
+      if (age < weapon_specs[weapon].life_ms && window.phase >= age) {
+        double fire_ph = (double)(window.phase - age);
+        double fire_p = fire_ph / window.duration;
+        double hit_p =
+            (fire_ph + weapon_specs[weapon].impact_ms) / window.duration;
+        if (fire_p > 0.06 && hit_p < 0.94) {
+          double fcx = dir > 0
+                           ? -mid_len * 2 + fire_p * (surface->w + 4.0 * mid_len)
+                           : surface->w + mid_len * 2 -
+                                 fire_p * (surface->w + 4.0 * mid_len);
+          double fsx = fcx - dir * c * mid_len * 1.9;
+          double frx = fsx + sin(fire_ph / 1300.0 + c * 2.1) * scale * 0.11;
+          double fry = sy + (c == 0 ? -1 : 1) * scale * 0.055 *
+                                (0.6 + 0.4 * cos(fire_ph / 900.0 + c));
+          double hcx = dir > 0
+                           ? -mid_len * 2 + hit_p * (surface->w + 4.0 * mid_len)
+                           : surface->w + mid_len * 2 -
+                                 hit_p * (surface->w + 4.0 * mid_len);
+          double hsx = hcx - dir * c * mid_len * 1.9;
+          draw_weapon_shot(surface, weapon, 0, frx, fry, hsx, sy, (double)age,
+                           scale / 90.0, 1, fade, 1,
+                           fx_hash(window.seed, (int)(window.phase / 2100) + c));
+        }
       }
     }
     return;
@@ -3132,32 +3223,49 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
     int sm_len = scale / 38;
     if (sm_len < 12) sm_len = 12;
     Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
-    double cx = (dir > 0) ? surface->w * 0.24 : surface->w * 0.76;
+    double entry = smooth_step(0.0, 0.20, progress);
+    double cx = (dir > 0) ? -big_len + entry * (surface->w * 0.24 + big_len)
+                          : surface->w + big_len -
+                                entry * (surface->w * 0.24 + big_len);
     double cy = surface->h * 0.12 + sin(window.phase / 2000.0) * scale * 0.008;
     draw_ship_role(surface, (int)cx, (int)cy, SHIP_BIG, window.seed + 11,
                    big_len, dir, 0, opacity);
-    // 3 launched fighters fanning out from the carrier
-    for (int f = 0; f < 3; f++) {
-      double fu = progress - f * 0.12;
-      if (fu < 0.0) continue;
-      double fx = cx + dir * fu * surface->w * 0.65;
-      double fy = cy + (f - 1) * scale * 0.032 * smooth_step(0.0, 0.3, fu);
-      draw_ship_role(surface, (int)fx, (int)fy, SHIP_SMALL,
-                     window.seed + 31 + f, sm_len, dir, 0, opacity);
-    }
     // 2 incoming enemy mid-ships on the opposite flank
+    double ex_arr[2], ey_arr[2];
     for (int e = 0; e < 2; e++) {
-      double ex = (dir > 0) ? surface->w * (0.95 - progress * 0.35)
-                            : surface->w * (0.05 + progress * 0.35);
-      double ey = surface->h * (0.10 + e * 0.045);
-      draw_ship_role(surface, (int)ex, (int)ey, SHIP_MID,
+      ex_arr[e] = (dir > 0)
+                      ? surface->w + sm_len * 2 -
+                            progress * (surface->w * 0.42 + sm_len * 2)
+                      : -sm_len * 2 +
+                            progress * (surface->w * 0.42 + sm_len * 2);
+      ey_arr[e] = surface->h * (0.10 + e * 0.045);
+      draw_ship_role(surface, (int)ex_arr[e], (int)ey_arr[e], SHIP_MID,
                      window.seed + 61 + e, (int)(sm_len * 1.6), -dir, 1,
                      opacity);
       Uint32 age = window.phase % 2200;
-      if (age < 850 && progress > 0.15 && progress < 0.88) {
-        draw_weapon_shot(surface, WEAPON_MASS_DRIVER, 0, ex, ey, cx, cy,
-                         (double)age, weapon_unit(sm_len), 1, fade, 0,
+      if (age < weapon_specs[WEAPON_MASS_DRIVER].life_ms && progress > 0.20 &&
+          progress < 0.88) {
+        draw_weapon_shot(surface, WEAPON_MASS_DRIVER, 0, ex_arr[e], ey_arr[e],
+                         cx, cy, (double)age, weapon_unit(sm_len), 1, fade, 0,
                          fx_hash(window.seed, (int)(window.phase / 2200) + e));
+      }
+    }
+    // 3 launched fighters fanning out from the carrier to intercept
+    for (int f = 0; f < 3; f++) {
+      double fu = progress - (0.14 + f * 0.10);
+      if (fu < 0.0) continue;
+      double fx = cx + dir * fu * surface->w * 0.58;
+      double fy = cy + (f - 1) * scale * 0.032 * smooth_step(0.0, 0.3, fu);
+      draw_ship_role(surface, (int)fx, (int)fy, SHIP_SMALL,
+                     window.seed + 31 + f, sm_len, dir, 0, opacity);
+      Uint32 fage = window.phase % 1400;
+      if (fage < weapon_specs[WEAPON_PULSE].life_ms && fu > 0.12 &&
+          progress < 0.88) {
+        int tgt = f % 2;
+        draw_weapon_shot(surface, WEAPON_PULSE, 0, fx, fy, ex_arr[tgt],
+                         ey_arr[tgt], (double)fage, weapon_unit(sm_len), 0,
+                         fade, 1,
+                         fx_hash(window.seed, (int)(window.phase / 1400) + f));
       }
     }
     return;
@@ -3234,7 +3342,7 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
   if (fleet->kind == 2) {
     // Parallel broadside: both lines steam across the sky side-by-side at
     // different altitudes, trading broadsides before the loser peels off.
-    double sweep = -width * 0.1 + progress * (width * 1.2);
+    double sweep = -width * 0.08 + progress * (width * 1.32);
     double sep = fleet->scale * (0.048 + 0.014 * sin(progress * 6.2831853));
     double line_y = fleet->center_y + (side == 0 ? -sep : sep);
     double retreat_y =
@@ -3247,18 +3355,18 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
   }
   if (fleet->kind == 3) {
     // Dreadnought siege: one side anchors around a central flagship while
-    // the attackers orbit in a tight flanking column.
+    // the attackers orbit in a wider flanking column.
     if (side == fleet->winner) {
-      double hold = width * 0.62;
-      double bx = -fleet->size * 6 + approach * (hold + fleet->size * 6);
-      *x = bx + (ship == 0 ? 0.0 : -fleet->size * 2.6 * ((ship + 1) / 2)) +
+      *x = anchor + (ship == 0 ? 0.0 : -direction * fleet->size * 2.6 * ((ship + 1) / 2)) +
            sin(t / (700.0 + ship * 80)) * fleet->size * 0.4;
       *y = fleet->center_y + lane * fleet->scale / 30.0;
     } else {
       double ang = progress * 5.2 + ship * 0.55;
-      double rad_x = fleet->scale * 0.22;
-      double rad_y = fleet->scale * 0.055;
-      double cx = width * 0.44 - retreat * width * 0.55;
+      double rad_x = fleet->scale * 0.24;
+      double rad_y = fleet->scale * 0.068;
+      double edge = (side == 0) ? -fleet->size * 6.0 : width + fleet->size * 6.0;
+      double cx = edge + approach * (width * 0.50 - edge) +
+                  (side == 0 ? -retreat * width * 0.62 : retreat * width * 0.62);
       *x = cx + cos(ang) * rad_x;
       *y = fleet->center_y + sin(ang) * rad_y;
     }
@@ -3266,18 +3374,21 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
   }
   if (fleet->kind == 4) {
     // Pincer crossfire: the winning fleet splits into two flanking wings
-    // (top-left and bottom-right) closing around a retreating center column.
+    // (left and right) closing around a retreating center column.
     if (side == fleet->winner) {
       int wing = ship % 2;
-      double wx = wing == 0 ? width * (0.24 + 0.08 * approach)
-                            : width * (0.76 - 0.08 * approach);
-      double wy = fleet->center_y + (wing == 0 ? -1 : 1) * fleet->scale * 0.045;
+      double start_x = wing == 0 ? -fleet->size * 6.0 : width + fleet->size * 6.0;
+      double target_x = wing == 0 ? width * 0.30 : width * 0.70;
+      double wx = start_x + approach * (target_x - start_x);
+      double wy = fleet->center_y + (wing == 0 ? -1 : 1) * fleet->scale * 0.042;
       *x = wx + (ship / 2) * (wing == 0 ? -1 : 1) * fleet->size * 2.4 +
            sin(t / (540.0 + ship * 95)) * fleet->size * 0.5;
       *y = wy + cos(t / (480.0 + ship * 70)) * fleet->size * 0.5;
     } else {
-      double cy = fleet->center_y - retreat * fleet->scale * 0.18;
-      *x = width * 0.50 + lane * fleet->size * 2.2 +
+      double start_x = (side == 0) ? -fleet->size * 6.0 : width + fleet->size * 6.0;
+      double cx = start_x + approach * (width * 0.50 - start_x);
+      double cy = fleet->center_y - retreat * fleet->scale * 0.22;
+      *x = cx + lane * fleet->size * 2.2 +
            sin(t / (450.0 + ship * 80)) * fleet->size * 0.6;
       *y = cy + (ship - fleet->count[side] / 2.0) * fleet->size * 1.4;
     }
@@ -3287,17 +3398,16 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
     // V-wedge charge: the winning fleet forms a sharp spearhead wedge that
     // drives straight through a staggered defensive screen.
     if (side == fleet->winner) {
-      double vx = -fleet->size * 6 + approach * (width * 0.55 + fleet->size * 6) +
-                  smooth_step(0.55, 0.96, progress) * width * 0.35;
+      double vx = -fleet->size * 6 +
+                  approach * (width * 0.45 + fleet->size * 6) +
+                  smooth_step(0.48, 0.98, progress) * (width * 0.75);
       int rank = (ship + 1) / 2;
       *x = (side == 0 ? vx - rank * fleet->size * 2.8
                       : (width - vx) + rank * fleet->size * 2.8);
       *y = fleet->center_y + lane * fleet->size * 1.9 +
            sin(t / (520.0 + ship * 90)) * fleet->size * 0.4;
     } else {
-      double hold = (side == 0 ? width * 0.35 : width * 0.65) +
-                    (side == 0 ? -retreat * width * 0.5 : retreat * width * 0.5);
-      *x = hold + (ship % 2 ? -1 : 1) * fleet->size * 2.2;
+      *x = anchor + (ship % 2 ? -1 : 1) * fleet->size * 2.2;
       *y = fleet->center_y + lane * fleet->scale / 30.0 +
            sin(t / (440.0 + ship * 75)) * fleet->size * 0.5;
     }
@@ -3342,6 +3452,20 @@ static double fleet_death(const Fleet *fleet, int side, int ship) {
   return fleet->start + when * fleet->duration;
 }
 
+static int fleet_direction(const Fleet *fleet, int side, int ship, double t) {
+  if (fleet->kind == 2) return 1;
+  if (fleet->kind == 3 && side != fleet->winner) {
+    double x, y, nx, ny;
+    fleet_pose(fleet, side, ship, t, &x, &y);
+    fleet_pose(fleet, side, ship, t + 60.0, &nx, &ny);
+    return (nx >= x) ? 1 : -1;
+  }
+  if (fleet->kind == 4 && side == fleet->winner) {
+    return (ship % 2 == 0) ? 1 : -1;
+  }
+  return side == 0 ? 1 : -1;
+}
+
 // Draws the shots in the air now from every gun of one ship.
 static void fleet_fire(const Fleet *fleet, int side, int ship, double now,
                        double fade) {
@@ -3350,7 +3474,7 @@ static void fleet_fire(const Fleet *fleet, int side, int ship, double now,
   int length = fleet_length(fleet, ship, fleet_role(fleet, side, ship));
   double unit = weapon_unit(length);
   double death = fleet_death(fleet, side, ship);
-  int direction = side == 0 ? 1 : -1;
+  int direction = fleet_direction(fleet, side, ship, now);
   int enemy = 1 - side;
   for (int gun = 0; gun < 1 + design->turret_count; gun++) {
     int weapon = gun == 0 ? design->weapon : design->turret_weapon;
@@ -3459,22 +3583,12 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks,
 
   // The ships. One that is about to be destroyed burns and trails smoke.
   for (int side = 0; side < 2; side++) {
-    int base_dir = side == 0 ? 1 : -1;
     for (int ship = 0; ship < fleet.count[side]; ship++) {
       double death = fleet_death(&fleet, side, ship);
       if (death >= 0.0 && now >= death) continue;
       double x, y;
       fleet_pose(&fleet, side, ship, now, &x, &y);
-      int direction = base_dir;
-      if (fleet.kind == 2) {
-        direction = 1;
-      } else if (fleet.kind == 3 && side != fleet.winner) {
-        double nx, ny;
-        fleet_pose(&fleet, side, ship, now + 60.0, &nx, &ny);
-        direction = (nx >= x) ? 1 : -1;
-      } else if (fleet.kind == 4 && side == fleet.winner) {
-        direction = (ship % 2 == 0) ? 1 : -1;
-      }
+      int direction = fleet_direction(&fleet, side, ship, now);
       int role = fleet_role(&fleet, side, ship);
       int length = fleet_length(&fleet, ship, role);
       if (death >= 0.0 && now > death - 3500.0) {
