@@ -1692,6 +1692,8 @@ static void draw_ship_design(RenderTarget *surface, int x, int y,
 
   if (use_offscreen) {
     SDL_SetRenderTarget(surface->renderer, ship_target_tex);
+    SDL_Rect local_clip = {0, 0, area.w, area.h};
+    SDL_SetRenderClipRect(surface->renderer, &local_clip);
     SDL_SetRenderDrawColor(surface->renderer, 0, 0, 0, 0);
     SDL_SetRenderDrawBlendMode(surface->renderer, SDL_BLENDMODE_NONE);
     SDL_FRect clear_rect = {0, 0, (float)area.w, (float)area.h};
@@ -1702,8 +1704,6 @@ static void draw_ship_design(RenderTarget *surface, int x, int y,
     draw_dst.w = area.w;
     draw_dst.h = area.h;
     dst = &draw_dst;
-    SDL_Rect local_clip = {0, 0, area.w, area.h};
-    SDL_SetRenderClipRect(surface->renderer, &local_clip);
   } else {
     SDL_SetRenderClipRect(surface->renderer, &area);
   }
