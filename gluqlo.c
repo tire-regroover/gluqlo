@@ -507,11 +507,11 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 139
+#define RARE_SKY_KINDS 142
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  95  // things that happen on the hills (see render_hill_event)
+  98  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -7812,6 +7812,168 @@ static void hill_lightstairs(const HillEvent *event) {
       150, 190, 235, weapon_alpha(120.0 * event->fade));
 }
 
+// A hilltop brass armillary sphere: three tilted concentric rings spin around
+// a glowing sun-core while tiny planet beads orbit along the ecliptic.
+static void hill_armillary(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 0, 61));
+  double ground = hill_ground(event, cx);
+  Uint8 alpha = weapon_alpha(238.0 * event->fade);
+  static const Uint8 brass[3] = {245, 200, 110};
+  static const Uint8 sun_c[3] = {255, 230, 155};
+  static const Uint8 star_c[3] = {175, 225, 255};
+  // Stone plinth & cradle arc
+  filledTrigonRGBA(surface, (int)(cx - s * 0.032), (int)(ground + 2),
+                   (int)(cx + s * 0.032), (int)(ground + 2), (int)cx,
+                   (int)(ground - s * 0.036), 42, 46, 58, alpha);
+  boxRGBA(surface, (int)(cx - s * 0.036), (int)(ground - 3),
+          (int)(cx + s * 0.036), (int)(ground + 2), 54, 58, 72, alpha);
+  double cy = ground - s * 0.095;
+  double r = s * 0.062;
+  thickLineRGBA(surface, (int)cx, (int)(ground - s * 0.032), (int)cx,
+                (int)(cy + r * 0.55), 3, 165, 130, 68, alpha);
+  // Tilted meridian stand
+  circleRGBA(surface, (int)cx, (int)cy, (int)(r * 1.04), 175, 138, 72,
+             weapon_alpha(180.0 * event->fade));
+  // Three rotating elliptical rings at distinct inclinations
+  for (int ring = 0; ring < 3; ring++) {
+    double tilt = -0.45 + ring * 0.55;
+    double spin = event->t * (0.45 + ring * 0.28) * (ring == 1 ? -1 : 1);
+    double rx = r * (0.96 - ring * 0.12);
+    double ry = rx * (0.26 + 0.55 * fabs(cos(spin)));
+    int segs = 32;
+    for (int i = 0; i < segs; i++) {
+      double a0 = (2.0 * M_PI * i) / segs;
+      double a1 = (2.0 * M_PI * (i + 1)) / segs;
+      double x0 = cos(a0) * rx, y0 = sin(a0) * ry;
+      double x1 = cos(a1) * rx, y1 = sin(a1) * ry;
+      double px0 = cx + x0 * cos(tilt) - y0 * sin(tilt);
+      double py0 = cy + x0 * sin(tilt) + y0 * cos(tilt);
+      double px1 = cx + x1 * cos(tilt) - y1 * sin(tilt);
+      double py1 = cy + x1 * sin(tilt) + y1 * cos(tilt);
+      bool front = sin(a0) > 0;
+      Uint8 ra = weapon_alpha((front ? 225.0 : 105.0) * event->fade);
+      thickLineRGBA(surface, (int)px0, (int)py0, (int)px1, (int)py1,
+                    front ? 2 : 1, brass[0] - ring * 18, brass[1] - ring * 15,
+                    brass[2] + ring * 18, ra);
+    }
+    // Orbiting planet bead on each ring
+    double pa = event->t * (0.9 + ring * 0.4) + ring * 2.1;
+    double bx = cos(pa) * rx, by = sin(pa) * ry;
+    double px = cx + bx * cos(tilt) - by * sin(tilt);
+    double py = cy + bx * sin(tilt) + by * cos(tilt);
+    weapon_glow(surface, px, py, 2.4, ring == 2 ? star_c : brass,
+                220.0 * event->fade);
+  }
+  // Glowing sun-core at the center
+  double pulse = 0.85 + 0.15 * sin(event->t * 2.8);
+  weapon_glow(surface, cx, cy, s * 0.011 * pulse, sun_c, 240.0 * event->fade);
+  filledCircleRGBA(surface, (int)cx, (int)cy, (int)(s * 0.007) + 1, 255, 245,
+                   200, alpha);
+}
+
+// 2001 / Lovecraftian cyclopean monolith: an impossibly sharp, pitch-black
+// slab rises silently from the ridge; subtle geometric fractures pulse with
+// cold lunar cyan while nearby dust motes drift upward in defiance of gravity.
+static void hill_monolith(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 0, 62));
+  double ground = hill_ground(event, cx);
+  double rise = smooth_step(0.05, 0.35, event->progress);
+  double h = s * 0.19 * rise;
+  double w = s * 0.036;
+  Uint8 alpha = weapon_alpha(248.0 * event->fade);
+  static const Uint8 rune_c[3] = {120, 210, 235};
+  if (h < 3.0) return;
+  // Ground fracture glow at the base
+  filledEllipseRGBA(surface, (int)cx, (int)(ground + 1), (int)(w * 1.4),
+                    (int)(s * 0.009) + 1, 70, 140, 175,
+                    weapon_alpha(55.0 * rise * event->fade));
+  // Pitch-black 1:4:9 slab silhouette with a razor-thin cold highlight edge
+  double top = ground - h;
+  boxRGBA(surface, (int)(cx - w * 0.5), (int)top, (int)(cx + w * 0.5),
+          (int)(ground + 2), 6, 7, 12, alpha);
+  lineRGBA(surface, (int)(cx - w * 0.5), (int)top, (int)(cx - w * 0.5),
+           (int)ground, 110, 175, 205, weapon_alpha(150.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w * 0.5), (int)top, (int)(cx + w * 0.5),
+           (int)top, 140, 205, 230, weapon_alpha(175.0 * event->fade));
+  // Subtle non-Euclidean geometric seams pulsing along the face
+  double hum = 0.45 + 0.55 * sin(event->t * 1.6);
+  for (int i = 1; i <= 3; i++) {
+    double sy = top + h * (i * 0.23);
+    double inset = w * 0.22;
+    lineRGBA(surface, (int)(cx - inset), (int)sy, (int)(cx + inset), (int)sy,
+             rune_c[0], rune_c[1], rune_c[2],
+             weapon_alpha(130.0 * hum * rise * event->fade));
+  }
+  // Vertical hairline & zenith pinpoint
+  lineRGBA(surface, (int)cx, (int)(top + h * 0.14), (int)cx,
+           (int)(top + h * 0.82), rune_c[0], rune_c[1], rune_c[2],
+           weapon_alpha(95.0 * hum * rise * event->fade));
+  weapon_glow(surface, cx, top - s * 0.012, 2.2, rune_c,
+              180.0 * hum * rise * event->fade);
+  // Gravity-defying dust motes rising around the monolith
+  for (int m = 0; m < 14; m++) {
+    double u = fmod(event->t * 0.14 + hill_random(event, m, 3), 1.0);
+    double mx = cx + (hill_random(event, m, 4) - 0.5) * w * 3.4 +
+                sin(event->t * 1.1 + m) * s * 0.006;
+    double my = ground - u * (h * 1.25);
+    weapon_glow(surface, mx, my, 1.3, rune_c,
+                165.0 * sin(u * M_PI) * rise * event->fade);
+  }
+}
+
+// Lovecraftian abyssal horizon: vast, silent tendrils rise slowly from behind
+// the ridge like the silhouette of something submerged in deep fog, with faint
+// cold-phosphorescent eyes opening and closing near the crest.
+static void hill_abyssal_reach(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 0, 63));
+  double ground = hill_ground(event, cx);
+  double reach = sin(smooth_step(0.04, 0.96, event->progress) * M_PI);
+  Uint8 alpha = weapon_alpha(238.0 * event->fade);
+  static const Uint8 abyss_eye[3] = {155, 225, 200};
+  // Low mist pooling along the ridge
+  for (int m = 0; m < 5; m++) {
+    double mx = cx + (m - 2) * s * 0.055;
+    filledEllipseRGBA(surface, (int)mx, (int)(ground + 2), (int)(s * 0.065),
+                      (int)(s * 0.014) + 1, 22, 32, 42,
+                      weapon_alpha(55.0 * reach * event->fade));
+  }
+  // Five slow, tapering silhouettes rising and swaying from behind the hill
+  for (int t = 0; t < 5; t++) {
+    double base_x = cx + (t - 2) * s * 0.045;
+    double len = s * (0.11 + 0.055 * hill_random(event, t, 1)) * reach;
+    double base_w = s * (0.013 - fabs(t - 2) * 0.0018);
+    double px = base_x, py = ground + 3;
+    const int segs = 10;
+    for (int i = 1; i <= segs; i++) {
+      double u = (double)i / segs;
+      double sway = sin(event->t * (0.65 + t * 0.09) + t * 1.4 - u * 2.2) *
+                    s * 0.022 * u;
+      double nx = base_x + sway + (t - 2) * s * 0.008 * u;
+      double ny = ground + 3 - len * u;
+      int thick = (int)(base_w * (1.0 - u * 0.85)) + 1;
+      thickLineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, thick, 8, 11,
+                    18, alpha);
+      px = nx;
+      py = ny;
+    }
+  }
+  // Faint, slow-blinking eyes low along the ridge mist
+  for (int e = 0; e < 3; e++) {
+    double blink = sin(event->t * 0.7 + e * 2.3);
+    if (blink <= 0.15) continue;
+    double ex = cx + (e - 1) * s * 0.038;
+    double ey = ground - s * (0.018 + 0.008 * (e % 2));
+    weapon_glow(surface, ex, ey, 1.8, abyss_eye,
+                160.0 * blink * reach * event->fade);
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -7838,7 +8000,8 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_seesaw,        hill_laundry,   hill_well,        hill_kiln,
     hill_ropebridge,    hill_belltower, hill_maze,        hill_fisher,
     hill_lanterntree,   hill_forge,     hill_seedtree,    hill_stonecircle,
-    hill_sandcastle,    hill_musicbox,  hill_lightstairs,
+    hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
+    hill_monolith,      hill_abyssal_reach,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
@@ -11206,6 +11369,150 @@ static void sky_event_138(const SkyEvent *event) {
   }
 }
 
+// "The Colour Out of Space" (Lovecraft): an unearthly, nameless miasma of
+// sickly violet and phosphorescent chartreuse drifts across the sky, trailing
+// slow, gravity-defying tendrils and motes that pulse out of phase with nature.
+static void sky_event_139(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 violet[3] = {178, 72, 245};
+  static const Uint8 blight[3] = {152, 248, 128};
+  double drift = sin(phase / 1100.0) * size * 0.45;
+  double cx = x, cy = y + drift;
+  double rx = size * 2.4, ry = size * 1.25;
+  // Soft, shifting outer miasma lobes (alternating unearthly hues)
+  for (int lobe = 0; lobe < 7; lobe++) {
+    double a = lobe * 0.9 + phase / 1400.0;
+    double lx = cx + cos(a) * rx * (0.35 + 0.25 * sin(phase / 900.0 + lobe));
+    double ly = cy + sin(a * 1.3) * ry * 0.55;
+    double lr = size * (0.9 + 0.35 * sin(phase / 650.0 + lobe * 1.7));
+    bool alt = (lobe % 2 == 0);
+    Uint8 r = alt ? violet[0] : blight[0];
+    Uint8 g = alt ? violet[1] : blight[1];
+    Uint8 b = alt ? violet[2] : blight[2];
+    filledEllipseRGBA(surface, (int)lx, (int)ly, (int)(lr * 1.2),
+                      (int)(lr * 0.75), r, g, b,
+                      weapon_alpha(26.0 * fade));
+  }
+  // Anomalous core: a dark void-heart rimmed with shifting alien spectra
+  filledCircleRGBA(surface, (int)cx, (int)cy, (int)(size * 0.42) + 1, 10, 6, 18,
+                   weapon_alpha(190.0 * fade));
+  double pulse = 0.7 + 0.3 * sin(phase / 320.0);
+  weapon_glow(surface, cx, cy, size * 0.55 * pulse, violet, 120.0 * fade);
+  weapon_glow(surface, cx + cos(phase / 500.0) * size * 0.25,
+              cy + sin(phase / 420.0) * size * 0.15, size * 0.35, blight,
+              110.0 * fade);
+  // Slow descending and ascending tendrils of strange luminescence
+  for (int t = 0; t < 6; t++) {
+    double tx0 = cx + (t - 2.5) * size * 0.55;
+    double px = tx0, py = cy + size * 0.25;
+    for (int seg = 1; seg <= 7; seg++) {
+      double u = seg / 7.0;
+      double nx = tx0 + sin(phase / 700.0 + t * 1.3 + seg * 0.7) * size * 0.35;
+      double ny = cy + size * (0.25 + u * 2.3);
+      const Uint8 *c = (t % 2 == 0) ? blight : violet;
+      lineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, c[0], c[1], c[2],
+               weapon_alpha(135.0 * (1.0 - u * 0.8) * fade));
+      px = nx;
+      py = ny;
+    }
+  }
+  // Drifting spore-motes of the Colour
+  for (int i = 0; i < 18; i++) {
+    double u = fmod(phase / 2400.0 + i / 18.0, 1.0);
+    double mx = cx + sin(i * 2.7 + u * 5.0) * size * 2.1;
+    double my = cy + cos(i * 1.9 + u * 3.5) * size * 1.4 - u * size * 0.8;
+    const Uint8 *c = (i % 3 == 0) ? violet : blight;
+    weapon_glow(surface, mx, my, 1.4, c, 190.0 * (1.0 - u) * fade);
+  }
+}
+
+// "Black Stars" (Chambers' Carcosa / Ligotti): a triad of pitch-black
+// suns ringed by pale, feverish coronas and twin eclipsed crescents; faint
+// geometric filaments link them like a forbidden constellation.
+static void sky_event_140(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 corona[3] = {235, 224, 175};
+  static const Uint8 ember[3] = {185, 130, 110};
+  double base_a = phase / 2600.0;
+  double px[3], py[3], pr[3];
+  for (int i = 0; i < 3; i++) {
+    double a = base_a + i * (2.0 * M_PI / 3.0);
+    double dist = size * (i == 0 ? 1.5 : 1.9);
+    px[i] = x + cos(a) * dist;
+    py[i] = y + sin(a) * dist * 0.62;
+    pr[i] = size * (i == 0 ? 0.65 : 0.45);
+  }
+  // Faint constellation filaments connecting the black stars
+  for (int i = 0; i < 3; i++) {
+    int j = (i + 1) % 3;
+    lineRGBA(surface, (int)px[i], (int)py[i], (int)px[j], (int)py[j],
+             corona[0], corona[1], corona[2], weapon_alpha(55.0 * fade));
+  }
+  // Draw each black star: pale eclipse corona, void disc, and cold rays
+  for (int i = 0; i < 3; i++) {
+    double pulse = 0.8 + 0.2 * sin(phase / 410.0 + i * 2.1);
+    double r = pr[i];
+    filledCircleRGBA(surface, (int)px[i], (int)py[i], (int)(r * 1.38 * pulse),
+                     corona[0], corona[1], corona[2],
+                     weapon_alpha(38.0 * fade));
+    circleRGBA(surface, (int)px[i], (int)py[i], (int)(r * 1.15), corona[0],
+               corona[1], corona[2], weapon_alpha(150.0 * fade));
+    filledCircleRGBA(surface, (int)px[i], (int)py[i], (int)r + 1, 5, 4, 8,
+                     weapon_alpha(245.0 * fade));
+    for (int ray = 0; ray < 4; ray++) {
+      double ra = ray * (M_PI / 2.0) + phase / 1900.0 * (i % 2 ? -1 : 1);
+      double len = r * (1.9 + 0.35 * pulse);
+      lineRGBA(surface, (int)(px[i] + cos(ra) * r),
+               (int)(py[i] + sin(ra) * r), (int)(px[i] + cos(ra) * len),
+               (int)(py[i] + sin(ra) * len), ember[0], ember[1], ember[2],
+               weapon_alpha(110.0 * fade));
+    }
+  }
+}
+
+// "Solaris" (Lem): a strange, living ocean-mimoid of symmetry-breaking
+// concentric shells and iridescent ribs floats across the sky, folding and
+// unfolding impossible crystalline symmetries as it passes.
+static void sky_event_141(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 shell_c[3] = {135, 205, 230};
+  static const Uint8 core_c[3] = {245, 165, 130};
+  double morph = phase / 1200.0;
+  double r0 = size * 1.45;
+  // Outer translucent undulating membrane
+  const int pts = 24;
+  int px_prev = 0, py_prev = 0;
+  for (int i = 0; i <= pts; i++) {
+    double a = (2.0 * M_PI * i) / pts;
+    double wobble = 1.0 + 0.24 * sin(a * 3.0 + morph) +
+                    0.14 * cos(a * 5.0 - morph * 1.3);
+    int px = x + (int)(cos(a) * r0 * wobble);
+    int py = y + (int)(sin(a) * r0 * 0.72 * wobble);
+    if (i > 0) {
+      thickLineRGBA(surface, px_prev, py_prev, px, py, 2, shell_c[0],
+                    shell_c[1], shell_c[2], weapon_alpha(150.0 * fade));
+    }
+    px_prev = px;
+    py_prev = py;
+  }
+  // Inner counter-rotating symmetry ribs
+  for (int rib = 0; rib < 6; rib++) {
+    double a = rib * (M_PI / 3.0) + morph * 0.45;
+    double rx = cos(a) * r0 * 0.92;
+    double ry = sin(a) * r0 * 0.66;
+    lineRGBA(surface, x, y, (int)(x + rx), (int)(y + ry), shell_c[0],
+             shell_c[1], shell_c[2], weapon_alpha(95.0 * fade));
+    weapon_glow(surface, x + rx * 0.75, y + ry * 0.75, 1.5, core_c,
+                155.0 * fade);
+  }
+  // Living amber-rose core shifting slowly inside the shell
+  double cx = x + cos(morph * 0.8) * size * 0.2;
+  double cy = y + sin(morph * 1.1) * size * 0.14;
+  weapon_glow(surface, cx, cy, size * 0.42, core_c, 165.0 * fade);
+  filledCircleRGBA(surface, (int)cx, (int)cy, (int)(size * 0.24) + 1, 255, 210,
+                   190, weapon_alpha(200.0 * fade));
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -11275,7 +11582,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_123, sky_event_124, sky_event_125, sky_event_126, sky_event_127,
     sky_event_128, sky_event_129, sky_event_130, sky_event_131, sky_event_132,
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
-    sky_event_138,
+    sky_event_138, sky_event_139, sky_event_140, sky_event_141,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
