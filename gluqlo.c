@@ -508,7 +508,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 153
+#define RARE_SKY_KINDS 154
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -13119,6 +13119,26 @@ static void sky_event_152(const SkyEvent *event) {
              weapon_alpha(195.0 * fade));
 }
 
+// Nebula butterfly: a bipolar cosmic cloud with twin glowing magenta-cyan
+// wing lobes and a bright central white-dwarf core.
+static void sky_event_153(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 lobe_l[3] = {225, 115, 215};
+  static const Uint8 lobe_r[3] = {115, 210, 255};
+  static const Uint8 core_c[3] = {235, 248, 255};
+  double span = size * 1.15;
+  double wing_r = size * 0.78;
+  weapon_glow(surface, x - span * 0.65, y - size * 0.28, wing_r, lobe_l,
+              85.0 * fade);
+  weapon_glow(surface, x - span * 0.65, y + size * 0.28, wing_r * 0.8, lobe_l,
+              75.0 * fade);
+  weapon_glow(surface, x + span * 0.65, y - size * 0.28, wing_r, lobe_r,
+              85.0 * fade);
+  weapon_glow(surface, x + span * 0.65, y + size * 0.28, wing_r * 0.8, lobe_r,
+              75.0 * fade);
+  weapon_glow(surface, x, y, size * 0.32, core_c, 210.0 * fade);
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -13191,6 +13211,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     sky_event_143, sky_event_144, sky_event_145, sky_event_146, sky_event_147,
     sky_event_148, sky_event_149, sky_event_150, sky_event_151, sky_event_152,
+    sky_event_153,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
