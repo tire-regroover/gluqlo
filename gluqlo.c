@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  104  // things that happen on the hills (see render_hill_event)
+  105  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -8731,6 +8731,36 @@ static void hill_tidal_bell(const HillEvent *event) {
              weapon_alpha(145.0 * (1.0 - toll) * event->fade));
 }
 
+// "The Martian Chronicles" (Ray Bradbury): a slender sand-skiff with a
+// translucent brass-ribbed sail glides silently along the ridge crest,
+// trailed by pale dust motes and a warm prow lantern.
+static void hill_canal_skiff(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double x = dir > 0 ? surface->w * (0.08 + 0.84 * event->progress)
+                     : surface->w * (0.92 - 0.84 * event->progress);
+  double ground = hill_ground(event, x);
+  double hull = s * 0.055;
+  double mast = s * 0.068;
+  Uint8 hull_a = weapon_alpha(220.0 * event->fade);
+  // Crescent skiff hull skimming the ridge
+  thickLineRGBA(surface, (int)(x - hull * 0.55), (int)(ground - 3),
+                (int)(x + hull * 0.55), (int)(ground - 3), 3, 28, 34, 44,
+                hull_a);
+  // Mast and billowing amber-tinted sail
+  lineRGBA(surface, (int)x, (int)(ground - 3), (int)x, (int)(ground - mast),
+           176, 138, 86, hull_a);
+  filledTrigonRGBA(surface, (int)x, (int)(ground - mast), (int)x,
+                   (int)(ground - mast * 0.25),
+                   (int)(x + dir * hull * 0.52), (int)(ground - mast * 0.42),
+                   188, 154, 102, weapon_alpha(110.0 * event->fade));
+  // Prow lantern
+  static const Uint8 lantern[3] = {250, 205, 115};
+  weapon_glow(surface, x + dir * hull * 0.55, ground - 4, 1.8, lantern,
+              185.0 * event->fade);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -8760,7 +8790,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
-    hill_glass_forest, hill_tidal_bell,
+    hill_glass_forest, hill_tidal_bell, hill_canal_skiff,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
