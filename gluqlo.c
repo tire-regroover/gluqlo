@@ -511,7 +511,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  101  // things that happen on the hills (see render_hill_event)
+  102  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -8097,6 +8097,43 @@ static void hill_derelict_galleon(const HillEvent *event) {
   }
 }
 
+// Weird fiction threshold (Blackwood / Machen): an ancient, crooked stone
+// archway stands alone on the ridge; inside its frame, a different, deeper
+// starfield of pale violet-blue stars gleams where the hill should be.
+static void hill_threshold_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 0, 67));
+  double ground = hill_ground(event, cx);
+  double aw = s * 0.038, ah = s * 0.088;
+  Uint8 alpha = weapon_alpha(242.0 * event->fade);
+  static const Uint8 rift_c[3] = {165, 150, 240};
+  // Deep void interior inside the arch
+  boxRGBA(surface, (int)(cx - aw * 0.65), (int)(ground - ah * 0.85),
+          (int)(cx + aw * 0.65), (int)(ground + 2), 5, 4, 14, alpha);
+  filledEllipseRGBA(surface, (int)cx, (int)(ground - ah * 0.85),
+                    (int)(aw * 0.65), (int)(aw * 0.45), 5, 4, 14, alpha);
+  // Crooked megalithic pillars and lintel
+  thickLineRGBA(surface, (int)(cx - aw * 0.82), (int)(ground + 2),
+                (int)(cx - aw * 0.72), (int)(ground - ah * 0.88),
+                (int)(s * 0.012) + 2, 34, 36, 46, alpha);
+  thickLineRGBA(surface, (int)(cx + aw * 0.82), (int)(ground + 2),
+                (int)(cx + aw * 0.72), (int)(ground - ah * 0.88),
+                (int)(s * 0.012) + 2, 34, 36, 46, alpha);
+  thickLineRGBA(surface, (int)(cx - aw * 0.96), (int)(ground - ah * 0.88),
+                (int)(cx + aw * 0.96), (int)(ground - ah * 0.94),
+                (int)(s * 0.014) + 2, 38, 40, 52, alpha);
+  // Alien stars gleaming through the doorway
+  double hum = 0.65 + 0.35 * sin(event->t * 1.4);
+  for (int i = 0; i < 9; i++) {
+    double sx = cx + (hill_random(event, i, 10) - 0.5) * aw * 1.05;
+    double sy = ground - (0.15 + 0.78 * hill_random(event, i, 11)) * ah;
+    double tw = 0.5 + 0.5 * sin(event->t * 2.2 + i * 1.7);
+    weapon_glow(surface, sx, sy, 1.3, rift_c,
+                195.0 * tw * hum * event->fade);
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -8125,7 +8162,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lanterntree,   hill_forge,     hill_seedtree,    hill_stonecircle,
     hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
-    hill_pale_lighthouse, hill_derelict_galleon,
+    hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
