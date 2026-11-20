@@ -620,7 +620,7 @@ static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     false,
                                                     900,
                                                     1700,
-                                                    0,
+                                                    2,
                                                     GROUP_SKY,
                                                     1,
                                                     NULL};
@@ -2674,11 +2674,49 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
   render_dogfight(surface, &window, scale, 1, 2, 0.0);
 }
 
-// A furball: two or three pairs fighting at once.
+// Background battle scenarios:
+//   0: furball — two or three pairs fighting at once.
+//   1: convoy ambush — two mid-class ships cross the upper sky under fire from
+//      darting interceptors launching swarm missiles and flak bursts.
 static void render_background_battle(RenderTarget *surface, Uint32 ticks,
                                      int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
+  int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 2);
+  if (kind == 1) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int dir = (window.seed >> 4) & 1 ? 1 : -1;
+    int mid_len = scale / 22;
+    if (mid_len < 18) mid_len = 18;
+    int sm_len = mid_len / 2;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double cx = dir > 0
+                    ? -mid_len * 2 + progress * (surface->w + 4.0 * mid_len)
+                    : surface->w + mid_len * 2 -
+                          progress * (surface->w + 4.0 * mid_len);
+    double cy = surface->h * 0.13;
+    for (int c = 0; c < 2; c++) {
+      double sx = cx - dir * c * mid_len * 1.9;
+      double sy = cy + (c == 0 ? -scale * 0.015 : scale * 0.022);
+      draw_ship_role(surface, (int)sx, (int)sy, SHIP_MID,
+                     window.seed + c * 17, mid_len, dir, 0, opacity);
+      // Raiders diving from above and below
+      double rx = sx + sin(window.phase / 1300.0 + c * 2.1) * scale * 0.11;
+      double ry = sy + (c == 0 ? -1 : 1) * scale * 0.055 *
+                           (0.6 + 0.4 * cos(window.phase / 900.0 + c));
+      int rdir = cos(window.phase / 1300.0 + c * 2.1) >= 0 ? 1 : -1;
+      draw_ship_role(surface, (int)rx, (int)ry, SHIP_SMALL,
+                     window.seed + 41 + c, sm_len, rdir, 1, opacity);
+      Uint32 age = window.phase % 2100;
+      if (age < 1030 && progress > 0.06 && progress < 0.94) {
+        draw_weapon_shot(surface, c == 0 ? WEAPON_SWARM : WEAPON_FLAK, 0,
+                         rx, ry, sx, sy, (double)age, scale / 90.0, 1, fade,
+                         1, fx_hash(window.seed, (int)(window.phase / 2100) + c));
+      }
+    }
+    return;
+  }
   render_dogfight(surface, &window, scale, 2 + (window.seed >> 5) % 2, 3, 0.35);
 }
 
