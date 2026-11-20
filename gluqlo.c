@@ -645,7 +645,7 @@ static const EffectSpec EFFECT_BATTLE_FLYBY = {
     false,          900,   1100, 6, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
-    0,          true,  900, 1100, 5,     GROUP_SKY, 3,     NULL};
+    0,          true,  900, 1100, 6,     GROUP_SKY, 3,     NULL};
 static const EffectSpec EFFECT_HILL_EVENT = {"hill_event",
                                              120000,
                                              0,
@@ -2851,11 +2851,13 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
 //   4: wingman rescue — a damaged fighter flees with a pursuer on its tail
 //      until a friendly wingman dives in from above, downs the pursuer, and
 //      escorts the survivor off-screen.
+//   5: asteroid slalom — two fighters weave around four drifting sky-rocks,
+//      exchanging pulse bolts between the boulders.
 static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                                    int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
-  int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 5);
+  int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 6);
   if (kind == 1) {
     double progress = window.progress;
     double fade = window.fade;
@@ -3091,6 +3093,56 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
         draw_weapon_shot(surface, WEAPON_MASS_DRIVER, 0, fwx, fwy, hpx, hpy,
                          (double)volley, unit, 0, fade, 1,
                          fx_hash(window.seed, (int)(window.phase / 900)));
+      }
+    }
+    return;
+  }
+  if (kind == 5) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int length = scale / 34;
+    if (length < 14) length = 14;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double unit = weapon_unit(length);
+    int dir = (window.seed >> 4) & 1 ? 1 : -1;
+    // Four drifting sky-rocks
+    for (int r = 0; r < 4; r++) {
+      double rx = surface->w * (0.22 + r * 0.19) +
+                  dir * (progress - 0.5) * scale * 0.04;
+      double ry = surface->h * (r % 2 == 0 ? 0.10 : 0.16);
+      int rad = (int)(scale * (0.012 + (r % 2) * 0.005));
+      filledCircleRGBA(surface, (int)rx, (int)ry, rad, 34, 38, 48,
+                       weapon_alpha(200.0 * fade));
+      circleRGBA(surface, (int)rx, (int)ry, rad, 72, 82, 98,
+                 weapon_alpha(150.0 * fade));
+    }
+    // Lead and pursuing fighters weaving around the boulders
+    for (int s = 0; s < 2; s++) {
+      double u = progress - s * 0.08;
+      if (u < 0.0 || u > 1.0) continue;
+      double sx = (dir > 0) ? -length + u * (surface->w + 2.0 * length)
+                            : surface->w + length - u * (surface->w + 2.0 * length);
+      double sy = surface->h * 0.13 + sin(u * 15.708 + s * 0.7) * scale * 0.036;
+      draw_ship_role(surface, (int)sx, (int)sy, SHIP_SMALL,
+                     window.seed + s * 29, length, dir, s, opacity);
+    }
+    Uint32 age = window.phase % 1300;
+    if (age < weapon_specs[WEAPON_PULSE].life_ms && window.phase >= age) {
+      double fp = (double)(window.phase - age) / window.duration;
+      double hp =
+          (double)(window.phase - age + weapon_specs[WEAPON_PULSE].impact_ms) /
+          window.duration;
+      if (fp > 0.14 && hp < 0.92) {
+        double fu = fp - 0.08;
+        double fsx = (dir > 0) ? -length + fu * (surface->w + 2.0 * length)
+                               : surface->w + length - fu * (surface->w + 2.0 * length);
+        double fsy = surface->h * 0.13 + sin(fu * 15.708 + 0.7) * scale * 0.036;
+        double htx = (dir > 0) ? -length + hp * (surface->w + 2.0 * length)
+                               : surface->w + length - hp * (surface->w + 2.0 * length);
+        double hty = surface->h * 0.13 + sin(hp * 15.708) * scale * 0.036;
+        draw_weapon_shot(surface, WEAPON_PULSE, 0, fsx, fsy, htx, hty,
+                         (double)age, unit, 1, fade, fp > 0.65 ? 1 : 0,
+                         fx_hash(window.seed, (int)(window.phase / 1300)));
       }
     }
     return;
