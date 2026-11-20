@@ -607,7 +607,7 @@ static const EffectSpec EFFECT_FULLSCREEN = {"fullscreen",
                                              fullscreen_accept};
 static const EffectSpec EFFECT_FLEET_BATTLE = {
     "fleet_battle", 240000, 1,    6, false,     0, 60000, 0, 0,
-    false,          1400,   2200, 0, GROUP_SKY, 0, NULL};
+    false,          1400,   2200, 2, GROUP_SKY, 0, NULL};
 static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     90000,
                                                     1,
@@ -2734,6 +2734,7 @@ typedef struct {
   RenderTarget *surface;
   int scale;
   Uint32 seed;
+  int kind;
   double start;  // scene time the battle began
   double duration;
   int winner;  // the side that does not lose ships
@@ -2770,6 +2771,21 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
   int direction = side == 0 ? 1 : -1;
   int lane = ship == 0 ? 0 : (ship % 2 ? (ship + 1) / 2 : -(ship / 2));
   double offset = direction * ((ship + 1) / 2) * fleet->size * 3;
+  if (fleet->kind == 1) {
+    // Crescent encirclement: winner forms a wide enveloping arc while the
+    // outnumbered/trapped side clusters tighter toward the center.
+    double spread = (side == fleet->winner) ? 1.55 : 0.72;
+    offset = (side == fleet->winner)
+                 ? direction * (fabs((double)lane) * fleet->size * 1.9 -
+                                fleet->size * 2.2)
+                 : direction * ((ship + 1) / 2) * fleet->size * 2.1;
+    double weave = sin(t / (510.0 + ship * 127) + ship * 1.8 + side * 2.4) *
+                   fleet->scale * 0.008;
+    *x = anchor + offset + weave;
+    *y = fleet->center_y + lane * (fleet->scale / 34.0) * spread +
+         sin(t / (420.0 + ship * 83) + ship * 1.3) * fleet->size * 0.65;
+    return;
+  }
   double weave = sin(t / (510.0 + ship * 127) + ship * 1.8 + side * 2.4) *
                  fleet->scale * 0.009;
   double arc = sin(t / 1900.0 + progress * 8.0) * fleet->scale * 0.010;
@@ -2903,6 +2919,7 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks,
   fleet.surface = surface;
   fleet.scale = scale;
   fleet.seed = window.seed;
+  fleet.kind = effect_kind(&EFFECT_FLEET_BATTLE, (window.seed >> 7) % 2);
   fleet.start = (double)ticks - window.phase;
   fleet.duration = window.duration;
   fleet.winner = (window.seed ^ (window.seed >> 13) ^ (window.seed >> 23)) & 1;
