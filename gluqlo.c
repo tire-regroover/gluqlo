@@ -588,7 +588,7 @@ static const EffectSpec EFFECT_WORLD_JUMP = {
     false,        350,    450, 4, GROUP_TAKEOVER, 0,           NULL};
 static const EffectSpec EFFECT_LONG_SCENE = {
     "long_scene", 210000, 0,    5, false,          2246822519u, 72000, 28000, 8,
-    true,         6000,   7000, 5, GROUP_TAKEOVER, 2,           NULL};
+    true,         6000,   7000, 7, GROUP_TAKEOVER, 2,           NULL};
 static const EffectSpec EFFECT_FULLSCREEN = {"fullscreen",
                                              90000,
                                              1,
@@ -3430,7 +3430,7 @@ static void render_long_scene(RenderTarget *surface, Uint32 ticks, int scale) {
   Uint32 seed = window.seed;
   double progress = window.progress;
   double fade = window.fade;
-  int kind = effect_kind(&EFFECT_LONG_SCENE, seed % 5);
+  int kind = effect_kind(&EFFECT_LONG_SCENE, seed % 7);
 
   if (kind == 0) {
     draw_hill_garden(surface, ticks, scale, seed, progress, fade);
@@ -3484,7 +3484,7 @@ static void render_long_scene(RenderTarget *surface, Uint32 ticks, int scale) {
         previous_y = next_y;
       }
     }
-  } else {
+  } else if (kind == 4) {
     boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 17, 20, 32,
             (Uint8)(34 * fade));
     int figure_x = surface->w * (25 + seed % 50) / 100;
@@ -3496,6 +3496,56 @@ static void render_long_scene(RenderTarget *surface, Uint32 ticks, int scale) {
                      (Uint8)(150 * fade));
     filledCircleRGBA(surface, figure_x, figure_y - figure_height,
                      figure_height / 6, 18, 22, 30, (Uint8)(160 * fade));
+  } else if (kind == 5) {
+    // Bioluminescent tide: glowing cyan-emerald surf swells up the near ridge
+    // with drifting sea-foam motes and pulsing wave crests.
+    int tide_y = surface->h * (85 - (int)(sin(progress * M_PI) * 11)) / 100;
+    boxRGBA(surface, 0, tide_y, surface->w - 1, surface->h - 1, 14, 58, 72,
+            (Uint8)(64 * fade));
+    for (int band = 0; band < 4; band++) {
+      int prev_x = 0;
+      int prev_y = tide_y + band * scale / 34;
+      for (int seg = 1; seg <= 22; seg++) {
+        int next_x = surface->w * seg / 22;
+        int next_y =
+            tide_y + band * scale / 34 +
+            (int)(sin(seg * 0.75 + ticks / (420.0 + band * 90)) * scale * 0.011);
+        thickLineRGBA(surface, prev_x, prev_y, next_x, next_y, 2, 70, 228, 210,
+                      (Uint8)((95 - band * 16) * fade));
+        prev_x = next_x;
+        prev_y = next_y;
+      }
+    }
+    static const Uint8 bio[3] = {80, 245, 215};
+    for (int i = 0; i < 24; i++) {
+      unsigned int h = fx_hash(seed, 700 + i);
+      double fx = fmod((h % 1000) / 1000.0 + progress * (0.2 + (h % 5) * 0.04),
+                       1.0) *
+                  surface->w;
+      double fy = tide_y + (h % 100) / 100.0 * (surface->h - tide_y);
+      double pulse = 0.5 + 0.5 * sin(ticks / 340.0 + i * 1.3);
+      weapon_glow(surface, fx, fy, 1.5 + (h % 3) * 0.6, bio,
+                  (85.0 + 95.0 * pulse) * fade);
+    }
+  } else {
+    // Slow skyward migration: a convoy of silent mid-ships and glowing
+    // lanterns drifts across the entire sky over the long scene.
+    int dir = (seed & 1) ? 1 : -1;
+    int len = scale / 24;
+    if (len < 16) len = 16;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * 0.85 * fade);
+    for (int s = 0; s < 5; s++) {
+      double offset = s * 0.14;
+      double u = (progress * 1.4 - offset);
+      if (u < -0.1 || u > 1.1) continue;
+      double sx = (dir > 0) ? -len + u * (surface->w + 2.0 * len)
+                            : surface->w + len - u * (surface->w + 2.0 * len);
+      double sy = surface->h * (0.14 + (s % 3) * 0.06) +
+                  sin(ticks / 1400.0 + s * 1.7) * scale * 0.014;
+      draw_ship_role(surface, (int)sx, (int)sy, (s == 2) ? SHIP_MID : SHIP_SMALL,
+                     seed + s * 19, (s == 2) ? (int)(len * 1.5) : len, dir,
+                     s % 2, opacity);
+    }
   }
 }
 
