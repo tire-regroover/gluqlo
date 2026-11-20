@@ -620,7 +620,7 @@ static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     false,
                                                     900,
                                                     1700,
-                                                    4,
+                                                    5,
                                                     GROUP_SKY,
                                                     1,
                                                     NULL};
@@ -2957,11 +2957,13 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
 //      flanks, trading heavy beam and railgun volleys across a fighter screen.
 //   3: minefield gauntlet — a mid-class blockade runner weaves through drifting
 //      proximity mines that detonate behind it while fighters give chase.
+//   4: carrier launch — a heavy carrier holds station, launching a wing of
+//      fighters that fan out to intercept incoming enemy bombers.
 static void render_background_battle(RenderTarget *surface, Uint32 ticks,
                                      int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
-  int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 4);
+  int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 5);
   if (kind == 1) {
     double progress = window.progress;
     double fade = window.fade;
@@ -3075,6 +3077,45 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
           draw_explosion(surface, mx, my, age, sm_len * 0.9, false,
                          fx_hash(window.seed, 90 + m), 1, fade);
         }
+      }
+    }
+    return;
+  }
+  if (kind == 4) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int dir = (window.seed >> 4) & 1 ? 1 : -1;
+    int big_len = scale / 14;
+    if (big_len < 24) big_len = 24;
+    int sm_len = scale / 38;
+    if (sm_len < 12) sm_len = 12;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double cx = (dir > 0) ? surface->w * 0.24 : surface->w * 0.76;
+    double cy = surface->h * 0.12 + sin(window.phase / 2000.0) * scale * 0.008;
+    draw_ship_role(surface, (int)cx, (int)cy, SHIP_BIG, window.seed + 11,
+                   big_len, dir, 0, opacity);
+    // 3 launched fighters fanning out from the carrier
+    for (int f = 0; f < 3; f++) {
+      double fu = progress - f * 0.12;
+      if (fu < 0.0) continue;
+      double fx = cx + dir * fu * surface->w * 0.65;
+      double fy = cy + (f - 1) * scale * 0.032 * smooth_step(0.0, 0.3, fu);
+      draw_ship_role(surface, (int)fx, (int)fy, SHIP_SMALL,
+                     window.seed + 31 + f, sm_len, dir, 0, opacity);
+    }
+    // 2 incoming enemy mid-ships on the opposite flank
+    for (int e = 0; e < 2; e++) {
+      double ex = (dir > 0) ? surface->w * (0.95 - progress * 0.35)
+                            : surface->w * (0.05 + progress * 0.35);
+      double ey = surface->h * (0.10 + e * 0.045);
+      draw_ship_role(surface, (int)ex, (int)ey, SHIP_MID,
+                     window.seed + 61 + e, (int)(sm_len * 1.6), -dir, 1,
+                     opacity);
+      Uint32 age = window.phase % 2200;
+      if (age < 850 && progress > 0.15 && progress < 0.88) {
+        draw_weapon_shot(surface, WEAPON_MASS_DRIVER, 0, ex, ey, cx, cy,
+                         (double)age, weapon_unit(sm_len), 1, fade, 0,
+                         fx_hash(window.seed, (int)(window.phase / 2200) + e));
       }
     }
     return;
