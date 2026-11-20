@@ -645,7 +645,7 @@ static const EffectSpec EFFECT_BATTLE_FLYBY = {
     false,          900,   1100, 4, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
-    0,          true,  900, 1100, 3,     GROUP_SKY, 3,     NULL};
+    0,          true,  900, 1100, 4,     GROUP_SKY, 3,     NULL};
 static const EffectSpec EFFECT_HILL_EVENT = {"hill_event",
                                              120000,
                                              0,
@@ -2747,11 +2747,13 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
 //      sine-loops, exchanging fire on each crossover until one is downed.
 //   2: strafing run — an interceptor dives repeatedly on a mid-class courier
 //      crossing the upper sky while a defender tries to screen it.
+//   3: vertical climb & stall — two fighters pull into steep twin climbing
+//      arcs, stall near the top of the sky, and dive back down trading shots.
 static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                                    int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
-  int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 3);
+  int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 4);
   if (kind == 1) {
     double progress = window.progress;
     double fade = window.fade;
@@ -2870,6 +2872,44 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
       draw_weapon_shot(surface, WEAPON_RAIL, 0, ix, iy, cx, cy, age,
                        weapon_unit(sm_len), 1, fade, 1,
                        fx_hash(window.seed, (int)(progress * 3.0)));
+    }
+    return;
+  }
+  if (kind == 3) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int length = scale / 34;
+    if (length < 14) length = 14;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double unit = weapon_unit(length);
+    for (int side = 0; side < 2; side++) {
+      double lag = side * 0.06;
+      double u = progress - lag;
+      if (u < 0.0 || u > 1.0) continue;
+      // Parabolic climb & stall arc across the center of the sky
+      double x = surface->w * (0.18 + u * 0.64) +
+                 sin(u * 12.566 + side * 1.4) * scale * 0.02;
+      double y = surface->h * 0.20 -
+                 sin(u * M_PI) * scale * 0.14 +
+                 side * scale * 0.015;
+      double dx = surface->w * 0.64;
+      double dy = -cos(u * M_PI) * M_PI * scale * 0.14;
+      double pitch = atan2(-dy, dx);
+      draw_ship_role(surface, (int)x, (int)y, SHIP_SMALL,
+                     window.seed + side * 31, length, 1, side, opacity, pitch);
+    }
+    Uint32 age = window.phase % 1400;
+    if (age < 600 && progress > 0.15 && progress < 0.85) {
+      double u0 = progress;
+      double u1 = progress - 0.06;
+      double x0 = surface->w * (0.18 + u0 * 0.64);
+      double y0 = surface->h * 0.20 - sin(u0 * M_PI) * scale * 0.14;
+      double x1 = surface->w * (0.18 + u1 * 0.64);
+      double y1 = surface->h * 0.20 - sin(u1 * M_PI) * scale * 0.14 +
+                  scale * 0.015;
+      draw_weapon_shot(surface, WEAPON_PULSE, 0, x1, y1, x0, y0, (double)age,
+                       unit, 1, fade, progress > 0.65 ? 1 : 0,
+                       fx_hash(window.seed, (int)(window.phase / 1400)));
     }
     return;
   }
