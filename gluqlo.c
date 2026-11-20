@@ -642,7 +642,7 @@ static const EffectSpec EFFECT_RARE_SKY = {"rare_sky",
                                            rare_sky_accept};
 static const EffectSpec EFFECT_BATTLE_FLYBY = {
     "battle_flyby", 60000, 1,    6, false,     0, 14000, 0, 0,
-    false,          900,   1100, 5, GROUP_SKY, 4, NULL};
+    false,          900,   1100, 6, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
     0,          true,  900, 1100, 5,     GROUP_SKY, 3,     NULL};
@@ -2591,12 +2591,14 @@ static void render_dogfight(RenderTarget *surface, const EffectWindow *window,
 //      fires a broadside salvo at a patrolling picket, then accelerates to warp.
 //   4: blockade break — a fast runner threads between two hovering gunboats
 //      firing crossfire flak bursts across its path.
+//   5: stealth decloak strike — a cloaked corvette shimmers into view behind a
+//      patrolling frigate, fires a railgun lance, and banks away.
 static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
                                 int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
   Uint32 phase = window.phase;
-  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 5);
+  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 6);
 
   int size = scale / 170;
   if (size < 4) size = 4;
@@ -2762,6 +2764,40 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
         draw_weapon_shot(surface, WEAPON_FLAK, 0, gx, gy, bx, by,
                          (double)volley, scale / 95.0, 1, fade, 0,
                          fx_hash(window.seed, (int)(phase / 1600)));
+      }
+    }
+    return;
+  }
+  if (kind == 5) {
+    int dir = (window.seed >> 5) & 1 ? 1 : -1;
+    double fx = (dir > 0)
+                    ? -length * 2.0 + progress * (surface->w + 4.0 * length)
+                    : surface->w + length * 2.0 -
+                          progress * (surface->w + 4.0 * length);
+    double fy = center_y - scale * 0.014;
+    draw_ship_role(surface, (int)fx, (int)fy, SHIP_MID, window.seed >> 4,
+                   (int)(length * 1.4), dir, 1, opacity);
+    // Decloaking attacker approaches from behind and banks upward after firing
+    double sx = fx - dir * surface->w * (0.20 - 0.06 * smooth_step(0.18, 0.52, progress));
+    double climb = smooth_step(0.54, 1.0, progress);
+    double sy = fy + scale * 0.025 - climb * climb * scale * 0.09;
+    double cloak = smooth_step(0.18, 0.34, progress) *
+                   (1.0 - smooth_step(0.74, 0.90, progress));
+    Uint8 s_op = (Uint8)(opacity * cloak);
+    if (s_op > 4) {
+      draw_ship_role(surface, (int)sx, (int)sy, SHIP_SMALL, window.seed >> 11,
+                     (int)(length * 1.15), dir, 0, s_op, climb * 0.5);
+    }
+    if (progress > 0.36 && progress < 0.62) {
+      double age = (progress - 0.36) * window.duration;
+      if (age < weapon_specs[WEAPON_RAIL].life_ms) {
+        double hit_p = 0.36 + weapon_specs[WEAPON_RAIL].impact_ms / window.duration;
+        double hx = (dir > 0)
+                        ? -length * 2.0 + hit_p * (surface->w + 4.0 * length)
+                        : surface->w + length * 2.0 -
+                              hit_p * (surface->w + 4.0 * length);
+        draw_weapon_shot(surface, WEAPON_RAIL, 0, sx, sy, hx, fy, age,
+                         scale / 95.0, 0, fade, 1, fx_hash(window.seed, 91));
       }
     }
     return;
