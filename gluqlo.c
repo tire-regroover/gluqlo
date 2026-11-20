@@ -2853,12 +2853,13 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
     double ey = cy - scale * 0.032 + sin(progress * 14.0) * scale * 0.015;
     draw_ship_role(surface, (int)ex, (int)ey, SHIP_SMALL, window.seed + 13,
                    sm_len, dir, 0, opacity);
-    // Diving interceptor making 3 steep parabolic strafing runs
-    double dive_u = fmod(progress * 3.0, 1.0);
-    double ix = cx + (dive_u - 0.5) * scale * 0.36 * (-dir);
-    double iy = cy - scale * 0.11 * (1.0 - 4.0 * (dive_u - 0.5) * (dive_u - 0.5));
-    double idx = -dir * scale * 0.36;
-    double idy = 8.0 * (dive_u - 0.5) * scale * 0.11;
+    // Diving interceptor making 3 continuous looping strafing passes
+    double theta = progress * 3.0 * 2.0 * M_PI;
+    double ix = cx + sin(theta) * scale * 0.24;
+    double iy = cy - scale * 0.045 - cos(theta) * scale * 0.055;
+    double dcx = dir * (surface->w + 2.0 * mid_len);
+    double idx = dcx + cos(theta) * 6.0 * M_PI * scale * 0.24;
+    double idy = sin(theta) * 6.0 * M_PI * scale * 0.055;
     double iheading = atan2(-idy, idx);
     int idir = idx >= 0 ? 1 : -1;
     double ipitch =
@@ -2867,8 +2868,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                          cos(3.14159265359 - iheading));
     draw_ship_role(surface, (int)ix, (int)iy, SHIP_SMALL, window.seed + 29,
                    sm_len, idir, 1, opacity, ipitch);
-    if (dive_u > 0.25 && dive_u < 0.72) {
-      double age = (dive_u - 0.25) * (window.duration / 3.0);
+    double pass_u = fmod(progress * 3.0, 1.0);
+    if (pass_u > 0.28 && pass_u < 0.70) {
+      double age = (pass_u - 0.28) * (window.duration / 3.0);
       draw_weapon_shot(surface, WEAPON_RAIL, 0, ix, iy, cx, cy, age,
                        weapon_unit(sm_len), 1, fade, 1,
                        fx_hash(window.seed, (int)(progress * 3.0)));
