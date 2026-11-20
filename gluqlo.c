@@ -38,13 +38,18 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#include <unistd.h>
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <fontconfig/fontconfig.h>
 
 #ifndef FONT
-#define FONT "/usr/share/gluqlo/gluqlo.ttf"
+#define FONT "gluqlo.ttf"
 #endif
+
+static char resolved_clock_font[1024] = "";
+static char resolved_date_font[1024] = "";
 
 const char* TITLE = "Gluqlo L-Space";
 const int DEFAULT_WIDTH = 1024;
@@ -9785,6 +9790,138 @@ static void destroy_clock_caches(void) {
 	if(bg_texture) { SDL_DestroyTexture(bg_texture); bg_texture = NULL; }
 }
 
+static bool is_readable_file(const char *path) {
+	return path && path[0] != '\0' && access(path, R_OK) == 0;
+}
+
+static bool find_font_via_fontconfig(const char *pattern_str, char *out, size_t out_size) {
+	if(!FcInit()) return false;
+	FcPattern *pat = FcNameParse((const FcChar8 *)pattern_str);
+	if(!pat) return false;
+	FcConfigSubstitute(NULL, pat, FcMatchPattern);
+	FcDefaultSubstitute(pat);
+	FcResult result;
+	FcPattern *match = FcFontMatch(NULL, pat, &result);
+	FcPatternDestroy(pat);
+	if(!match) return false;
+	FcChar8 *file = NULL;
+	bool found = false;
+	if(FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
+		const char *path = (const char *)file;
+		if(is_readable_file(path)) {
+			snprintf(out, out_size, "%s", path);
+			found = true;
+		}
+	}
+	FcPatternDestroy(match);
+	return found;
+}
+
+static bool font_supports_date_text(const char *path) {
+	TTF_Font *probe = TTF_OpenFont(path, 16.0f);
+	if(!probe) return false;
+	// gluqlo.ttf only contains '0'-'9', 'A', 'M', 'P'; reject fonts missing full alphabet.
+	static const char *required = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,";
+	bool ok = true;
+	for(const char *p = required; *p; p++) {
+		if(!TTF_FontHasGlyph(probe, (Uint32)(unsigned char)*p)) {
+			ok = false;
+			break;
+		}
+	}
+	TTF_CloseFont(probe);
+	return ok;
+}
+
+static bool font_supports_clock_text(const char *path) {
+	TTF_Font *probe = TTF_OpenFont(path, 16.0f);
+	if(!probe) return false;
+	static const char *required = "0123456789AMP";
+	bool ok = true;
+	for(const char *p = required; *p; p++) {
+		if(!TTF_FontHasGlyph(probe, (Uint32)(unsigned char)*p)) {
+			ok = false;
+			break;
+		}
+	}
+	TTF_CloseFont(probe);
+	return ok;
+}
+
+static const char *resolve_date_font_path(void) {
+	if(resolved_date_font[0] != '\0' && is_readable_file(resolved_date_font)) {
+		return resolved_date_font;
+	}
+
+	const char *env_date_font = getenv("GLUQLO_DATE_FONT");
+	if(is_readable_file(env_date_font) && font_supports_date_text(env_date_font)) {
+		snprintf(resolved_date_font, sizeof(resolved_date_font), "%s", env_date_font);
+		return resolved_date_font;
+	}
+
+	static const char *fc_patterns[] = {
+		"sans:lang=en",
+		"sans-serif",
+		"DejaVu Sans",
+		"Liberation Sans",
+		"Noto Sans"
+	};
+	for(size_t i = 0; i < sizeof(fc_patterns) / sizeof(fc_patterns[0]); i++) {
+		char candidate[1024];
+		if(find_font_via_fontconfig(fc_patterns[i], candidate, sizeof(candidate))
+			&& font_supports_date_text(candidate)) {
+			snprintf(resolved_date_font, sizeof(resolved_date_font), "%s", candidate);
+			return resolved_date_font;
+		}
+	}
+	return NULL;
+}
+
+static const char *resolve_clock_font_path(void) {
+	if(resolved_clock_font[0] != '\0' && is_readable_file(resolved_clock_font)) {
+		return resolved_clock_font;
+	}
+
+	const char *env_font = getenv("GLUQLO_FONT");
+	if(is_readable_file(env_font) && font_supports_clock_text(env_font)) {
+		snprintf(resolved_clock_font, sizeof(resolved_clock_font), "%s", env_font);
+		return resolved_clock_font;
+	}
+
+	const char *base_path = SDL_GetBasePath();
+	char local_font[1024] = "";
+	if(base_path) {
+		snprintf(local_font, sizeof(local_font), "%sgluqlo.ttf", base_path);
+	}
+
+	const char *clock_font_paths[] = {
+		FONT,
+		local_font[0] ? local_font : NULL,
+		"./gluqlo.ttf"
+	};
+	for(size_t i = 0; i < sizeof(clock_font_paths) / sizeof(clock_font_paths[0]); i++) {
+		if(is_readable_file(clock_font_paths[i]) && font_supports_clock_text(clock_font_paths[i])) {
+			snprintf(resolved_clock_font, sizeof(resolved_clock_font), "%s", clock_font_paths[i]);
+			return resolved_clock_font;
+		}
+	}
+
+	char fc_gluqlo[1024];
+	if(find_font_via_fontconfig("Gluqlo", fc_gluqlo, sizeof(fc_gluqlo))
+		&& font_supports_clock_text(fc_gluqlo)) {
+		snprintf(resolved_clock_font, sizeof(resolved_clock_font), "%s", fc_gluqlo);
+		return resolved_clock_font;
+	}
+
+	// Fallback to the resolved date font if gluqlo.ttf is not installed anywhere.
+	const char *fallback = resolve_date_font_path();
+	if(fallback && font_supports_clock_text(fallback)) {
+		snprintf(resolved_clock_font, sizeof(resolved_clock_font), "%s", fallback);
+		return resolved_clock_font;
+	}
+	return NULL;
+}
+
 static void layout_clock(double display_scale_factor) {
 	int out_w = width, out_h = height;
 	SDL_GetCurrentRenderOutputSize(renderer, &out_w, &out_h);
@@ -9800,25 +9937,24 @@ static void layout_clock(double display_scale_factor) {
 	if(font_time) TTF_CloseFont(font_time);
 	if(font_mode) TTF_CloseFont(font_mode);
 	if(font_date) TTF_CloseFont(font_date);
-	font_time = TTF_OpenFont(FONT, (float)((is_horizontal ? scaled_h : scaled_w) / 1.68));
-	font_mode = TTF_OpenFont(FONT, (float)((is_horizontal ? scaled_h : scaled_w) / 16.5));
+	const char *clock_font_path = resolve_clock_font_path();
+	const char *date_font_path = resolve_date_font_path();
+	font_time = clock_font_path
+		? TTF_OpenFont(clock_font_path, (float)((is_horizontal ? scaled_h : scaled_w) / 1.68))
+		: NULL;
+	font_mode = clock_font_path
+		? TTF_OpenFont(clock_font_path, (float)((is_horizontal ? scaled_h : scaled_w) / 16.5))
+		: NULL;
 	if(!font_time || !font_mode) {
-		fprintf(stderr, "TTF_OpenFont: %s\n", SDL_GetError());
+		fprintf(stderr, "TTF_OpenFont (clock font): %s\n",
+			clock_font_path ? SDL_GetError() : "no suitable clock font found");
 		exit(1);
 	}
-	static const char *date_font_paths[] = {
-		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-		"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-		"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-		"/usr/share/fonts/truetype/freefont/FreeSans.ttf"
-	};
 	float date_font_size = (float)((is_horizontal ? scaled_h : scaled_w) / 24.0);
-	font_date = NULL;
-	for(size_t i = 0; i < sizeof(date_font_paths) / sizeof(date_font_paths[0]) && !font_date; i++) {
-		font_date = TTF_OpenFont(date_font_paths[i], date_font_size);
-	}
+	font_date = date_font_path ? TTF_OpenFont(date_font_path, date_font_size) : NULL;
 	if(!font_date) {
-		fprintf(stderr, "TTF_OpenFont: %s\n", SDL_GetError());
+		fprintf(stderr, "TTF_OpenFont (date font): %s\n",
+			date_font_path ? SDL_GetError() : "no suitable date font found");
 		exit(1);
 	}
 

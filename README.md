@@ -19,13 +19,14 @@ turn up now and then, in the sky and on the hills. See `NOTES.md` if you want th
 
 - SDL3
 - SDL3_ttf
+- Fontconfig
 - XScreensaver (optional, X11)
 
 ## Building from source
 
-Install the build-time dependencies (with SDL3 and SDL3_ttf development packages or built from source):
+Install the build-time dependencies (with SDL3, SDL3_ttf, and Fontconfig development packages or built from source):
 
-    $ sudo apt-get install build-essential pkg-config libsdl3-dev libsdl3-ttf-dev
+    $ sudo apt-get install build-essential pkg-config libsdl3-dev libsdl3-ttf-dev libfontconfig-dev
 
 Then compile and install as usual:
 
@@ -33,12 +34,12 @@ Then compile and install as usual:
 
 ### Arch Linux
 
-    $ sudo pacman -S --needed base-devel pkgconf sdl3 sdl3_ttf
+    $ sudo pacman -S --needed base-devel pkgconf sdl3 sdl3_ttf fontconfig
     $ make && sudo make install
 
 ### openSUSE (Leap and Tumbleweed)
 
-    $ sudo zypper install gcc-c++ make pkg-config SDL3-devel SDL3_ttf-devel
+    $ sudo zypper install gcc-c++ make pkg-config SDL3-devel SDL3_ttf-devel fontconfig-devel
     $ make && sudo make install
 
 `make install` puts the program in `/usr/libexec/xscreensaver`. If your XScreenSaver looks for its programs

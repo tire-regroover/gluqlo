@@ -2,8 +2,8 @@ CXX?=g++
 FONTDIR=$(DESTDIR)/usr/share/gluqlo
 # gluqlo.c is C++ (it uses bool and mixed declarations), so say so explicitly.
 CXXFLAGS?=-O2
-CXXFLAGS+=-Wall -x c++ $(shell pkg-config --cflags sdl3 sdl3-ttf) -DFONT='"$(FONTDIR)/gluqlo.ttf"'
-LDFLAGS=$(shell pkg-config --libs sdl3 sdl3-ttf) -lm
+CXXFLAGS+=-Wall -x c++ $(shell pkg-config --cflags sdl3 sdl3-ttf fontconfig) -DFONT='"$(FONTDIR)/gluqlo.ttf"'
+LDFLAGS=$(shell pkg-config --libs sdl3 sdl3-ttf fontconfig) -lm
 
 all: gluqlo
 
