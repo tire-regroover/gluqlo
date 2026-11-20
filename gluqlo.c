@@ -507,7 +507,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 144
+#define RARE_SKY_KINDS 145
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -11698,6 +11698,39 @@ static void sky_event_143(const SkyEvent *event) {
                     weapon_alpha(230.0 * fade));
 }
 
+// "The Three-Body Problem" (Cixin Liu): a chaotic, unfolding sophon — a giant
+// etched geometric eye-sphere in the upper sky, accompanied by three wandering
+// suns drifting out of alignment.
+static void sky_event_144(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 etch_c[3] = {155, 225, 250};
+  static const Uint8 sun_c[3][3] = {
+      {255, 195, 115}, {255, 140, 120}, {210, 235, 255}};
+  double unfold = sin(smooth_step(0.05, 0.95, progress) * M_PI);
+  double r = size * (0.95 + 0.95 * unfold);
+  // Etched dimensional-unfolding circuit rings
+  for (int ring = 0; ring < 3; ring++) {
+    double rr = r * (0.42 + ring * 0.28);
+    circleRGBA(surface, x, y, (int)rr, etch_c[0], etch_c[1], etch_c[2],
+               weapon_alpha((145.0 - ring * 30.0) * fade));
+    double a = phase / (900.0 + ring * 400.0) * (ring % 2 ? -1 : 1);
+    lineRGBA(surface, (int)(x + cos(a) * rr), (int)(y + sin(a) * rr),
+             (int)(x - cos(a) * rr), (int)(y - sin(a) * rr), etch_c[0],
+             etch_c[1], etch_c[2], weapon_alpha(75.0 * fade));
+  }
+  // Central watching pupil
+  filledCircleRGBA(surface, x, y, (int)(r * 0.18) + 1, 8, 12, 22,
+                   weapon_alpha(225.0 * fade));
+  // Three chaotic suns orbiting unevenly around the unfolding eye
+  for (int s_i = 0; s_i < 3; s_i++) {
+    double a = phase / (1100.0 + s_i * 350.0) + s_i * 2.1;
+    double dist = r * (0.65 + 0.35 * sin(phase / 700.0 + s_i * 1.7));
+    double sx = x + cos(a) * dist;
+    double sy = y + sin(a) * dist * 0.65;
+    weapon_glow(surface, sx, sy, 2.2, sun_c[s_i], 195.0 * fade);
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -11768,7 +11801,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_128, sky_event_129, sky_event_130, sky_event_131, sky_event_132,
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
-    sky_event_143,
+    sky_event_143, sky_event_144,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
