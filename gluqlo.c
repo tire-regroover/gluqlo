@@ -508,7 +508,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 151
+#define RARE_SKY_KINDS 152
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -13009,6 +13009,36 @@ static void sky_event_150(const SkyEvent *event) {
   weapon_glow(surface, sh_x, sh_y, 1.2, shuttle_c, 175.0 * fade);
 }
 
+// Ion storm arc: twin charged plasma nodes crackle across the upper sky with
+// flickering electric-violet filaments between them.
+static void sky_event_151(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 node_c[3] = {155, 210, 255};
+  double sep = size * 1.8;
+  double ax = x - sep, ay = y + sin(phase / 520.0) * size * 0.3;
+  double bx = x + sep, by = y - sin(phase / 520.0) * size * 0.3;
+  weapon_glow(surface, ax, ay, size * 0.25, node_c, 185.0 * fade);
+  weapon_glow(surface, bx, by, size * 0.25, node_c, 185.0 * fade);
+  Uint32 step = phase / 90;
+  for (int f = 0; f < 2; f++) {
+    double px = ax, py = ay;
+    for (int s = 1; s <= 5; s++) {
+      double t = s / 5.0;
+      double nx = ax + (bx - ax) * t;
+      double jitter = (s < 5)
+                          ? (((int)(fx_hash(seed + f * 31, step * 7 + s) % 100) - 50) / 50.0) *
+                                size * 0.48
+                          : 0.0;
+      double ny = ay + (by - ay) * t + jitter;
+      thickLineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, f == 0 ? 2 : 1,
+                    f == 0 ? 185 : 225, f == 0 ? 140 : 235, 255,
+                    weapon_alpha((f == 0 ? 145.0 : 190.0) * fade));
+      px = nx;
+      py = ny;
+    }
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -13080,7 +13110,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     sky_event_143, sky_event_144, sky_event_145, sky_event_146, sky_event_147,
-    sky_event_148, sky_event_149, sky_event_150,
+    sky_event_148, sky_event_149, sky_event_150, sky_event_151,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
