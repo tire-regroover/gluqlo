@@ -106,11 +106,12 @@ static SDL_Texture *backdrop_base = NULL;
 static SDL_Texture *ampm_textures[2] = {NULL, NULL};
 static int ampm_w[2] = {0, 0}, ampm_h[2] = {0, 0};
 
-// Cached digit glyph textures ('0'..'9') for fast GPU-accelerated card & flip
-// rendering.
+// Cached digit glyph textures ('0'..'9') cropped to their ink bounding box
+// for fast GPU-accelerated card & flip rendering with accurate centering.
 static SDL_Texture *digit_glyph_tex[10] = {NULL};
 static int digit_glyph_w[10] = {0};
 static int digit_glyph_h[10] = {0};
+static int digit_glyph_y_off[10] = {0};
 
 // Pre-rendered static card textures (hour, minute) + scratch flip card texture.
 static SDL_Texture *card_cache_tex[2] = {NULL, NULL};
@@ -13399,7 +13400,8 @@ void render_backdrop(RenderTarget *surface, Uint32 ticks) {
           warm_blue, warm_alpha);
 }
 
-static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h) {
+static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h,
+                                            int *y_off) {
   if (ch < '0' || ch > '9') return NULL;
   int idx = ch - '0';
   if (!digit_glyph_tex[idx]) {
@@ -13410,15 +13412,60 @@ static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h) {
               SDL_GetError());
       return NULL;
     }
-    digit_glyph_w[idx] = surf->w;
-    digit_glyph_h[idx] = surf->h;
-    digit_glyph_tex[idx] = SDL_CreateTextureFromSurface(renderer, surf);
+    int min_x = surf->w, max_x = -1;
+    int min_y = surf->h, max_y = -1;
+    const SDL_PixelFormatDetails *fmt = SDL_GetPixelFormatDetails(surf->format);
+    if (fmt && SDL_LockSurface(surf)) {
+      for (int y = 0; y < surf->h; y++) {
+        const Uint8 *row = (const Uint8 *)surf->pixels + y * surf->pitch;
+        for (int x = 0; x < surf->w; x++) {
+          Uint32 px;
+          memcpy(&px, row + x * fmt->bytes_per_pixel, fmt->bytes_per_pixel);
+          Uint8 r, g, b, a;
+          SDL_GetRGBA(px, fmt, NULL, &r, &g, &b, &a);
+          if (a > 0) {
+            if (x < min_x) min_x = x;
+            if (x > max_x) max_x = x;
+            if (y < min_y) min_y = y;
+            if (y > max_y) max_y = y;
+          }
+        }
+      }
+      SDL_UnlockSurface(surf);
+    }
+    if (max_x >= min_x && max_y >= min_y) {
+      int crop_w = max_x - min_x + 1;
+      int crop_h = max_y - min_y + 1;
+      SDL_Surface *cropped =
+          SDL_CreateSurface(crop_w, crop_h, surf->format);
+      if (cropped) {
+        SDL_Rect src_rect = {min_x, min_y, crop_w, crop_h};
+        SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_NONE);
+        SDL_BlitSurface(surf, &src_rect, cropped, NULL);
+        digit_glyph_w[idx] = crop_w;
+        digit_glyph_h[idx] = crop_h;
+        digit_glyph_y_off[idx] = min_y - (surf->h - 1 - max_y);
+        digit_glyph_tex[idx] = SDL_CreateTextureFromSurface(renderer, cropped);
+        SDL_DestroySurface(cropped);
+      } else {
+        digit_glyph_w[idx] = surf->w;
+        digit_glyph_h[idx] = surf->h;
+        digit_glyph_y_off[idx] = 0;
+        digit_glyph_tex[idx] = SDL_CreateTextureFromSurface(renderer, surf);
+      }
+    } else {
+      digit_glyph_w[idx] = surf->w;
+      digit_glyph_h[idx] = surf->h;
+      digit_glyph_y_off[idx] = 0;
+      digit_glyph_tex[idx] = SDL_CreateTextureFromSurface(renderer, surf);
+    }
     SDL_DestroySurface(surf);
     if (!digit_glyph_tex[idx]) return NULL;
     SDL_SetTextureBlendMode(digit_glyph_tex[idx], SDL_BLENDMODE_BLEND);
   }
   *w = digit_glyph_w[idx];
   *h = digit_glyph_h[idx];
+  if (y_off) *y_off = digit_glyph_y_off[idx];
   return digit_glyph_tex[idx];
 }
 
@@ -13426,26 +13473,26 @@ void blit_digits(RenderTarget *surface, SDL_Rect *rect, int spc, char digits[],
                  Uint8 mod_r, Uint8 mod_g, Uint8 mod_b) {
   if (digits[1]) {
     int gap = spc + spc / 2;
-    int w0 = 0, h0 = 0, w1 = 0, h1 = 0;
-    SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0);
-    SDL_Texture *t1 = get_digit_glyph_texture(digits[1], &w1, &h1);
+    int w0 = 0, h0 = 0, y0 = 0, w1 = 0, h1 = 0, y1 = 0;
+    SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0, &y0);
+    SDL_Texture *t1 = get_digit_glyph_texture(digits[1], &w1, &h1, &y1);
     if (!t0 || !t1) return;
     int total_width = w0 + gap + w1;
     float x = (float)(rect->x + (rect->w - total_width) / 2);
-    SDL_FRect dst0 = {x, (float)(rect->y + (rect->h - h0) / 2), (float)w0,
+    SDL_FRect dst0 = {x, (float)(rect->y + (rect->h - h0 + y0) / 2), (float)w0,
                       (float)h0};
     SDL_SetTextureColorMod(t0, mod_r, mod_g, mod_b);
     SDL_RenderTexture(surface->renderer, t0, NULL, &dst0);
-    SDL_FRect dst1 = {x + w0 + gap, (float)(rect->y + (rect->h - h1) / 2),
+    SDL_FRect dst1 = {x + w0 + gap, (float)(rect->y + (rect->h - h1 + y1) / 2),
                       (float)w1, (float)h1};
     SDL_SetTextureColorMod(t1, mod_r, mod_g, mod_b);
     SDL_RenderTexture(surface->renderer, t1, NULL, &dst1);
   } else {
-    int w0 = 0, h0 = 0;
-    SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0);
+    int w0 = 0, h0 = 0, y0 = 0;
+    SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0, &y0);
     if (!t0) return;
     SDL_FRect dst0 = {(float)(rect->x + (rect->w - w0) / 2),
-                      (float)(rect->y + (rect->h - h0) / 2), (float)w0,
+                      (float)(rect->y + (rect->h - h0 + y0) / 2), (float)w0,
                       (float)h0};
     SDL_SetTextureColorMod(t0, mod_r, mod_g, mod_b);
     SDL_RenderTexture(surface->renderer, t0, NULL, &dst0);
