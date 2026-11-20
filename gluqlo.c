@@ -508,7 +508,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 152
+#define RARE_SKY_KINDS 153
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -13065,6 +13065,33 @@ static void sky_event_151(const SkyEvent *event) {
   }
 }
 
+// Solar corona flare: a distant eclipsed sunlet in the upper sky erupting
+// with three slowly curling golden-amber prominence loops.
+static void sky_event_152(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 flare_c[3] = {255, 175, 85};
+  static const Uint8 rim_c[3] = {255, 225, 145};
+  double r = size * 0.72;
+  weapon_glow(surface, x, y, r * 1.65, flare_c, 95.0 * fade);
+  for (int i = 0; i < 3; i++) {
+    double base_a = progress * 0.9 + i * (2.0 * M_PI / 3.0);
+    double lx = x + cos(base_a) * r * 1.45;
+    double ly = y + sin(base_a) * r * 1.45;
+    double p1x = x + cos(base_a - 0.35) * r * 0.92;
+    double p1y = y + sin(base_a - 0.35) * r * 0.92;
+    double p2x = x + cos(base_a + 0.35) * r * 0.92;
+    double p2y = y + sin(base_a + 0.35) * r * 0.92;
+    thickLineRGBA(surface, (int)p1x, (int)p1y, (int)lx, (int)ly, 2, flare_c[0],
+                  flare_c[1], flare_c[2], weapon_alpha(150.0 * fade));
+    thickLineRGBA(surface, (int)lx, (int)ly, (int)p2x, (int)p2y, 2, flare_c[0],
+                  flare_c[1], flare_c[2], weapon_alpha(150.0 * fade));
+  }
+  filledCircleRGBA(surface, x, y, (int)r, 16, 18, 28,
+                   weapon_alpha(235.0 * fade));
+  circleRGBA(surface, x, y, (int)r + 1, rim_c[0], rim_c[1], rim_c[2],
+             weapon_alpha(195.0 * fade));
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -13136,7 +13163,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
     sky_event_143, sky_event_144, sky_event_145, sky_event_146, sky_event_147,
-    sky_event_148, sky_event_149, sky_event_150, sky_event_151,
+    sky_event_148, sky_event_149, sky_event_150, sky_event_151, sky_event_152,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
