@@ -642,7 +642,7 @@ static const EffectSpec EFFECT_RARE_SKY = {"rare_sky",
                                            rare_sky_accept};
 static const EffectSpec EFFECT_BATTLE_FLYBY = {
     "battle_flyby", 60000, 1,    6, false,     0, 14000, 0, 0,
-    false,          900,   1100, 4, GROUP_SKY, 4, NULL};
+    false,          900,   1100, 5, GROUP_SKY, 4, NULL};
 static const EffectSpec EFFECT_DOGFIGHT = {
     "dogfight", 75000, 1,   4,    false, 0,         18000, 0,
     0,          true,  900, 1100, 4,     GROUP_SKY, 3,     NULL};
@@ -2589,12 +2589,14 @@ static void render_dogfight(RenderTarget *surface, const EffectWindow *window,
 //      at a distant silhouette cruiser, and banks away into the upper sky.
 //   3: FTL slingshot — a cruiser drops out of hyperspace in a bright flash,
 //      fires a broadside salvo at a patrolling picket, then accelerates to warp.
+//   4: blockade break — a fast runner threads between two hovering gunboats
+//      firing crossfire flak bursts across its path.
 static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
                                 int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
   Uint32 phase = window.phase;
-  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 4);
+  int kind = effect_kind(&EFFECT_BATTLE_FLYBY, (window.seed >> 8) % 5);
 
   int size = scale / 170;
   if (size < 4) size = 4;
@@ -2700,6 +2702,35 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
         draw_weapon_shot(surface, WEAPON_BEAM, 0, cx, cy, px, py, age,
                          scale / 95.0, 0, fade, 1, fx_hash(window.seed, 51));
       }
+    }
+    return;
+  }
+  if (kind == 4) {
+    int dir = (window.seed >> 5) & 1 ? 1 : -1;
+    // Two stationary/slow-drifting blockade gunboats above and below
+    for (int g = 0; g < 2; g++) {
+      double gx = surface->w * (g == 0 ? 0.38 : 0.62);
+      double gy = center_y + (g == 0 ? -scale * 0.042 : scale * 0.042);
+      draw_ship_role(surface, (int)gx, (int)gy, SHIP_MID,
+                     window.seed + g * 19, (int)(length * 1.25), -dir, 1,
+                     opacity);
+    }
+    // Fast runner weaving between them
+    double rx = (dir > 0)
+                    ? -length * 2.0 + progress * (surface->w + 4.0 * length)
+                    : surface->w + length * 2.0 -
+                          progress * (surface->w + 4.0 * length);
+    double ry = center_y + sin(progress * 10.0) * scale * 0.022;
+    draw_ship_role(surface, (int)rx, (int)ry, SHIP_SMALL, window.seed >> 6,
+                   length, dir, 0, opacity);
+    Uint32 volley = phase % 1600;
+    if (volley < 750 && progress > 0.10 && progress < 0.90) {
+      int g = ((int)(phase / 1600)) & 1;
+      double gx = surface->w * (g == 0 ? 0.38 : 0.62);
+      double gy = center_y + (g == 0 ? -scale * 0.042 : scale * 0.042);
+      draw_weapon_shot(surface, WEAPON_FLAK, 0, gx, gy, rx, ry, (double)volley,
+                       scale / 95.0, 1, fade, 0,
+                       fx_hash(window.seed, (int)(phase / 1600)));
     }
     return;
   }
