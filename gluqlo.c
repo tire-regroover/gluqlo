@@ -512,7 +512,7 @@ enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  107  // things that happen on the hills (see render_hill_event)
+  108  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -9151,6 +9151,39 @@ static void hill_aurora_turbine(const HillEvent *event) {
   weapon_glow(surface, x, hub_y, 1.8, tip_c, 185.0 * event->fade);
 }
 
+// Solar mirror array: three ridge-mounted heliostat dishes that track slowly
+// together and bounce faint golden starlight beams to a central receiver spire.
+static void hill_solar_mirror(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 4, 9));
+  double spire_ground = hill_ground(event, cx);
+  double spire_h = s * 0.085;
+  double rec_y = spire_ground - spire_h;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)(spire_ground + 2), (int)cx, (int)rec_y,
+                3, 18, 22, 32, hull_a);
+  static const Uint8 rec_c[3] = {255, 210, 120};
+  weapon_glow(surface, cx, rec_y, 2.6, rec_c, 195.0 * event->fade);
+  double tilt = 0.25 * sin(event->t * 0.35);
+  for (int i = -1; i <= 1; i++) {
+    if (i == 0) continue;
+    double mx = cx + i * s * 0.075;
+    double mg = hill_ground(event, mx);
+    double my = mg - s * 0.024;
+    lineRGBA(surface, (int)mx, (int)(mg + 2), (int)mx, (int)my, 20, 25, 36,
+             hull_a);
+    double span = s * 0.022;
+    double dx = cos(tilt) * span;
+    double dy = sin(tilt) * span;
+    thickLineRGBA(surface, (int)(mx - dx), (int)(my - dy), (int)(mx + dx),
+                  (int)(my + dy), 2, 165, 195, 225,
+                  weapon_alpha(210.0 * event->fade));
+    lineRGBA(surface, (int)mx, (int)my, (int)cx, (int)rec_y, 255, 215, 130,
+             weapon_alpha(65.0 * event->fade));
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -9181,7 +9214,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
     hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
     hill_glass_forest, hill_tidal_bell, hill_canal_skiff,
-    hill_prism_observatory, hill_aurora_turbine,
+    hill_prism_observatory, hill_aurora_turbine, hill_solar_mirror,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
