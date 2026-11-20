@@ -508,11 +508,11 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 181
+#define RARE_SKY_KINDS 185
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  137  // things that happen on the hills (see render_hill_event)
+  141  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -9885,6 +9885,100 @@ static void hill_star_antenna(const HillEvent *event) {
   weapon_glow(surface, fx, fy, 1.3, glint_c, 185.0 * event->fade);
 }
 
+// Lantern pergola: a low dark-wood ridge pergola hung with three swaying
+// warm coral-gold paper lanterns.
+static void hill_lantern_pergola(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.24 + 0.52 * hill_random(event, 63, 139));
+  double ground = hill_ground(event, x);
+  double w = s * 0.055;
+  double h = s * 0.048;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  thickLineRGBA(surface, (int)(x - w), (int)(ground + 2), (int)(x - w),
+                (int)(ground - h), 2, 22, 24, 34, hull_a);
+  thickLineRGBA(surface, (int)(x + w), (int)(ground + 2), (int)(x + w),
+                (int)(ground - h), 2, 22, 24, 34, hull_a);
+  thickLineRGBA(surface, (int)(x - w * 1.18), (int)(ground - h),
+                (int)(x + w * 1.18), (int)(ground - h), 3, 26, 28, 40, hull_a);
+  static const Uint8 lan_c[3] = {255, 165, 105};
+  for (int i = -1; i <= 1; i++) {
+    double lx = x + i * w * 0.62 + sin(event->t * 1.7 + i) * s * 0.003;
+    double ly = ground - h + s * 0.014;
+    lineRGBA(surface, (int)(x + i * w * 0.62), (int)(ground - h), (int)lx,
+             (int)ly, 60, 70, 85, hull_a);
+    weapon_glow(surface, lx, ly, 1.5, lan_c, 195.0 * event->fade);
+  }
+}
+
+// Star-well: a circular stone well curb on the ridge with a faint rising
+// column of pale silver-blue starlight motes.
+static void hill_star_well(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.24 + 0.52 * hill_random(event, 65, 149));
+  double ground = hill_ground(event, x);
+  double w = s * 0.028;
+  double h = s * 0.018;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  boxRGBA(surface, (int)(x - w), (int)(ground - h), (int)(x + w),
+          (int)(ground + 2), 22, 26, 36, hull_a);
+  static const Uint8 mote_c[3] = {175, 225, 255};
+  for (int i = 0; i < 7; i++) {
+    double u = fmod(event->t * 0.45 + i / 7.0, 1.0);
+    double mx = x + sin(event->t * 2.0 + i * 1.5) * w * 0.65;
+    double my = ground - h - u * s * 0.068;
+    weapon_glow(surface, mx, my, 1.1, mote_c,
+                (1.0 - u) * 185.0 * event->fade);
+  }
+}
+
+// Bell arch: a slender stone belfry arch on the ridge with a gently
+// swinging bronze bell glinting in the moonlight.
+static void hill_bell_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.22 + 0.56 * hill_random(event, 67, 151));
+  double ground = hill_ground(event, x);
+  double w = s * 0.024;
+  double h = s * 0.068;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  thickLineRGBA(surface, (int)(x - w), (int)(ground + 2), (int)(x - w * 0.6),
+                (int)(ground - h), 3, 22, 26, 36, hull_a);
+  thickLineRGBA(surface, (int)(x + w), (int)(ground + 2), (int)(x + w * 0.6),
+                (int)(ground - h), 3, 22, 26, 36, hull_a);
+  thickLineRGBA(surface, (int)(x - w * 0.7), (int)(ground - h),
+                (int)(x + w * 0.7), (int)(ground - h), 3, 26, 30, 42, hull_a);
+  double swing = sin(event->t * 2.2) * s * 0.008;
+  double bx = x + swing;
+  double by = ground - h + s * 0.020;
+  lineRGBA(surface, (int)x, (int)(ground - h), (int)bx, (int)by, 60, 70, 85,
+           hull_a);
+  static const Uint8 bell_c[3] = {245, 210, 140};
+  filledCircleRGBA(surface, (int)bx, (int)by, (int)(s * 0.007) + 1, bell_c[0],
+                   bell_c[1], bell_c[2], weapon_alpha(205.0 * event->fade));
+}
+
+// Aurora reeds: a row of crystalline spire-reeds along the ridge that
+// shimmer in sequence with pale green-violet aurora light.
+static void hill_aurora_reeds(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 69, 157));
+  static const Uint8 c0[3] = {115, 245, 195};
+  static const Uint8 c1[3] = {185, 145, 255};
+  for (int i = -4; i <= 4; i++) {
+    double rx = cx + i * s * 0.012;
+    double rg = hill_ground(event, rx);
+    double rh = s * (0.030 + (i % 2 == 0 ? 0.014 : 0.0));
+    double wave = 0.4 + 0.6 * (0.5 + 0.5 * sin(event->t * 2.8 - i * 0.6));
+    const Uint8 *c = (i % 2 == 0) ? c0 : c1;
+    lineRGBA(surface, (int)rx, (int)(rg + 2), (int)rx, (int)(rg - rh), c[0],
+             c[1], c[2], weapon_alpha(165.0 * wave * event->fade));
+    weapon_glow(surface, rx, rg - rh, 1.0, c, 170.0 * wave * event->fade);
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -9925,6 +10019,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_tide_chimes, hill_ember_cairn, hill_mist_crane,
     hill_moon_dome, hill_lantern_arch, hill_bio_grove, hill_beacon_mast,
     hill_tide_clock, hill_fire_wheel, hill_rune_pillar, hill_star_antenna,
+    hill_lantern_pergola, hill_star_well, hill_bell_arch, hill_aurora_reeds,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
@@ -14287,6 +14382,77 @@ static void sky_event_180(const SkyEvent *event) {
   weapon_glow(surface, x + r * 0.85, y + r * 0.25, 1.2, lens_c, 185.0 * fade);
 }
 
+// Celestial fan: a delicate fan of seven pale-gold starlight rays
+// unfolding and sweeping gently across the upper sky.
+static void sky_event_181(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 fan_c[3] = {245, 220, 155};
+  double spread = 0.22 + 0.14 * sin(phase / 700.0);
+  double len = size * 1.9;
+  for (int i = -3; i <= 3; i++) {
+    double a = -M_PI * 0.5 + i * spread;
+    lineRGBA(surface, x, (int)(y + size * 0.5),
+             (int)(x + cos(a) * len), (int)(y + size * 0.5 + sin(a) * len),
+             fan_c[0], fan_c[1], fan_c[2], weapon_alpha(145.0 * fade));
+    weapon_glow(surface, x + cos(a) * len, y + size * 0.5 + sin(a) * len, 1.0,
+                fan_c, 175.0 * fade);
+  }
+}
+
+// Comet pair: two icy blue-white comets sweeping in parallel with crisp
+// twin tails.
+static void sky_event_182(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 head_c[3] = {195, 238, 255};
+  for (int i = 0; i < 2; i++) {
+    double cx = x + (i == 0 ? -size * 0.6 : size * 0.6);
+    double cy = y + (i == 0 ? -size * 0.45 : size * 0.45);
+    thickLineRGBA(surface, (int)cx, (int)cy,
+                  (int)(cx - direction * size * 2.8), (int)(cy - size * 0.6), 2,
+                  125, 195, 245, weapon_alpha(135.0 * fade));
+    weapon_glow(surface, cx, cy, 1.5, head_c, 210.0 * fade);
+  }
+}
+
+// Star-crown halo: a ring of eight twinkling pearl-cyan stars rotating
+// slowly around a soft nebula haze.
+static void sky_event_183(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 star_c[3] = {205, 245, 255};
+  double r = size * 1.15;
+  weapon_glow(surface, x, y, size * 0.7, star_c, 85.0 * fade);
+  for (int i = 0; i < 8; i++) {
+    double a = phase / 1200.0 + i * (M_PI / 4.0);
+    double tw = 0.5 + 0.5 * sin(phase / 250.0 + i * 1.7);
+    weapon_glow(surface, x + cos(a) * r, y + sin(a) * r * 0.65, 1.2 * tw + 0.4,
+                star_c, 185.0 * fade);
+  }
+}
+
+// Sky-kite squadron: three luminous rose-amber diamond kites gliding in
+// chevron formation with fluttering tails.
+static void sky_event_184(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 kite_c[3] = {255, 175, 135};
+  for (int i = 0; i < 3; i++) {
+    double kx = x - direction * abs(i - 1) * size * 1.1;
+    double ky = y + (i - 1) * size * 0.75;
+    double r = size * 0.45;
+    filledTrigonRGBA(surface, (int)(kx + direction * r), (int)ky, (int)kx,
+                     (int)(ky - r * 0.6), (int)(kx - direction * r * 0.4),
+                     (int)ky, kite_c[0], kite_c[1], kite_c[2],
+                     weapon_alpha(180.0 * fade));
+    filledTrigonRGBA(surface, (int)(kx + direction * r), (int)ky, (int)kx,
+                     (int)(ky + r * 0.6), (int)(kx - direction * r * 0.4),
+                     (int)ky, kite_c[0], kite_c[1], kite_c[2],
+                     weapon_alpha(180.0 * fade));
+    lineRGBA(surface, (int)(kx - direction * r * 0.4), (int)ky,
+             (int)(kx - direction * r * 1.8),
+             (int)(ky + sin(phase / 240.0 + i) * size * 0.25), kite_c[0],
+             kite_c[1], kite_c[2], weapon_alpha(135.0 * fade));
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -14364,7 +14530,8 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_163, sky_event_164, sky_event_165, sky_event_166, sky_event_167,
     sky_event_168, sky_event_169, sky_event_170, sky_event_171, sky_event_172,
     sky_event_173, sky_event_174, sky_event_175, sky_event_176, sky_event_177,
-    sky_event_178, sky_event_179, sky_event_180,
+    sky_event_178, sky_event_179, sky_event_180, sky_event_181, sky_event_182,
+    sky_event_183, sky_event_184,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
