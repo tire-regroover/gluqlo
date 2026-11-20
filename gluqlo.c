@@ -507,7 +507,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 145
+#define RARE_SKY_KINDS 146
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -11768,6 +11768,38 @@ static void sky_event_144(const SkyEvent *event) {
   }
 }
 
+// "Story of Your Life" (Ted Chiang): a circular Heptapod logogram of dark
+// ink-smoke tendrils and varying-weight arcs coalesces in the sky, its misty
+// calligraphy breathing slowly before dissolving.
+static void sky_event_145(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double r = size * 1.45;
+  double breath = 0.88 + 0.12 * sin(phase / 950.0);
+  const int segs = 36;
+  for (int i = 0; i < segs; i++) {
+    double a0 = (2.0 * M_PI * i) / segs;
+    double a1 = (2.0 * M_PI * (i + 1)) / segs;
+    double w0 = 1.0 + 0.12 * sin(a0 * 5.0 + seed) + 0.08 * cos(a0 * 9.0);
+    double w1 = 1.0 + 0.12 * sin(a1 * 5.0 + seed) + 0.08 * cos(a1 * 9.0);
+    int x0 = x + (int)(cos(a0) * r * w0 * breath);
+    int y0 = y + (int)(sin(a0) * r * w0 * breath);
+    int x1 = x + (int)(cos(a1) * r * w1 * breath);
+    int y1 = y + (int)(sin(a1) * r * w1 * breath);
+    int thick = 1 + (int)(2.5 * (0.5 + 0.5 * sin(a0 * 3.0 + seed * 0.7)));
+    thickLineRGBA(surface, x0, y0, x1, y1, thick, 18, 22, 32,
+                  weapon_alpha(230.0 * fade));
+    lineRGBA(surface, x0, y0, x1, y1, 145, 165, 190,
+             weapon_alpha(70.0 * fade));
+    // Wispy ink tendrils radiating from thick clusters
+    if (i % 4 == 0) {
+      double tr = r * (1.28 + 0.18 * sin(phase / 700.0 + i));
+      lineRGBA(surface, x0, y0, x + (int)(cos(a0 + 0.15) * tr),
+               y + (int)(sin(a0 + 0.15) * tr), 28, 34, 48,
+               weapon_alpha(150.0 * fade));
+    }
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -11838,7 +11870,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_128, sky_event_129, sky_event_130, sky_event_131, sky_event_132,
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
-    sky_event_143, sky_event_144,
+    sky_event_143, sky_event_144, sky_event_145,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
