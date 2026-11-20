@@ -507,7 +507,7 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 143
+#define RARE_SKY_KINDS 144
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
@@ -11623,6 +11623,40 @@ static void sky_event_142(const SkyEvent *event) {
   }
 }
 
+// "Blindsight" (Peter Watts): Rorschach — a jagged, asymmetric fractal-torus
+// of matte-black ribs shrouded in a cold, stuttering magenta-indigo EM corona;
+// faint magnetic-field arcs flick between its spines as it drifts.
+static void sky_event_143(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 em_mag[3] = {195, 85, 225};
+  static const Uint8 em_ice[3] = {115, 175, 245};
+  double rx = size * 1.9, ry = size * 1.15;
+  double spin = phase / 2100.0;
+  // Cold electromagnetic corona
+  filledEllipseRGBA(surface, x, y, (int)(rx * 1.15), (int)(ry * 1.15),
+                    em_mag[0], em_mag[1], em_mag[2], weapon_alpha(20.0 * fade));
+  // Jagged matte-black fractal ribs around an occluded central void
+  const int ribs = 14;
+  for (int i = 0; i < ribs; i++) {
+    double a = spin + i * (2.0 * M_PI / ribs);
+    double r1 = 0.42 + 0.14 * sin(i * 2.7 + spin * 1.5);
+    double r2 = 0.95 + 0.25 * cos(i * 3.1 - spin);
+    int x1 = x + (int)(cos(a) * rx * r1);
+    int y1 = y + (int)(sin(a) * ry * r1);
+    int x2 = x + (int)(cos(a + 0.18) * rx * r2);
+    int y2 = y + (int)(sin(a + 0.18) * ry * r2);
+    thickLineRGBA(surface, x1, y1, x2, y2, 3, 10, 12, 20,
+                  weapon_alpha(240.0 * fade));
+    // Stuttering magnetic arc at outer spine tips
+    if ((i + (int)(phase / 240)) % 3 == 0) {
+      weapon_glow(surface, x2, y2, 1.4, (i % 2 == 0) ? em_mag : em_ice,
+                  140.0 * fade);
+    }
+  }
+  filledEllipseRGBA(surface, x, y, (int)(rx * 0.38), (int)(ry * 0.34), 6, 7, 14,
+                    weapon_alpha(230.0 * fade));
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -11693,6 +11727,7 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_128, sky_event_129, sky_event_130, sky_event_131, sky_event_132,
     sky_event_133, sky_event_134, sky_event_135, sky_event_136, sky_event_137,
     sky_event_138, sky_event_139, sky_event_140, sky_event_141, sky_event_142,
+    sky_event_143,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
