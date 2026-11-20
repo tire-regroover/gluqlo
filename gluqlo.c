@@ -620,7 +620,7 @@ static const EffectSpec EFFECT_BACKGROUND_BATTLE = {"background_battle",
                                                     false,
                                                     900,
                                                     1700,
-                                                    3,
+                                                    4,
                                                     GROUP_SKY,
                                                     1,
                                                     NULL};
@@ -2882,11 +2882,13 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
 //      darting interceptors launching swarm missiles and flak bursts.
 //   2: orbital barrage — a pair of distant capital ships hold station on opposite
 //      flanks, trading heavy beam and railgun volleys across a fighter screen.
+//   3: minefield gauntlet — a mid-class blockade runner weaves through drifting
+//      proximity mines that detonate behind it while fighters give chase.
 static void render_background_battle(RenderTarget *surface, Uint32 ticks,
                                      int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
-  int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 3);
+  int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 4);
   if (kind == 1) {
     double progress = window.progress;
     double fade = window.fade;
@@ -2957,6 +2959,50 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
       draw_weapon_shot(surface, side == 0 ? WEAPON_BEAM : WEAPON_RAIL, 0, sx,
                        sy, tx, ty, (double)b_age, weapon_unit(big_len), side,
                        fade, 1, fx_hash(window.seed, (int)(window.phase / 2600)));
+    }
+    return;
+  }
+  if (kind == 3) {
+    double progress = window.progress;
+    double fade = window.fade;
+    int dir = (window.seed >> 4) & 1 ? 1 : -1;
+    int mid_len = scale / 22;
+    if (mid_len < 18) mid_len = 18;
+    int sm_len = mid_len / 2;
+    Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
+    double rx = (dir > 0)
+                    ? -mid_len + progress * (surface->w + 2.0 * mid_len)
+                    : surface->w + mid_len -
+                          progress * (surface->w + 2.0 * mid_len);
+    double ry = surface->h * 0.12 + sin(progress * 11.0) * scale * 0.025;
+    draw_ship_role(surface, (int)rx, (int)ry, SHIP_MID, window.seed + 5,
+                   mid_len, dir, 0, opacity);
+    // Pursuing fighters
+    for (int f = 0; f < 2; f++) {
+      double fx = rx - dir * (mid_len * 2.2 + f * mid_len * 1.1);
+      double fy = ry + (f == 0 ? -scale * 0.02 : scale * 0.022);
+      draw_ship_role(surface, (int)fx, (int)fy, SHIP_SMALL,
+                     window.seed + 23 + f, sm_len, dir, 1, opacity);
+    }
+    // Proximity mines across the corridor that detonate as the runner passes
+    static const Uint8 mine_c[3] = {245, 110, 85};
+    for (int m = 0; m < 7; m++) {
+      double mp = 0.14 + m * 0.11;
+      double mx = (dir > 0) ? -mid_len + mp * (surface->w + 2.0 * mid_len)
+                            : surface->w + mid_len -
+                                  mp * (surface->w + 2.0 * mid_len);
+      double my = surface->h * 0.12 +
+                  sin(mp * 11.0 + (m % 2 ? 1.5 : -1.5)) * scale * 0.028;
+      if (progress < mp + 0.04) {
+        double blink = 0.4 + 0.6 * fabs(sin(window.phase / 220.0 + m));
+        weapon_glow(surface, mx, my, 1.3, mine_c, 165.0 * blink * fade);
+      } else {
+        double age = (progress - (mp + 0.04)) * window.duration;
+        if (age < 1200.0) {
+          draw_explosion(surface, mx, my, age, sm_len * 0.9, false,
+                         fx_hash(window.seed, 90 + m), 1, fade);
+        }
+      }
     }
     return;
   }
