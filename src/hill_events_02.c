@@ -3629,6 +3629,25 @@ static void hill_clockwork_owl(const HillEvent *event) {
 }
 
 
+// Ether windmill: a slender tower with six glowing cyan-white sails turning slowly.
+static void hill_ether_windmill(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 523, 683));
+  double g = hill_ground(event, cx);
+  double h = s * 0.052;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 115, 130, 150,
+           weapon_alpha(205.0 * event->fade));
+  double rot = event->t * 1.4;
+  for (int i = 0; i < 6; i++) {
+    double a = rot + i * SCENE_TAU / 6.0;
+    lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + cos(a) * s * 0.022),
+             (int)(g - h + sin(a) * s * 0.022), 165, 225, 255,
+             weapon_alpha(200.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3867,6 +3886,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_fire_totem,
     hill_star_flowerbed,
     hill_clockwork_owl,
+    hill_ether_windmill,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
