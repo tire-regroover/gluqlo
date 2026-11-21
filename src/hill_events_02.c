@@ -3720,6 +3720,20 @@ static void hill_fire_pit(const HillEvent *event) {
 }
 
 
+// Moon pond: a shallow ridge pool reflecting a shimmering silver crescent.
+static void hill_moon_pond(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 569, 727));
+  double g = hill_ground(event, cx);
+  filledEllipseRGBA(surface, (int)cx, (int)g, (int)(s * 0.026), 4, 55, 85, 130,
+                    weapon_alpha(190.0 * event->fade));
+  double shim = sin(event->t * 2.8) * s * 0.006;
+  lineRGBA(surface, (int)(cx - s * 0.010 + shim), (int)g, (int)(cx + s * 0.010 + shim), (int)g,
+           210, 230, 255, weapon_alpha(200.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3963,6 +3977,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_sky_mirror,
     hill_bell_post,
     hill_fire_pit,
+    hill_moon_pond,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

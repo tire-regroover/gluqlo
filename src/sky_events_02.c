@@ -2527,6 +2527,17 @@ static void sky_event_239(const SkyEvent *event) {
 }
 
 
+// Crescent moth: a pale-cyan nocturnal moth with curving crescent wings.
+static void sky_event_240(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int flap = (int)(size * (0.4 + 0.6 * fabs(sin(phase / 120.0))));
+  filledEllipseRGBA(surface, x, y - flap / 2, size / 2, flap, 175, 230, 235,
+                    weapon_alpha(180.0 * fade));
+  filledEllipseRGBA(surface, x, y + flap / 2, size / 2, flap, 155, 210, 220,
+                    weapon_alpha(165.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2607,7 +2618,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
-    sky_event_239,
+    sky_event_239, sky_event_240,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
