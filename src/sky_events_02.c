@@ -3040,6 +3040,19 @@ static void sky_event_279(const SkyEvent *event) {
 }
 
 
+// Starburst halo: six radial golden-white spikes around a bright core.
+static void sky_event_280(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 2;
+  for (int i = 0; i < 6; i++) {
+    double a = phase / 320.0 + i * SCENE_TAU / 6.0;
+    lineRGBA(surface, x, y, x + (int)(cos(a) * r), y + (int)(sin(a) * r), 255, 235, 185,
+             weapon_alpha(180.0 * fade));
+  }
+  filledCircleRGBA(surface, x, y, 2, 255, 250, 230, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3126,7 +3139,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
-    sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279,
+    sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

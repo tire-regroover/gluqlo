@@ -4476,6 +4476,26 @@ static void hill_starlight_trellis(const HillEvent *event) {
 }
 
 
+// Bell lantern: a small arched hillside frame holding a glowing brass bell-lamp.
+static void hill_bell_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 509, 691));
+  double g = hill_ground(event, cx);
+  double w = s * 0.015;
+  double h = s * 0.036;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 96, 86, 76,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 96, 86, 76,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)(g - h), 96, 86, 76,
+           weapon_alpha(205.0 * event->fade));
+  double sway = sin(event->t * 2.5) * 2.5;
+  filledCircleRGBA(surface, (int)(cx + sway), (int)(g - h * 0.65), 3, 255, 210, 125,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4759,6 +4779,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_glowing_fern,
     hill_beacon_well,
     hill_starlight_trellis,
+    hill_bell_lantern,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
