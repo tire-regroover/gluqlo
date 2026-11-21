@@ -3681,6 +3681,25 @@ static void hill_sky_mirror(const HillEvent *event) {
 }
 
 
+// Bell post: a small bronze bell swinging gently beneath a wooden crossbeam.
+static void hill_bell_post(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 557, 709));
+  double g = hill_ground(event, cx);
+  double h = s * 0.044;
+  lineRGBA(surface, (int)(cx - s * 0.012), (int)g, (int)(cx - s * 0.012), (int)(g - h), 100, 85,
+           70, weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + s * 0.012), (int)g, (int)(cx + s * 0.012), (int)(g - h), 100, 85,
+           70, weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx - s * 0.014), (int)(g - h), (int)(cx + s * 0.014), (int)(g - h), 110,
+           95, 78, weapon_alpha(210.0 * event->fade));
+  double sw = sin(event->t * 2.3) * s * 0.004;
+  filledCircleRGBA(surface, (int)(cx + sw), (int)(g - h + s * 0.010), 4, 210, 175, 105,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3922,6 +3941,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ether_windmill,
     hill_crystal_obelisk,
     hill_sky_mirror,
+    hill_bell_post,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
