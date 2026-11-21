@@ -2454,6 +2454,21 @@ static void sky_event_233(const SkyEvent *event) {
 }
 
 
+// Moonseed float: glowing dandelion-like star seeds drifting on a gentle breeze.
+static void sky_event_234(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -1; i <= 1; i++) {
+    int sx = x + i * size;
+    int sy = y + (int)(sin(phase / 210.0 + i * 1.1) * size * 0.6);
+    filledCircleRGBA(surface, sx, sy + size / 2, 2, 235, 240, 210, weapon_alpha(200.0 * fade));
+    lineRGBA(surface, sx, sy + size / 2, sx, sy - size / 3, 195, 210, 225,
+             weapon_alpha(160.0 * fade));
+    lineRGBA(surface, sx - size / 3, sy - size / 2, sx + size / 3, sy - size / 2, 220, 235, 250,
+             weapon_alpha(175.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2533,7 +2548,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_215, sky_event_216, sky_event_217, sky_event_218, sky_event_219, sky_event_220,
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
-    sky_event_233,
+    sky_event_233, sky_event_234,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

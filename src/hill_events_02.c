@@ -3609,6 +3609,26 @@ static void hill_star_flowerbed(const HillEvent *event) {
 }
 
 
+// Clockwork owl: a brass owl perched on a post with blinking amber eyes.
+static void hill_clockwork_owl(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.26 + 0.48 * hill_random(event, 521, 677));
+  double g = hill_ground(event, cx);
+  double h = s * 0.042;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 100, 90, 80,
+           weapon_alpha(205.0 * event->fade));
+  filledEllipseRGBA(surface, (int)cx, (int)(g - h - s * 0.008), 5, 7, 175, 145, 95,
+                    weapon_alpha(225.0 * event->fade));
+  if (fmod(event->t, 3.2) > 0.2) {
+    pixelRGBA(surface, (int)cx - 2, (int)(g - h - s * 0.011), 255, 220, 100,
+              weapon_alpha(240.0 * event->fade));
+    pixelRGBA(surface, (int)cx + 2, (int)(g - h - s * 0.011), 255, 220, 100,
+              weapon_alpha(240.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3846,6 +3866,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_arch_two,
     hill_fire_totem,
     hill_star_flowerbed,
+    hill_clockwork_owl,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
