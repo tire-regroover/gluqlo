@@ -4822,6 +4822,22 @@ static void hill_moonlit_gazebo_two(const HillEvent *event) {
 }
 
 
+// Starlight well two: a low stone basin with rising pale-gold motes.
+static void hill_starlight_well_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 733, 919));
+  double g = hill_ground(event, cx);
+  boxRGBA(surface, (int)(cx - 7), (int)(g - 6), (int)(cx + 7), (int)g, 92, 96, 108,
+          weapon_alpha(210.0 * event->fade));
+  for (int i = 0; i < 3; i++) {
+    double my = g - 9 - fmod(event->t * 13.0 + i * 7.5, s * 0.032);
+    filledCircleRGBA(surface, (int)(cx + cos(event->t * 2.1 + i) * 3.0), (int)my, 2, 255, 225,
+                     145, weapon_alpha(210.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5123,6 +5139,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_frost_beacon,
     hill_reed_lantern_arch,
     hill_moonlit_gazebo_two,
+    hill_starlight_well_two,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
