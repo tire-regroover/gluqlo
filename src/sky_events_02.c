@@ -2818,6 +2818,17 @@ static void sky_event_262(const SkyEvent *event) {
 }
 
 
+// Amber flare: a pulsing warm-orange star with four diagonal rays.
+static void sky_event_263(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = (int)(size * (0.6 + 0.3 * sin(phase / 160.0)));
+  if (r < 4) r = 4;
+  lineRGBA(surface, x - r, y - r, x + r, y + r, 255, 190, 115, weapon_alpha(175.0 * fade));
+  lineRGBA(surface, x - r, y + r, x + r, y - r, 255, 190, 115, weapon_alpha(175.0 * fade));
+  filledCircleRGBA(surface, x, y, 3, 255, 225, 165, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2902,6 +2913,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
+    sky_event_263,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

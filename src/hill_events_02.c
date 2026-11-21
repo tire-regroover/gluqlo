@@ -4159,6 +4159,21 @@ static void hill_starry_pavilion_two(const HillEvent *event) {
 }
 
 
+// Crystal lantern: a faceted blue-violet crystal perched on a stone plinth.
+static void hill_crystal_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 313, 461));
+  double g = hill_ground(event, cx);
+  double h = s * 0.028;
+  boxRGBA(surface, (int)(cx - 5), (int)(g - h * 0.35), (int)(cx + 5), (int)g, 92, 98, 112,
+          weapon_alpha(210.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - 5), (int)(g - h * 0.35), (int)(cx + 5),
+                   (int)(g - h * 0.35), (int)cx, (int)(g - h), 165, 200, 255,
+                   weapon_alpha((185.0 + 45.0 * sin(event->t * 2.5)) * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4425,6 +4440,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_beacon_tripod,
     hill_tidepool_glow,
     hill_starry_pavilion_two,
+    hill_crystal_lantern,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
