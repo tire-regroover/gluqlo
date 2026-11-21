@@ -2948,6 +2948,23 @@ static void sky_event_272(const SkyEvent *event) {
 }
 
 
+// Sky prism arc: three thin concentric spectral arcs in coral, gold, and cyan.
+static void sky_event_273(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 cols[3][3] = {{255, 165, 165}, {255, 225, 145}, {145, 225, 255}};
+  for (int c = 0; c < 3; c++) {
+    int r = size / 2 + 2 + c * 3;
+    for (int i = 0; i < 4; i++) {
+      double a0 = -2.4 + i * 0.4;
+      double a1 = a0 + 0.4;
+      lineRGBA(surface, x + (int)(cos(a0) * r), y + (int)(sin(a0) * r), x + (int)(cos(a1) * r),
+               y + (int)(sin(a1) * r), cols[c][0], cols[c][1], cols[c][2],
+               weapon_alpha(155.0 * fade));
+    }
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3033,7 +3050,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
-    sky_event_269, sky_event_270, sky_event_271, sky_event_272,
+    sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

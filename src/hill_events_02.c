@@ -4345,6 +4345,23 @@ static void hill_lantern_cairn_row(const HillEvent *event) {
 }
 
 
+// Skywatch mast: a tall hillside mast with a rotating anemometer and beacon tip.
+static void hill_skywatch_mast(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 433, 607));
+  double g = hill_ground(event, cx);
+  double h = s * 0.048;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 108, 114, 128,
+           weapon_alpha(210.0 * event->fade));
+  double arm = cos(event->t * 3.0) * s * 0.012;
+  lineRGBA(surface, (int)(cx - arm), (int)(g - h * 0.7), (int)(cx + arm), (int)(g - h * 0.7), 165,
+           180, 200, weapon_alpha(200.0 * event->fade));
+  filledCircleRGBA(surface, (int)cx, (int)(g - h), 2, 255, 190, 120,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4621,6 +4638,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_frost_lantern,
     hill_reed_pergola,
     hill_lantern_cairn_row,
+    hill_skywatch_mast,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
