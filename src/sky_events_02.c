@@ -2733,6 +2733,20 @@ static void sky_event_256(const SkyEvent *event) {
 }
 
 
+// Meteor fork: a fast meteor that splits into two diverging ember trails.
+static void sky_event_257(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int tail = size * 2;
+  lineRGBA(surface, x - direction * tail, y - tail / 4, x, y, 255, 195, 130,
+           weapon_alpha(180.0 * fade));
+  lineRGBA(surface, x, y, x + direction * (tail / 2), y - tail / 3, 255, 225, 170,
+           weapon_alpha(195.0 * fade));
+  lineRGBA(surface, x, y, x + direction * (tail / 2), y + tail / 4, 255, 170, 120,
+           weapon_alpha(195.0 * fade));
+  filledCircleRGBA(surface, x, y, 2, 255, 245, 215, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2816,6 +2830,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
+    sky_event_257,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

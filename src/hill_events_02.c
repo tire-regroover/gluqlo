@@ -4046,6 +4046,24 @@ static void hill_glowing_reed_bed(const HillEvent *event) {
 }
 
 
+// Ember shrine: a small stepped stone altar holding a warm flickering flame.
+static void hill_ember_shrine(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 239, 367));
+  double g = hill_ground(event, cx);
+  double w = s * 0.018;
+  double h = s * 0.022;
+  boxRGBA(surface, (int)(cx - w), (int)(g - h * 0.4), (int)(cx + w), (int)g, 92, 88, 96,
+          weapon_alpha(215.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w * 0.65), (int)(g - h * 0.8), (int)(cx + w * 0.65),
+          (int)(g - h * 0.4), 110, 104, 114, weapon_alpha(215.0 * event->fade));
+  double flicker = sin(event->t * 7.0) * 1.5;
+  filledCircleRGBA(surface, (int)(cx + flicker * 0.5), (int)(g - h - 3), 3, 255, 165, 85,
+                   weapon_alpha(230.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4306,6 +4324,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_signal_lantern_post,
     hill_starry_obelisk_pair,
     hill_glowing_reed_bed,
+    hill_ember_shrine,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
