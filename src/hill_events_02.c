@@ -4496,6 +4496,23 @@ static void hill_bell_lantern(const HillEvent *event) {
 }
 
 
+// Ember lantern row: four low wooden stakes topped with warm coral-gold lamps.
+static void hill_ember_lantern_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.18 + 0.64 * hill_random(event, 521, 701));
+  for (int i = 0; i < 4; i++) {
+    double px = cx + (i - 1.5) * s * 0.016;
+    double g = hill_ground(event, px);
+    double h = s * 0.018;
+    lineRGBA(surface, (int)px, (int)g, (int)px, (int)(g - h), 96, 82, 72,
+             weapon_alpha(200.0 * event->fade));
+    filledCircleRGBA(surface, (int)px, (int)(g - h - 2), 2, 255, 175, 105,
+                     weapon_alpha(225.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4780,6 +4797,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_beacon_well,
     hill_starlight_trellis,
     hill_bell_lantern,
+    hill_ember_lantern_row,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
