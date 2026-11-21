@@ -366,6 +366,7 @@ static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char 
     total_w += adv + kerning;
     if (i + 1 < n_cp) total_w += extra_space;
   }
+  total_w += 1;  // room for subtle 1px weight-reinforcement pass
   if (total_w < 1) total_w = 1;
   if (max_h < 1) max_h = 1;
 
@@ -373,6 +374,7 @@ static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char 
   if (!dst) return NULL;
   SDL_FillSurfaceRect(dst, NULL, 0);
 
+  bool is_light_weight = TTF_GetFontWeight(font) < TTF_FONT_WEIGHT_MEDIUM;
   int pen_x = 0;
   for (int i = 0; i < n_cp; i++) {
     int kerning = 0;
@@ -383,16 +385,16 @@ static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char 
     TTF_GetGlyphMetrics(font, codepoints[i], NULL, NULL, NULL, NULL, &adv);
     SDL_Surface *glyph = TTF_RenderGlyph_Blended(font, codepoints[i], color);
     if (glyph) {
-      if (glyph->h > max_h) {
-        // Clamp height if glyph surface is slightly taller than font height
-        SDL_Rect src = {0, 0, glyph->w, max_h};
-        SDL_Rect drect = {pen_x, 0, glyph->w, max_h};
-        SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
-        SDL_BlitSurface(glyph, &src, dst, &drect);
-      } else {
-        SDL_Rect drect = {pen_x, 0, glyph->w, glyph->h};
-        SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
-        SDL_BlitSurface(glyph, NULL, dst, &drect);
+      int blit_h = glyph->h > max_h ? max_h : glyph->h;
+      SDL_Rect src = {0, 0, glyph->w, blit_h};
+      SDL_Rect drect = {pen_x, 0, glyph->w, blit_h};
+      SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
+      SDL_BlitSurface(glyph, &src, dst, &drect);
+      if (is_light_weight) {
+        // Subtle +0.35 alpha 1px horizontal pass nudges Book/Regular toward Medium
+        SDL_SetSurfaceAlphaMod(glyph, 90);
+        SDL_Rect drect2 = {pen_x + 1, 0, glyph->w, blit_h};
+        SDL_BlitSurface(glyph, &src, dst, &drect2);
       }
       SDL_DestroySurface(glyph);
     }
@@ -668,8 +670,11 @@ static const char *resolve_date_font_path(void) {
     return resolved_date_font;
   }
 
-  static const char *fc_patterns[] = {"sans:lang=en", "sans-serif", "DejaVu Sans",
-                                      "Liberation Sans", "Noto Sans"};
+  static const char *fc_patterns[] = {
+      "sans:weight=medium:lang=en", "sans:weight=semibold:lang=en",
+      "sans:lang=en",               "sans-serif:weight=medium",
+      "sans-serif",                 "DejaVu Sans",
+      "Liberation Sans",            "Noto Sans"};
   for (size_t i = 0; i < sizeof(fc_patterns) / sizeof(fc_patterns[0]); i++) {
     char candidate[1024];
     if (find_font_via_fontconfig(fc_patterns[i], candidate, sizeof(candidate)) &&
