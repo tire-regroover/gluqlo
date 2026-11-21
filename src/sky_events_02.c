@@ -3221,6 +3221,19 @@ static void sky_event_292(const SkyEvent *event) {
 }
 
 
+// Comet cluster: a tight trio of golden-white shooting streaks flying in formation.
+static void sky_event_293(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -1; i <= 1; i++) {
+    int cx = x + i * 5;
+    int cy = y + abs(i) * 4;
+    lineRGBA(surface, cx - direction * size, cy - size / 4, cx, cy, 255, 220, 155,
+             weapon_alpha(180.0 * fade));
+    filledCircleRGBA(surface, cx, cy, 2, 255, 245, 215, weapon_alpha(225.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3310,6 +3323,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
     sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291, sky_event_292,
+    sky_event_293,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

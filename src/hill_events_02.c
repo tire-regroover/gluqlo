@@ -4722,6 +4722,29 @@ static void hill_dew_arbor(const HillEvent *event) {
 }
 
 
+// Lantern bridge three: a low arched footbridge with warm glowing handrail posts.
+static void hill_lantern_bridge_three(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 661, 853));
+  double w = s * 0.035;
+  for (int i = -2; i < 2; i++) {
+    double x0 = cx + i * w * 0.45;
+    double x1 = cx + (i + 1) * w * 0.45;
+    double y0 = hill_ground(event, x0) - (2 - abs(i)) * 3.0;
+    double y1 = hill_ground(event, x1) - (2 - abs(i + 1)) * 3.0;
+    thickLineRGBA(surface, (int)x0, (int)y0, (int)x1, (int)y1, 2, 118, 96, 76,
+                  weapon_alpha(205.0 * event->fade));
+  }
+  for (int i = -1; i <= 1; i++) {
+    double px = cx + i * w * 0.5;
+    double py = hill_ground(event, px) - 6.0;
+    filledCircleRGBA(surface, (int)px, (int)py, 2, 255, 210, 130,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5018,6 +5041,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_firefly_reed_row,
     hill_starry_mast,
     hill_dew_arbor,
+    hill_lantern_bridge_three,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
