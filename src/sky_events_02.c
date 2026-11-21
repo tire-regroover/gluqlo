@@ -3209,6 +3209,18 @@ static void sky_event_291(const SkyEvent *event) {
 }
 
 
+// Starlight braid: two crossing sine waves of silver-gold sparks.
+static void sky_event_292(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -2; i <= 2; i++) {
+    int sx = x + i * (size / 3 + 2);
+    int dy = (int)(sin(phase / 180.0 + i * 0.9) * 4.0);
+    filledCircleRGBA(surface, sx, y + dy, 1, 255, 225, 165, weapon_alpha(200.0 * fade));
+    filledCircleRGBA(surface, sx, y - dy, 1, 185, 225, 255, weapon_alpha(200.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3297,7 +3309,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
-    sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291,
+    sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291, sky_event_292,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

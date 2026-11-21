@@ -4701,6 +4701,27 @@ static void hill_starry_mast(const HillEvent *event) {
 }
 
 
+// Dew arbor: a leafy hillside arch dripping with shimmering aqua dew beads.
+static void hill_dew_arbor(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 653, 839));
+  double g = hill_ground(event, cx);
+  double w = s * 0.024;
+  double h = s * 0.026;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w * 0.6), (int)(g - h), 80, 118, 92,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w * 0.6), (int)(g - h), 80, 118, 92,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w * 0.6), (int)(g - h), (int)(cx + w * 0.6), (int)(g - h), 80, 118,
+           92, weapon_alpha(205.0 * event->fade));
+  for (int i = -1; i <= 1; i++) {
+    filledCircleRGBA(surface, (int)(cx + i * w * 0.45), (int)(g - h + 4), 2, 145, 240, 235,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4996,6 +5017,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_beacon_gate,
     hill_firefly_reed_row,
     hill_starry_mast,
+    hill_dew_arbor,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
