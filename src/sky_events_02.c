@@ -2515,6 +2515,18 @@ static void sky_event_238(const SkyEvent *event) {
 }
 
 
+// Sparkler swirl: a spiraling trail of tiny pale-gold sparks drifting across the sky.
+static void sky_event_239(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 6; i++) {
+    double a = phase / 140.0 + i * 0.9;
+    int sx = x - direction * i * size / 2 + (int)(cos(a) * size * 0.6);
+    int sy = y + (int)(sin(a) * size * 0.6);
+    filledCircleRGBA(surface, sx, sy, 2, 255, 225, 140, weapon_alpha((210.0 - i * 25.0) * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2595,6 +2607,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
+    sky_event_239,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

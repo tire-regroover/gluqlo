@@ -3700,6 +3700,26 @@ static void hill_bell_post(const HillEvent *event) {
 }
 
 
+// Fire pit: a stone-ringed fire pit sending up faint drifting embers.
+static void hill_fire_pit(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 563, 719));
+  double g = hill_ground(event, cx);
+  filledEllipseRGBA(surface, (int)cx, (int)g, (int)(s * 0.014), 3, 85, 80, 82,
+                    weapon_alpha(215.0 * event->fade));
+  static const Uint8 pit[3] = {255, 145, 65};
+  weapon_glow(surface, cx, g - s * 0.005, 1.0, pit, 185.0 * event->fade);
+  for (int i = 0; i < 4; i++) {
+    double rise = fmod(event->t * 0.5 + i * 0.25, 1.0);
+    double ex = cx + sin(event->t * 2.0 + i * 1.6) * s * 0.008;
+    double ey = g - rise * s * 0.040;
+    pixelRGBA(surface, (int)ex, (int)ey, 255, 195, 105,
+              weapon_alpha(200.0 * (1.0 - rise) * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3942,6 +3962,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_crystal_obelisk,
     hill_sky_mirror,
     hill_bell_post,
+    hill_fire_pit,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
