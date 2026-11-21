@@ -4230,6 +4230,27 @@ static void hill_dew_lantern_row(const HillEvent *event) {
 }
 
 
+// Firefly gate: two wooden posts with drifting yellow-green fireflies between them.
+static void hill_firefly_gate(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 353, 503));
+  double g = hill_ground(event, cx);
+  double w = s * 0.022;
+  double h = s * 0.032;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 96, 82, 68,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 96, 82, 68,
+           weapon_alpha(205.0 * event->fade));
+  for (int i = 0; i < 4; i++) {
+    double fx = cx + sin(event->t * 1.7 + i * 1.5) * w * 0.8;
+    double fy = g - h * (0.3 + 0.15 * i) + cos(event->t * 2.3 + i) * 3.0;
+    filledCircleRGBA(surface, (int)fx, (int)fy, 2, 215, 250, 125,
+                     weapon_alpha(215.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4500,6 +4521,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_boat_two,
     hill_beacon_windmill_two,
     hill_dew_lantern_row,
+    hill_firefly_gate,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

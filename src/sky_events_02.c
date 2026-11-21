@@ -2868,6 +2868,16 @@ static void sky_event_266(const SkyEvent *event) {
 }
 
 
+// Twin halo: two interlocking pale-gold and sky-blue orbital rings.
+static void sky_event_267(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 2;
+  if (r < 4) r = 4;
+  circleRGBA(surface, x - r / 3, y, r, 255, 225, 160, weapon_alpha(165.0 * fade));
+  circleRGBA(surface, x + r / 3, y, r, 165, 215, 255, weapon_alpha(165.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2952,7 +2962,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
-    sky_event_263, sky_event_264, sky_event_265, sky_event_266,
+    sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
