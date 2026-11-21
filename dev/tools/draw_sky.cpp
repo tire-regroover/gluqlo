@@ -2,9 +2,8 @@
 // can be checked without waiting for the scheduler.
 //   build/run: dev/tools/draw_sky.sh FIRST LAST   (writes
 //   /tmp/kindtest/out/skyharness-N.png)
-#define main gluqlo_main
-#include "../../gluqlo.c"
-#undef main
+#include "../../src/gluqlo.h"
+#include "../../src/sky_events.h"
 #include <stdlib.h>
 
 int main(int argc, char **argv) {

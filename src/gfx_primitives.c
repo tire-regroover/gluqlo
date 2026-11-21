@@ -1,3 +1,5 @@
+#include "gfx_primitives.h"
+
 // --- SDL3 GPU-accelerated primitive helpers (replacing SDL_gfx) ---
 
 static inline SDL_FColor fcolor_rgba(Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
@@ -11,29 +13,28 @@ static inline void set_draw_color(RenderTarget *dst, Uint8 r, Uint8 g, Uint8 b, 
 }
 
 
-static void pixelRGBA(RenderTarget *dst, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+void pixelRGBA(RenderTarget *dst, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
   if (a == 0) return;
   set_draw_color(dst, r, g, b, a);
   SDL_RenderPoint(dst->renderer, (float)x, (float)y);
 }
 
 
-static void lineRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b,
-                     Uint8 a) {
+void lineRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b,
+              Uint8 a) {
   if (a == 0) return;
   set_draw_color(dst, r, g, b, a);
   SDL_RenderLine(dst->renderer, (float)x1, (float)y1, (float)x2, (float)y2);
 }
 
 
-static void vlineRGBA(RenderTarget *dst, int x, int y1, int y2, Uint8 r, Uint8 g, Uint8 b,
-                      Uint8 a) {
+void vlineRGBA(RenderTarget *dst, int x, int y1, int y2, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
   lineRGBA(dst, x, y1, x, y2, r, g, b, a);
 }
 
 
-static void rectangleRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g,
-                          Uint8 b, Uint8 a) {
+void rectangleRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b,
+                   Uint8 a) {
   if (a == 0) return;
   if (x1 > x2) {
     int t = x1;
@@ -51,8 +52,8 @@ static void rectangleRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uin
 }
 
 
-static void thickLineRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, int width_px, Uint8 r,
-                          Uint8 g, Uint8 b, Uint8 a) {
+void thickLineRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, int width_px, Uint8 r,
+                   Uint8 g, Uint8 b, Uint8 a) {
   if (a == 0 || width_px <= 0) return;
   if (width_px == 1) {
     lineRGBA(dst, x1, y1, x2, y2, r, g, b, a);
@@ -87,8 +88,8 @@ static void thickLineRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, int
 }
 
 
-static void boxRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b,
-                    Uint8 a) {
+void boxRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, Uint8 g, Uint8 b,
+             Uint8 a) {
   if (a == 0) return;
   if (x1 > x2) {
     int t = x1;
@@ -106,8 +107,8 @@ static void boxRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, Uint8 r, 
 }
 
 
-static void filledTrigonRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, int x3, int y3,
-                             Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+void filledTrigonRGBA(RenderTarget *dst, int x1, int y1, int x2, int y2, int x3, int y3, Uint8 r,
+                      Uint8 g, Uint8 b, Uint8 a) {
   if (a == 0) return;
   SDL_FColor col = fcolor_rgba(r, g, b, a);
   SDL_Vertex verts[3];
@@ -133,8 +134,8 @@ static inline int circle_segments(int rx, int ry) {
 }
 
 
-static void filledEllipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry, Uint8 r, Uint8 g,
-                              Uint8 b, Uint8 a) {
+void filledEllipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry, Uint8 r, Uint8 g, Uint8 b,
+                       Uint8 a) {
   if (a == 0 || rx < 0 || ry < 0) return;
   if (rx == 0 && ry == 0) {
     pixelRGBA(dst, cx, cy, r, g, b, a);
@@ -169,8 +170,8 @@ static void filledEllipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry,
 }
 
 
-static void ellipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry, Uint8 r, Uint8 g,
-                        Uint8 b, Uint8 a) {
+void ellipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry, Uint8 r, Uint8 g, Uint8 b,
+                 Uint8 a) {
   if (a == 0 || rx < 0 || ry < 0) return;
   int segs = circle_segments(rx, ry);
   SDL_FPoint pts[65];
@@ -184,20 +185,19 @@ static void ellipseRGBA(RenderTarget *dst, int cx, int cy, int rx, int ry, Uint8
 }
 
 
-static void filledCircleRGBA(RenderTarget *dst, int cx, int cy, int radius, Uint8 r, Uint8 g,
-                             Uint8 b, Uint8 a) {
+void filledCircleRGBA(RenderTarget *dst, int cx, int cy, int radius, Uint8 r, Uint8 g, Uint8 b,
+                      Uint8 a) {
   filledEllipseRGBA(dst, cx, cy, radius, radius, r, g, b, a);
 }
 
 
-static void circleRGBA(RenderTarget *dst, int cx, int cy, int radius, Uint8 r, Uint8 g, Uint8 b,
-                       Uint8 a) {
+void circleRGBA(RenderTarget *dst, int cx, int cy, int radius, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
   ellipseRGBA(dst, cx, cy, radius, radius, r, g, b, a);
 }
 
 
-static void filledPieRGBA(RenderTarget *dst, int cx, int cy, int radius, int start_deg, int end_deg,
-                          Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+void filledPieRGBA(RenderTarget *dst, int cx, int cy, int radius, int start_deg, int end_deg,
+                   Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
   if (a == 0 || radius <= 0) return;
   int span = end_deg - start_deg;
   while (span < 0) span += 360;

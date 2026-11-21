@@ -1,3 +1,56 @@
+#include "scene_core.h"
+#include "gfx_primitives.h"
+#include <time.h>
+
+double hash_noise(int x, int y, Uint32 seed) {
+  Uint32 value = (Uint32)x * 374761393u + (Uint32)y * 668265263u + seed * 2246822519u;
+  value = (value ^ (value >> 13)) * 1274126177u;
+  value ^= value >> 16;
+  return value / 4294967295.0;
+}
+
+
+double smooth_noise(double x, double y, Uint32 seed) {
+  int x0 = (int)floor(x);
+  int y0 = (int)floor(y);
+  double fx = x - x0;
+  double fy = y - y0;
+  fx = fx * fx * (3.0 - 2.0 * fx);
+  fy = fy * fy * (3.0 - 2.0 * fy);
+  double top = hash_noise(x0, y0, seed) * (1.0 - fx) + hash_noise(x0 + 1, y0, seed) * fx;
+  double bottom = hash_noise(x0, y0 + 1, seed) * (1.0 - fx) + hash_noise(x0 + 1, y0 + 1, seed) * fx;
+  return top * (1.0 - fy) + bottom * fy;
+}
+
+
+Uint8 blend_channel(Uint8 from, Uint8 to, double amount) {
+  if (amount < 0.0) amount = 0.0;
+  if (amount > 1.0) amount = 1.0;
+  return (Uint8)(from + (to - from) * amount);
+}
+
+
+double smooth_step(double edge0, double edge1, double value) {
+  double t = (value - edge0) / (edge1 - edge0);
+  if (t < 0.0) t = 0.0;
+  if (t > 1.0) t = 1.0;
+  return t * t * (3.0 - 2.0 * t);
+}
+
+
+// Height of the three ground ridges as a fraction of the screen height at
+// horizontal position nx (0..1). Effects use it to sit things on the ground.
+double ridge_height(int layer, double nx) {
+  switch (layer) {
+    case RIDGE_FAR:
+      return 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
+    case RIDGE_MIDDLE:
+      return 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
+    default:
+      return 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+  }
+}
+
 /*
  * Scheduled effects
  *
@@ -19,43 +72,6 @@
  * EffectSpec below, add it to effect_table[], and call it from
  * render_backdrop() (or render_clock() for overlays drawn over the cards).
  */
-enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
-
-#define RARE_SKY_KINDS 204
-#define RARE_SKY_CLASSIC_KINDS 23  // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 160       // things that happen on the hills (see render_hill_event)
-
-typedef struct {
-  const char *name;
-  Uint32 cycle;         // slot length (ms)
-  int seed_style;       // 0: slot * 2246822519u + 3266489917u, 1: slot * 2654435761u
-                        // + 0x9e3779b9u
-  Uint32 gate;          // run only in slots where seed % gate == 0 (0: every slot)
-  bool gate_after_mix;  // test the gate on the mixed seed instead of the raw one
-  Uint32 mix_mul;       // if non-zero, scramble the seed using this multiplier
-  Uint32 duration;      // base run time (ms)
-  Uint32 jitter;        // extra run time: (seed >> jitter_shift) % jitter
-  int jitter_shift;
-  bool random_start;  // start at a seeded offset in the slot instead of at its
-                      // beginning
-  double fade_in;     // ms
-  double fade_out;    // ms
-  int kind_count;     // number of forceable kinds for -effect NAME:KIND (0: none)
-  int group;          // GROUP_*: effects in the same group never overlap
-  int priority;       // within a group the lowest number wins (keep unique per
-                      // group)
-  bool (*accept)(Uint32 slot,
-                 Uint32 seed);  // optional: false means this slot shows nothing
-} EffectSpec;
-
-typedef struct {
-  Uint32 slot;
-  Uint32 seed;
-  Uint32 phase;  // ms since the effect started
-  Uint32 duration;
-  double progress;  // phase / duration
-  double fade;      // 0..1 fade in/out factor
-} EffectWindow;
 
 typedef struct {
   Uint32 seed;
@@ -86,41 +102,41 @@ static const EffectSpec EFFECT_ALIEN_WEATHER = {
 static const EffectSpec EFFECT_WORLD_JUMP = {
     "world_jump", 360000, 0,   5, false,          2654435761u, 7800, 0, 0,
     false,        350,    450, 4, GROUP_TAKEOVER, 0,           NULL};
-static const EffectSpec EFFECT_LONG_SCENE = {
+const EffectSpec EFFECT_LONG_SCENE = {
     "long_scene", 210000, 0,    5, false,          2246822519u, 72000, 28000, 8,
     true,         6000,   7000, 7, GROUP_TAKEOVER, 2,           NULL};
 static const EffectSpec EFFECT_FULLSCREEN = {
     "fullscreen",     90000, 1, 0, false, 0, 6500, 4000, 9, true, 1300, 1200, 4, GROUP_TAKEOVER, 3,
     fullscreen_accept};
-static const EffectSpec EFFECT_FLEET_BATTLE = {
-    "fleet_battle", 240000, 1, 6, false, 0, 60000, 0, 0, false, 1400, 2200, 6, GROUP_SKY, 0, NULL};
-static const EffectSpec EFFECT_BACKGROUND_BATTLE = {
+const EffectSpec EFFECT_FLEET_BATTLE = {"fleet_battle", 240000, 1,    6, false,     0, 60000, 0, 0,
+                                        false,          1400,   2200, 6, GROUP_SKY, 0, NULL};
+const EffectSpec EFFECT_BACKGROUND_BATTLE = {
     "background_battle", 90000, 1,   9, false, 0, 32000, 0, 0, false, 900, 1700, 5,
     GROUP_SKY,           1,     NULL};
-static const EffectSpec EFFECT_RARE_SKY = {
+const EffectSpec EFFECT_RARE_SKY = {
     "rare_sky", 48000, 0,   3,   true,           2246822519u, 4200, 3200,
     8,          true,  350, 400, RARE_SKY_KINDS, GROUP_SKY,   2,    rare_sky_accept};
-static const EffectSpec EFFECT_BATTLE_FLYBY = {
-    "battle_flyby", 60000, 1, 6, false, 0, 14000, 0, 0, false, 900, 1100, 6, GROUP_SKY, 4, NULL};
-static const EffectSpec EFFECT_DOGFIGHT = {"dogfight", 75000, 1,    4, false,     0, 18000, 0, 0,
-                                           true,       900,   1100, 6, GROUP_SKY, 3, NULL};
-static const EffectSpec EFFECT_HILL_EVENT = {
+const EffectSpec EFFECT_BATTLE_FLYBY = {"battle_flyby", 60000, 1,    6, false,     0, 14000, 0, 0,
+                                        false,          900,   1100, 6, GROUP_SKY, 4, NULL};
+const EffectSpec EFFECT_DOGFIGHT = {"dogfight", 75000, 1,   4,    false, 0,         18000, 0,
+                                    0,          true,  900, 1100, 6,     GROUP_SKY, 3,     NULL};
+const EffectSpec EFFECT_HILL_EVENT = {
     "hill_event",     120000,         0, 2,   false, 2654435761u, 36000, 22000, 8, true, 4000, 5000,
     HILL_EVENT_KINDS, GROUP_TAKEOVER, 4, NULL};
-static const EffectSpec EFFECT_FOREGROUND = {
+const EffectSpec EFFECT_FOREGROUND = {
     "foreground", 180000, 1,   2, false,      2246822519u, 6500, 0, 0,
     false,        650,    900, 4, GROUP_NONE, 0,           NULL};
-static const EffectSpec EFFECT_SCREEN_FADE = {
-    "screen_fade", 300000, 1, 4, false, 0, 12000, 0, 0, true, 1800, 1800, 0, GROUP_NONE, 0, NULL};
+const EffectSpec EFFECT_SCREEN_FADE = {"screen_fade", 300000, 1,    4, false,      0, 12000, 0, 0,
+                                       true,          1800,   1800, 0, GROUP_NONE, 0, NULL};
 
-static const EffectSpec *const effect_table[] = {
+const EffectSpec *const effect_table[] = {
     &EFFECT_ALIEN_WEATHER,     &EFFECT_WORLD_JUMP,   &EFFECT_LONG_SCENE,  &EFFECT_RARE_SKY,
     &EFFECT_FULLSCREEN,        &EFFECT_FOREGROUND,   &EFFECT_SCREEN_FADE, &EFFECT_BATTLE_FLYBY,
     &EFFECT_BACKGROUND_BATTLE, &EFFECT_FLEET_BATTLE, &EFFECT_DOGFIGHT,    &EFFECT_HILL_EVENT};
-static const size_t effect_count = sizeof(effect_table) / sizeof(effect_table[0]);
+const size_t effect_count = sizeof(effect_table) / sizeof(effect_table[0]);
 
-static const EffectSpec *forced_effect = NULL;
-static int forced_kind = -1;
+const EffectSpec *forced_effect = NULL;
+int forced_kind = -1;
 
 /*
  * Scene time is the clock every effect, season and weather runs on. It is the
@@ -128,12 +144,12 @@ static int forced_kind = -1;
  * different point of the season/weather/effect schedule. -seed N makes the
  * offset reproducible; -effect NAME starts it at 0.
  */
-static Uint32 scene_offset = 0;
+Uint32 scene_offset = 0;
 static const Uint32 SCENE_OFFSET_RANGE = 3600000;
 
-static Uint32 scene_time(void) { return SDL_GetTicks() + scene_offset; }
+Uint32 scene_time(void) { return SDL_GetTicks() + scene_offset; }
 
-static Uint32 scene_offset_from_seed(Uint32 seed) {
+Uint32 scene_offset_from_seed(Uint32 seed) {
   seed ^= seed >> 16;
   seed *= 2246822519u;
   seed ^= seed >> 13;
@@ -141,14 +157,14 @@ static Uint32 scene_offset_from_seed(Uint32 seed) {
 }
 
 
-static Uint32 random_scene_offset(void) {
+Uint32 random_scene_offset(void) {
   struct timespec now;
   clock_gettime(CLOCK_REALTIME, &now);
   return scene_offset_from_seed((Uint32)now.tv_nsec ^ ((Uint32)now.tv_sec * 2654435761u));
 }
 
 
-static const EffectSpec *find_effect(const char *name) {
+const EffectSpec *find_effect(const char *name) {
   for (size_t i = 0; i < effect_count; i++) {
     if (strcmp(effect_table[i]->name, name) == 0) return effect_table[i];
   }
@@ -157,7 +173,7 @@ static const EffectSpec *find_effect(const char *name) {
 
 
 // Returns `kind`, or the kind requested with -effect NAME:KIND for this effect.
-static int effect_kind(const EffectSpec *spec, int kind) {
+int effect_kind(const EffectSpec *spec, int kind) {
   return (forced_effect == spec && forced_kind >= 0) ? forced_kind : kind;
 }
 
@@ -219,7 +235,7 @@ static bool effect_blocked(const EffectSpec *spec, const EffectRun *run) {
 }
 
 
-static bool effect_window(const EffectSpec *spec, Uint32 ticks, EffectWindow *window) {
+bool effect_window(const EffectSpec *spec, Uint32 ticks, EffectWindow *window) {
   bool forced = forced_effect == spec;
   if (forced_effect && !forced) return false;
 
@@ -241,19 +257,6 @@ static bool effect_window(const EffectSpec *spec, Uint32 ticks, EffectWindow *wi
   return true;
 }
 
-
-typedef struct {
-  double season[4];
-  double cloud;
-  double rain;
-  double snow;
-  double sunshine;
-  double fog;
-  double wind;
-  double lightning;
-  double aurora;
-  double palette[3];
-} SceneWeather;
 
 // Rain and snow must never fall together. When a change swaps one for the
 // other, the old one fades out over the first part of the change, the air is
@@ -285,7 +288,7 @@ static int pick_weather(Uint32 seed, int count) {
 }
 
 
-static SceneWeather get_scene_weather(Uint32 ticks) {
+SceneWeather get_scene_weather(Uint32 ticks) {
   static const double weather_levels[][11] = {
       {0.10, 0.00, 0.00, 0.95, 0.02, 0.08, 0.00, 0.00, 255, 173, 45},
       {0.25, 0.00, 0.00, 0.72, 0.12, 0.15, 0.00, 0.00, 198, 47, 28},
@@ -302,8 +305,7 @@ static SceneWeather get_scene_weather(Uint32 ticks) {
   const Uint32 weather_duration = 65000;
   const Uint32 weather_transition = 12000;
   const int weather_count = sizeof(weather_levels) / sizeof(weather_levels[0]);
-  SceneWeather scene = {{0.0, 0.0, 0.0, 0.0}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                        {0.0, 0.0, 0.0}};
+  SceneWeather scene = {{0.0, 0.0, 0.0, 0.0}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, {0, 0, 0}};
 
   Uint32 season_elapsed = ticks % (season_duration * 4);
   int season = season_elapsed / season_duration;
@@ -375,8 +377,8 @@ static void draw_aurora(RenderTarget *surface, Uint32 ticks, int scale, double s
 }
 
 
-static void render_weather_effects(RenderTarget *surface, Uint32 ticks, const SceneWeather *weather,
-                                   int scale) {
+void render_weather_effects(RenderTarget *surface, Uint32 ticks, const SceneWeather *weather,
+                            int scale) {
   draw_aurora(surface, ticks, scale, weather->aurora);
 
   if (weather->fog > 0.01) {
@@ -419,7 +421,7 @@ static void render_weather_effects(RenderTarget *surface, Uint32 ticks, const Sc
 }
 
 
-static void render_world_jump(RenderTarget *surface, Uint32 ticks, int scale) {
+void render_world_jump(RenderTarget *surface, Uint32 ticks, int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_WORLD_JUMP, ticks, &window)) return;
   Uint32 seed = window.seed;
@@ -488,7 +490,7 @@ static void render_world_jump(RenderTarget *surface, Uint32 ticks, int scale) {
 }
 
 
-static void render_alien_weather(RenderTarget *surface, Uint32 ticks, int scale) {
+void render_alien_weather(RenderTarget *surface, Uint32 ticks, int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_ALIEN_WEATHER, ticks, &window)) return;
   Uint32 seed = window.seed;
@@ -551,7 +553,60 @@ static void render_alien_weather(RenderTarget *surface, Uint32 ticks, int scale)
 }
 
 
-static void draw_bird(RenderTarget *surface, int x, int y, int size, int wing_lift) {
+void render_fullscreen_event(RenderTarget *surface, Uint32 ticks, int scale,
+                             const SceneWeather *weather) {
+  EffectWindow window;
+  if (!effect_window(&EFFECT_FULLSCREEN, ticks, &window)) return;
+  Uint32 seed = window.seed;
+  Uint32 phase = window.phase;
+  double fade = window.fade;
+  // Kinds 4 and 5 are quiet slots that fullscreen_accept() already filters out.
+  // When forced, fold them back so the effect always shows something.
+  int kind = (seed >> 5) % 6;
+  if (forced_effect == &EFFECT_FULLSCREEN) kind %= 4;
+  kind = effect_kind(&EFFECT_FULLSCREEN, kind);
+  if (kind >= 4) return;
+  if (kind == 0) {
+    boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 62, 94, 132, (Uint8)(10 * fade));
+    // Top up to full strength without doubling up when the aurora weather is
+    // on.
+    draw_aurora(surface, ticks, scale, fade * (1.0 - weather->aurora));
+  } else if (kind == 1) {
+    Uint32 flash_phase = phase % 3400;
+    double flash =
+        smooth_step(0.0, 90.0, flash_phase) * (1.0 - smooth_step(170.0, 430.0, flash_phase));
+    Uint8 alpha = (Uint8)(24 * fade * flash);
+    if (alpha > 0) {
+      boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 170, 192, 220, alpha);
+    }
+  } else if (kind == 2) {
+    boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 17, 25, 44, (Uint8)(28 * fade));
+    int radius = scale / 8;
+    int moon_x = surface->w * (25 + (seed >> 12) % 50) / 100;
+    int moon_y = surface->h * (18 + (seed >> 20) % 24) / 100;
+    filledCircleRGBA(surface, moon_x, moon_y, radius + scale / 18, 119, 158, 194,
+                     (Uint8)(24 * fade));
+    filledCircleRGBA(surface, moon_x, moon_y, radius, 171, 183, 190, (Uint8)(190 * fade));
+    filledCircleRGBA(surface, moon_x + radius / 3, moon_y, radius - radius / 7, 22, 27, 38,
+                     (Uint8)(220 * fade));
+  } else {
+    int flare_x = surface->w * (28 + (seed >> 12) % 44) / 100;
+    int flare_y = surface->h * (18 + (seed >> 20) % 25) / 100;
+    int radius = scale / 13;
+    boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 177, 82, 45, (Uint8)(13 * fade));
+    filledCircleRGBA(surface, flare_x, flare_y, radius, 245, 137, 75, (Uint8)(45 * fade));
+    filledCircleRGBA(surface, flare_x, flare_y, radius / 3, 255, 222, 169, (Uint8)(90 * fade));
+    for (int ray = 0; ray < 12; ray++) {
+      double angle = ray * 0.52359877559 + ticks / 9000.0;
+      int end_x = flare_x + (int)(cos(angle) * scale * 0.42);
+      int end_y = flare_y + (int)(sin(angle) * scale * 0.30);
+      thickLineRGBA(surface, flare_x, flare_y, end_x, end_y, 1, 251, 174, 105, (Uint8)(18 * fade));
+    }
+  }
+}
+
+
+void draw_bird(RenderTarget *surface, int x, int y, int size, int wing_lift) {
   const Uint8 shade = 23, alpha = 185;
   int body_length = size;
   int wing_span = size;
@@ -584,9 +639,8 @@ static void draw_bird(RenderTarget *surface, int x, int y, int size, int wing_li
 // forked/fanned tail, and optional rim highlight. `dir` is +1 (right) or -1
 // (left); `flap` ranges roughly -1.0 (downstroke) to +1.0 (upstroke); `pitch`
 // tilts the flight vector in radians.
-static void draw_sleek_bird(RenderTarget *surface, double cx, double cy, double span, int dir,
-                            double flap, double pitch, Uint8 r, Uint8 g, Uint8 b, Uint8 alpha,
-                            bool rim_light) {
+void draw_sleek_bird(RenderTarget *surface, double cx, double cy, double span, int dir, double flap,
+                     double pitch, Uint8 r, Uint8 g, Uint8 b, Uint8 alpha, bool rim_light) {
   if (span < 3.0 || alpha == 0) return;
   double ca = cos(pitch), sa = sin(pitch);
   double fx = dir * ca, fy = dir * sa;  // forward unit vector

@@ -1,14 +1,22 @@
 CXX?=g++
 FONTDIR=$(DESTDIR)/usr/share/gluqlo
-# gluqlo.c is C++ (it uses bool and mixed declarations), so say so explicitly.
+# Source files use C++ features (bool, mixed declarations), so compile with -x c++.
 CXXFLAGS?=-O2
-CXXFLAGS+=-Wall -x c++ $(shell pkg-config --cflags sdl3 sdl3-ttf fontconfig) -DFONT='"$(FONTDIR)/gluqlo.ttf"'
+CXXFLAGS+=-Wall $(shell pkg-config --cflags sdl3 sdl3-ttf fontconfig) -DFONT='"$(FONTDIR)/gluqlo.ttf"'
 LDFLAGS=$(shell pkg-config --libs sdl3 sdl3-ttf fontconfig) -lm
+
+SRCS=gluqlo.c src/gfx_primitives.c src/scene_core.c src/ships_battles.c \
+	src/hill_events_01.c src/hill_events_02.c src/sky_events_01.c \
+	src/sky_events_02.c src/backdrop.c src/clock_render.c
+OBJS=$(SRCS:.c=.o)
 
 all: gluqlo
 
-gluqlo: gluqlo.c
-	$(CXX) $(CXXFLAGS) -o gluqlo gluqlo.c $(LDFLAGS)
+gluqlo: $(OBJS)
+	$(CXX) -o gluqlo $(OBJS) $(LDFLAGS)
+
+%.o: %.c
+	$(CXX) -x c++ $(CXXFLAGS) -c $< -o $@
 
 install:
 	strip gluqlo
@@ -23,4 +31,4 @@ uninstall:
 		$(DESTDIR)/usr/libexec/xscreensaver/gluqlo $(FONTDIR)/gluqlo.ttf $(DESTDIR)/usr/share/pixmaps/gluqlo.png
 
 clean:
-	rm -f gluqlo
+	rm -f gluqlo $(OBJS)

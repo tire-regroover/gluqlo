@@ -1,3 +1,7 @@
+#include "ships_battles.h"
+#include "gfx_primitives.h"
+#include "scene_core.h"
+
 /*
  * Ship drawing
  *
@@ -22,7 +26,6 @@ typedef struct {
 #define SHIP_NO_OUTLINE \
   { NULL, 0 }
 #define SHIP_ENGINE_SIZE 2  // engine glow radius, tenths of a unit
-#define SHIP_OPACITY 235    // opacity of a fully faded in ship
 
 typedef struct {
   ShipOutline hull;         // upper half, nose first, tail last (both at y = 0)
@@ -127,7 +130,6 @@ static const ShipPoint hull_swept[] = {{36, 0},  {12, -4},   {28, -22}, {6, -20}
 static const ShipPoint spine_swept[] = {{34, 0}, {10, -2}, {-24, -2}, {-26, 0}};
 
 // Indexes into ship_designs[], grouped by role.
-enum { SHIP_SMALL, SHIP_MID, SHIP_BIG };
 static const int ship_small_designs[] = {0, 1, 5, 6, 9};  // dagger, manta, scythe, bat, swept
 static const int ship_mid_designs[] = {2, 3, 4};          // hammerhead, mandible, trident
 static const int ship_big_designs[] = {7, 8};             // leviathan, wedge
@@ -427,7 +429,7 @@ static void ship_paint(RenderTarget *surface, const ShipTeam *team, const int *p
 
 
 // Scratch render-target texture for drawing ships with opacity on GPU.
-static SDL_Texture *ship_target_tex = NULL;
+SDL_Texture *ship_target_tex = NULL;
 static int ship_target_w = 0, ship_target_h = 0;
 
 // Draws one ship centred on (x, y), `length` pixels long, nose towards
@@ -636,9 +638,8 @@ static int ship_design_index(int role, unsigned int variety) {
 
 // Draws a ship of the given role. `variety` picks one of the designs of that
 // role.
-static void draw_ship_role(RenderTarget *surface, int x, int y, int role, unsigned int variety,
-                           int length, int direction, int team_index, Uint8 opacity,
-                           double pitch = 0.0) {
+void draw_ship_role(RenderTarget *surface, int x, int y, int role, unsigned int variety, int length,
+                    int direction, int team_index, Uint8 opacity, double pitch) {
   draw_ship_design(surface, x, y, ship_design_index(role, variety), length, direction, team_index,
                    opacity, pitch);
 }
@@ -665,7 +666,7 @@ static void ship_mount_point(int design_index, int x, int y, int length, int dir
  */
 static const Uint8 weapon_team_colors[2][3] = {{110, 205, 235}, {255, 165, 105}};
 
-static unsigned int fx_hash(unsigned int a, unsigned int b) {
+unsigned int fx_hash(unsigned int a, unsigned int b) {
   unsigned int value = a * 2654435761u + b * 2246822519u + 0x9e3779b9u;
   value ^= value >> 15;
   value *= 2246822519u;
@@ -674,7 +675,7 @@ static unsigned int fx_hash(unsigned int a, unsigned int b) {
 }
 
 
-static Uint8 weapon_alpha(double alpha) {
+Uint8 weapon_alpha(double alpha) {
   if (alpha < 0.0) alpha = 0.0;
   if (alpha > 255.0) alpha = 255.0;
   return (Uint8)alpha;
@@ -689,8 +690,8 @@ static double weapon_unit(int length) {
 
 
 // A soft round glow: a faint halo, a brighter body and a hot core.
-static void weapon_glow(RenderTarget *surface, double x, double y, double radius,
-                        const Uint8 *color, double alpha) {
+void weapon_glow(RenderTarget *surface, double x, double y, double radius, const Uint8 *color,
+                 double alpha) {
   int r = (int)(radius + 0.5);
   if (r < 1) r = 1;
   filledCircleRGBA(surface, (int)x, (int)y, r * 2, color[0], color[1], color[2],
@@ -1033,59 +1034,6 @@ static void draw_weapon_shot(RenderTarget *surface, int weapon, int shot, double
 }
 
 
-static void render_fullscreen_event(RenderTarget *surface, Uint32 ticks, int scale,
-                                    const SceneWeather *weather) {
-  EffectWindow window;
-  if (!effect_window(&EFFECT_FULLSCREEN, ticks, &window)) return;
-  Uint32 seed = window.seed;
-  Uint32 phase = window.phase;
-  double fade = window.fade;
-  // Kinds 4 and 5 are quiet slots that fullscreen_accept() already filters out.
-  // When forced, fold them back so the effect always shows something.
-  int kind = (seed >> 5) % 6;
-  if (forced_effect == &EFFECT_FULLSCREEN) kind %= 4;
-  kind = effect_kind(&EFFECT_FULLSCREEN, kind);
-  if (kind >= 4) return;
-  if (kind == 0) {
-    boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 62, 94, 132, (Uint8)(10 * fade));
-    // Top up to full strength without doubling up when the aurora weather is
-    // on.
-    draw_aurora(surface, ticks, scale, fade * (1.0 - weather->aurora));
-  } else if (kind == 1) {
-    Uint32 flash_phase = phase % 3400;
-    double flash =
-        smooth_step(0.0, 90.0, flash_phase) * (1.0 - smooth_step(170.0, 430.0, flash_phase));
-    Uint8 alpha = (Uint8)(24 * fade * flash);
-    if (alpha > 0) {
-      boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 170, 192, 220, alpha);
-    }
-  } else if (kind == 2) {
-    boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 17, 25, 44, (Uint8)(28 * fade));
-    int radius = scale / 8;
-    int moon_x = surface->w * (25 + (seed >> 12) % 50) / 100;
-    int moon_y = surface->h * (18 + (seed >> 20) % 24) / 100;
-    filledCircleRGBA(surface, moon_x, moon_y, radius + scale / 18, 119, 158, 194,
-                     (Uint8)(24 * fade));
-    filledCircleRGBA(surface, moon_x, moon_y, radius, 171, 183, 190, (Uint8)(190 * fade));
-    filledCircleRGBA(surface, moon_x + radius / 3, moon_y, radius - radius / 7, 22, 27, 38,
-                     (Uint8)(220 * fade));
-  } else {
-    int flare_x = surface->w * (28 + (seed >> 12) % 44) / 100;
-    int flare_y = surface->h * (18 + (seed >> 20) % 25) / 100;
-    int radius = scale / 13;
-    boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, 177, 82, 45, (Uint8)(13 * fade));
-    filledCircleRGBA(surface, flare_x, flare_y, radius, 245, 137, 75, (Uint8)(45 * fade));
-    filledCircleRGBA(surface, flare_x, flare_y, radius / 3, 255, 222, 169, (Uint8)(90 * fade));
-    for (int ray = 0; ray < 12; ray++) {
-      double angle = ray * 0.52359877559 + ticks / 9000.0;
-      int end_x = flare_x + (int)(cos(angle) * scale * 0.42);
-      int end_y = flare_y + (int)(sin(angle) * scale * 0.30);
-      thickLineRGBA(surface, flare_x, flare_y, end_x, end_y, 1, 251, 174, 105, (Uint8)(18 * fade));
-    }
-  }
-}
-
-
 /*
  * Dogfights
  *
@@ -1325,7 +1273,7 @@ static void render_dogfight(RenderTarget *surface, const EffectWindow *window, i
 //      firing crossfire flak bursts across its path.
 //   5: stealth decloak strike — a cloaked corvette shimmers into view behind a
 //      patrolling frigate, fires a railgun lance, and banks away.
-static void render_battle_flyby(RenderTarget *surface, Uint32 ticks, int scale) {
+void render_battle_flyby(RenderTarget *surface, Uint32 ticks, int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BATTLE_FLYBY, ticks, &window)) return;
   Uint32 phase = window.phase;
@@ -1556,7 +1504,7 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks, int scale) 
 //      escorts the survivor off-screen.
 //   5: asteroid slalom — two fighters weave around four drifting sky-rocks,
 //      exchanging pulse bolts between the boulders.
-static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks, int scale) {
+void render_dogfight_effect(RenderTarget *surface, Uint32 ticks, int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_DOGFIGHT, ticks, &window)) return;
   int kind = effect_kind(&EFFECT_DOGFIGHT, (window.seed >> 6) % 6);
@@ -1816,7 +1764,7 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks, int scal
 //      proximity mines that detonate behind it while fighters give chase.
 //   4: carrier launch — a heavy carrier holds station, launching a wing of
 //      fighters that fan out to intercept incoming enemy bombers.
-static void render_background_battle(RenderTarget *surface, Uint32 ticks, int scale) {
+void render_background_battle(RenderTarget *surface, Uint32 ticks, int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_BACKGROUND_BATTLE, ticks, &window)) return;
   int kind = effect_kind(&EFFECT_BACKGROUND_BATTLE, (window.seed >> 7) % 5);
@@ -2268,7 +2216,7 @@ static void fleet_fire(const Fleet *fleet, int side, int ship, double now, doubl
 }
 
 
-static void render_fleet_battle(RenderTarget *surface, Uint32 ticks, int scale) {
+void render_fleet_battle(RenderTarget *surface, Uint32 ticks, int scale) {
   EffectWindow window;
   if (!effect_window(&EFFECT_FLEET_BATTLE, ticks, &window)) return;
   Fleet fleet;
@@ -2360,7 +2308,7 @@ static void render_fleet_battle(RenderTarget *surface, Uint32 ticks, int scale) 
 
 
 // Screen row of ridge `layer` at pixel column x.
-static double ground_y(RenderTarget *surface, int layer, double x) {
+double ground_y(RenderTarget *surface, int layer, double x) {
   double nx = x / surface->w;
   if (nx < 0.0) nx = 0.0;
   if (nx > 0.999) nx = 0.999;
