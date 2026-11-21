@@ -2370,7 +2370,11 @@ static void hill_starry_tent(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double w = s * 0.032, h = s * 0.036;
   filledTrigonRGBA(surface, (int)(cx - w), (int)g, (int)(cx + w), (int)g, (int)cx, (int)(g - h),
-                   220, 145, 70, weapon_alpha(205.0 * event->fade));
+                   145, 92, 48, weapon_alpha(210.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w * 0.35), (int)g, (int)(cx + w * 0.35), (int)g, (int)cx,
+                   (int)(g - h * 0.72), 235, 165, 82, weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)cx, (int)(g - h), 185, 130, 75,
+           weapon_alpha(190.0 * event->fade));
   static const Uint8 fire[3] = {255, 165, 75};
   double fx = cx + w * 1.6;
   double fg = hill_ground(event, fx);
@@ -2417,8 +2421,14 @@ static void hill_observatory_dome(const HillEvent *event) {
   double g = hill_ground(event, cx);
   int r = (int)(s * 0.034);
   Uint8 a = weapon_alpha(225.0 * event->fade);
-  filledPieRGBA(surface, (int)cx, (int)(g - s * 0.012), r, 180, 360, 135, 150, 175, a);
-  boxRGBA(surface, (int)(cx - r), (int)(g - s * 0.012), (int)(cx + r), (int)g, 95, 108, 128, a);
+  filledPieRGBA(surface, (int)cx, (int)(g - s * 0.012), r, 180, 360, 105, 120, 145, a);
+  filledPieRGBA(surface, (int)(cx - r * 0.15), (int)(g - s * 0.012), (int)(r * 0.78), 195, 295,
+                155, 172, 198, weapon_alpha(175.0 * event->fade));
+  boxRGBA(surface, (int)(cx - r), (int)(g - s * 0.012), (int)(cx + r), (int)g, 76, 86, 104, a);
+  boxRGBA(surface, (int)(cx - r), (int)(g - s * 0.012), (int)(cx - r * 0.35), (int)g, 102, 114,
+          134, a);
+  lineRGBA(surface, (int)(cx - r - 1), (int)(g - s * 0.012), (int)(cx + r + 1),
+           (int)(g - s * 0.012), 145, 158, 180, a);
   double beam = smooth_step(0.2, 0.5, event->progress);
   if (beam > 0.01) {
     lineRGBA(surface, (int)cx, (int)(g - s * 0.044), (int)(cx + s * 0.05),
@@ -2558,10 +2568,16 @@ static void hill_standing_stones(const HillEvent *event) {
   double cx = surface->w * (0.24 + 0.52 * hill_random(event, 173, 313));
   double g = hill_ground(event, cx);
   Uint8 a = weapon_alpha(225.0 * event->fade);
-  boxRGBA(surface, (int)(cx - s * 0.022), (int)(g - s * 0.048), (int)(cx - s * 0.010), (int)g, 85,
-          92, 105, a);
-  boxRGBA(surface, (int)(cx + s * 0.008), (int)(g - s * 0.062), (int)(cx + s * 0.022), (int)g, 92,
-          98, 112, a);
+  double x1 = cx - s * 0.016, h1 = s * 0.048, w1 = s * 0.006;
+  boxRGBA(surface, (int)(x1 - w1), (int)(g - h1), (int)(x1 + w1), (int)g, 68, 74, 86, a);
+  boxRGBA(surface, (int)(x1 - w1), (int)(g - h1), (int)(x1 - w1 * 0.25), (int)g, 98, 106, 122, a);
+  filledTrigonRGBA(surface, (int)(x1 - w1), (int)(g - h1), (int)(x1 + w1), (int)(g - h1),
+                   (int)(x1 - w1 * 0.2), (int)(g - h1 - s * 0.007), 86, 94, 108, a);
+  double x2 = cx + s * 0.015, h2 = s * 0.062, w2 = s * 0.007;
+  boxRGBA(surface, (int)(x2 - w2), (int)(g - h2), (int)(x2 + w2), (int)g, 74, 80, 94, a);
+  boxRGBA(surface, (int)(x2 - w2), (int)(g - h2), (int)(x2 - w2 * 0.25), (int)g, 106, 114, 130, a);
+  filledTrigonRGBA(surface, (int)(x2 - w2), (int)(g - h2), (int)(x2 + w2), (int)(g - h2),
+                   (int)(x2 + w2 * 0.2), (int)(g - h2 - s * 0.009), 92, 100, 116, a);
   static const Uint8 rune[3] = {135, 205, 255};
   weapon_glow(surface, cx + s * 0.015, g - s * 0.036, 0.85, rune,
               (135.0 + 55.0 * sin(event->t * 2.0)) * event->fade);
@@ -2602,8 +2618,12 @@ static void hill_firepot_row(const HillEvent *event) {
   for (int i = -2; i <= 2; i++) {
     double px = cx + i * s * 0.024;
     double pg = hill_ground(event, px);
-    boxRGBA(surface, (int)(px - 3), (int)(pg - 5), (int)(px + 3), (int)pg, 120, 75, 55,
-            weapon_alpha(220.0 * event->fade));
+    filledTrigonRGBA(surface, (int)(px - 4), (int)(pg - 5), (int)(px + 4), (int)(pg - 5),
+                     (int)px, (int)(pg + 1), 95, 58, 42, weapon_alpha(220.0 * event->fade));
+    filledTrigonRGBA(surface, (int)(px - 4), (int)(pg - 5), (int)px, (int)(pg - 5), (int)px,
+                     (int)(pg + 1), 135, 84, 60, weapon_alpha(210.0 * event->fade));
+    lineRGBA(surface, (int)(px - 4), (int)(pg - 5), (int)(px + 4), (int)(pg - 5), 165, 105, 75,
+             weapon_alpha(220.0 * event->fade));
     weapon_glow(surface, px, pg - 7, 0.85, emb,
                 (170.0 + 45.0 * sin(event->t * 6.0 + i * 1.3)) * event->fade);
   }
@@ -2724,10 +2744,14 @@ static void hill_sundial_plinth(const HillEvent *event) {
   double cx = surface->w * (0.24 + 0.52 * hill_random(event, 227, 373));
   double g = hill_ground(event, cx);
   Uint8 a = weapon_alpha(225.0 * event->fade);
-  boxRGBA(surface, (int)(cx - s * 0.008), (int)(g - s * 0.032), (int)(cx + s * 0.008), (int)g, 130,
-          135, 145, a);
+  double w = s * 0.008;
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.032), (int)(cx + w), (int)g, 95, 100, 112, a);
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.032), (int)(cx - w * 0.25), (int)g, 132, 138,
+          150, a);
   filledEllipseRGBA(surface, (int)cx, (int)(g - s * 0.034), (int)(s * 0.018), (int)(s * 0.005),
-                    165, 170, 180, a);
+                    150, 156, 168, a);
+  ellipseRGBA(surface, (int)cx, (int)(g - s * 0.034), (int)(s * 0.018), (int)(s * 0.005), 185,
+              190, 202, a);
   double ang = event->t * 0.6;
   lineRGBA(surface, (int)cx, (int)(g - s * 0.034), (int)(cx + cos(ang) * s * 0.015),
            (int)(g - s * 0.044), 225, 200, 130, a);
@@ -2741,10 +2765,13 @@ static void hill_star_map_table(const HillEvent *event) {
   double cx = surface->w * (0.24 + 0.52 * hill_random(event, 229, 379));
   double g = hill_ground(event, cx);
   Uint8 a = weapon_alpha(220.0 * event->fade);
-  boxRGBA(surface, (int)(cx - s * 0.005), (int)(g - s * 0.026), (int)(cx + s * 0.005), (int)g, 95,
-          100, 115, a);
+  double w = s * 0.005;
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.026), (int)(cx + w), (int)g, 76, 82, 96, a);
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.026), (int)cx, (int)g, 105, 112, 128, a);
   filledEllipseRGBA(surface, (int)cx, (int)(g - s * 0.028), (int)(s * 0.026), (int)(s * 0.008), 55,
                     95, 145, a);
+  ellipseRGBA(surface, (int)cx, (int)(g - s * 0.028), (int)(s * 0.026), (int)(s * 0.008), 115, 160,
+              210, a);
   static const Uint8 chart[3] = {155, 220, 255};
   weapon_glow(surface, cx, g - s * 0.028, 1.1, chart, 165.0 * event->fade);
 }
@@ -2814,8 +2841,12 @@ static void hill_ice_lantern(const HillEvent *event) {
   double cx = surface->w * (0.24 + 0.52 * hill_random(event, 251, 401));
   double g = hill_ground(event, cx);
   int r = (int)(s * 0.014) + 2;
-  boxRGBA(surface, (int)(cx - r), (int)(g - r * 2), (int)(cx + r), (int)g, 165, 215, 245,
+  boxRGBA(surface, (int)(cx - r), (int)(g - r * 2), (int)(cx + r), (int)g, 118, 168, 204,
+          weapon_alpha(175.0 * event->fade));
+  boxRGBA(surface, (int)(cx - r), (int)(g - r * 2), (int)(cx - r * 0.3), (int)g, 168, 218, 248,
           weapon_alpha(180.0 * event->fade));
+  lineRGBA(surface, (int)(cx - r), (int)(g - r * 2), (int)(cx + r), (int)(g - r * 2), 205, 238,
+           255, weapon_alpha(195.0 * event->fade));
   static const Uint8 can[3] = {255, 195, 105};
   weapon_glow(surface, cx, g - r, 1.1, can,
               (180.0 + 35.0 * sin(event->t * 7.5)) * event->fade);
@@ -2892,7 +2923,9 @@ static void hill_crystal_cluster(const HillEvent *event) {
     double h = s * (0.045 - abs(i) * 0.008);
     double tip_x = bx + i * s * 0.007;
     filledTrigonRGBA(surface, (int)(bx - s * 0.006), (int)g, (int)(bx + s * 0.006), (int)g,
-                     (int)tip_x, (int)(g - h), 175, 125, 225, weapon_alpha(195.0 * event->fade));
+                     (int)tip_x, (int)(g - h), 130, 88, 178, weapon_alpha(195.0 * event->fade));
+    filledTrigonRGBA(surface, (int)(bx - s * 0.006), (int)g, (int)bx, (int)g, (int)tip_x,
+                     (int)(g - h), 192, 148, 242, weapon_alpha(175.0 * event->fade));
   }
 }
 
@@ -2923,10 +2956,14 @@ static void hill_shepherd_hut(const HillEvent *event) {
   double g = hill_ground(event, cx);
   Uint8 a = weapon_alpha(225.0 * event->fade);
   double w = s * 0.026, h = s * 0.028;
-  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)(g - s * 0.005), 115, 92, 74,
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)(g - s * 0.005), 88, 70, 56,
           a);
-  filledEllipseRGBA(surface, (int)cx, (int)(g - h), (int)(w * 1.05), (int)(s * 0.007), 95, 105,
-                    120, a);
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w * 0.25), (int)(g - s * 0.005), 118,
+          94, 76, a);
+  filledEllipseRGBA(surface, (int)cx, (int)(g - h), (int)(w * 1.08), (int)(s * 0.007), 78, 86,
+                    100, a);
+  lineRGBA(surface, (int)(cx - w * 1.08), (int)(g - h), (int)(cx + w * 1.08), (int)(g - h), 128,
+           136, 152, a);
   circleRGBA(surface, (int)(cx - w * 0.65), (int)(g - s * 0.005), (int)(s * 0.006) + 1, 135, 120,
              100, a);
   circleRGBA(surface, (int)(cx + w * 0.65), (int)(g - s * 0.005), (int)(s * 0.006) + 1, 135, 120,
@@ -3011,10 +3048,15 @@ static void hill_beacon_arch(const HillEvent *event) {
   double g = hill_ground(event, cx);
   Uint8 a = weapon_alpha(225.0 * event->fade);
   double w = s * 0.022, h = s * 0.050;
-  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w * 0.55), (int)g, 95, 105, 120, a);
-  boxRGBA(surface, (int)(cx + w * 0.55), (int)(g - h), (int)(cx + w), (int)g, 95, 105, 120, a);
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w * 0.55), (int)g, 76, 84, 98, a);
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w * 0.8), (int)g, 106, 116, 132, a);
+  boxRGBA(surface, (int)(cx + w * 0.55), (int)(g - h), (int)(cx + w), (int)g, 76, 84, 98, a);
+  boxRGBA(surface, (int)(cx + w * 0.55), (int)(g - h), (int)(cx + w * 0.75), (int)g, 106, 116,
+          132, a);
   boxRGBA(surface, (int)(cx - w * 1.1), (int)(g - h - s * 0.010), (int)(cx + w * 1.1),
-          (int)(g - h), 115, 125, 140, a);
+          (int)(g - h), 88, 96, 112, a);
+  lineRGBA(surface, (int)(cx - w * 1.1), (int)(g - h - s * 0.010), (int)(cx + w * 1.1),
+           (int)(g - h - s * 0.010), 130, 140, 158, a);
   static const Uint8 bcn[3] = {120, 235, 205};
   weapon_glow(surface, cx, g - h - s * 0.016, 1.2, bcn, 205.0 * event->fade);
 }
@@ -3057,7 +3099,7 @@ static void hill_firefly_bush(const HillEvent *event) {
 }
 
 
-// Tethered kite: a single glowing box-kite bobbing high above a small stake.
+// Tethered kite: a single glowing diamond-kite bobbing high above a small stake.
 static void hill_tethered_kite(const HillEvent *event) {
   RenderTarget *surface = event->surface;
   double s = event->scale;
@@ -3065,10 +3107,15 @@ static void hill_tethered_kite(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double kx = cx + event->direction * s * 0.035 + sin(event->t * 1.8) * s * 0.012;
   double ky = g - s * 0.095 + cos(event->t * 2.3) * s * 0.008;
+  double kw = s * 0.011, kh = s * 0.014;
   lineRGBA(surface, (int)cx, (int)g, (int)kx, (int)ky, 185, 195, 210,
            weapon_alpha(135.0 * event->fade));
-  boxRGBA(surface, (int)(kx - s * 0.010), (int)(ky - s * 0.010), (int)(kx + s * 0.010),
-          (int)(ky + s * 0.010), 235, 165, 95, weapon_alpha(205.0 * event->fade));
+  filledTrigonRGBA(surface, (int)kx, (int)(ky - kh), (int)(kx - kw), (int)ky, (int)(kx + kw),
+                   (int)ky, 240, 182, 112, weapon_alpha(210.0 * event->fade));
+  filledTrigonRGBA(surface, (int)kx, (int)(ky + kh), (int)(kx - kw), (int)ky, (int)(kx + kw),
+                   (int)ky, 198, 128, 74, weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(kx - kw), (int)ky, (int)(kx + kw), (int)ky, 255, 215, 155,
+           weapon_alpha(185.0 * event->fade));
 }
 
 
@@ -3080,13 +3127,19 @@ static void hill_stone_well(const HillEvent *event) {
   double g = hill_ground(event, cx);
   Uint8 a = weapon_alpha(225.0 * event->fade);
   double w = s * 0.016, h = s * 0.040;
-  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.016), (int)(cx + w), (int)g, 110, 118, 130, a);
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.016), (int)(cx + w), (int)g, 84, 92, 104, a);
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.016), (int)(cx - w * 0.25), (int)g, 114, 122,
+          136, a);
+  lineRGBA(surface, (int)(cx - w), (int)(g - s * 0.016), (int)(cx + w), (int)(g - s * 0.016), 140,
+           148, 162, a);
   lineRGBA(surface, (int)(cx - w * 0.8), (int)(g - s * 0.016), (int)(cx - w * 0.8), (int)(g - h),
            125, 100, 75, a);
   lineRGBA(surface, (int)(cx + w * 0.8), (int)(g - s * 0.016), (int)(cx + w * 0.8), (int)(g - h),
            125, 100, 75, a);
   filledTrigonRGBA(surface, (int)(cx - w * 1.25), (int)(g - h), (int)(cx + w * 1.25),
-                   (int)(g - h), (int)cx, (int)(g - h - s * 0.016), 95, 78, 68, a);
+                   (int)(g - h), (int)cx, (int)(g - h - s * 0.016), 78, 64, 56, a);
+  filledTrigonRGBA(surface, (int)(cx - w * 1.25), (int)(g - h), (int)cx, (int)(g - h), (int)cx,
+                   (int)(g - h - s * 0.016), 108, 90, 78, a);
 }
 
 
@@ -3098,7 +3151,9 @@ static void hill_aurora_spire(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double h = s * 0.072;
   filledTrigonRGBA(surface, (int)(cx - s * 0.010), (int)g, (int)(cx + s * 0.010), (int)g, (int)cx,
-                   (int)(g - h), 115, 215, 185, weapon_alpha(195.0 * event->fade));
+                   (int)(g - h), 85, 172, 148, weapon_alpha(195.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - s * 0.010), (int)g, (int)cx, (int)g, (int)cx,
+                   (int)(g - h), 135, 228, 198, weapon_alpha(180.0 * event->fade));
   static const Uint8 aur[3] = {125, 245, 200};
   weapon_glow(surface, cx, g - h * 0.75, 1.1, aur,
               (145.0 + 55.0 * sin(event->t * 2.5)) * event->fade);
@@ -3115,7 +3170,9 @@ static void hill_lantern_boat(const HillEvent *event) {
                     weapon_alpha(165.0 * event->fade));
   double bx = cx + sin(event->t * 1.5) * s * 0.014;
   filledTrigonRGBA(surface, (int)(bx - s * 0.010), (int)g, (int)(bx + s * 0.010), (int)g, (int)bx,
-                   (int)(g - s * 0.014), 245, 235, 215, weapon_alpha(220.0 * event->fade));
+                   (int)(g - s * 0.014), 205, 195, 178, weapon_alpha(215.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(bx - s * 0.010), (int)g, (int)bx, (int)g, (int)bx,
+                   (int)(g - s * 0.014), 248, 238, 220, weapon_alpha(215.0 * event->fade));
   static const Uint8 lan[3] = {255, 195, 110};
   weapon_glow(surface, bx, g - s * 0.006, 0.7, lan, 160.0 * event->fade);
 }
@@ -3236,7 +3293,9 @@ static void hill_snowdrift_tree(const HillEvent *event) {
     double y0 = g - s * (0.015 + i * 0.018);
     double w = s * (0.022 - i * 0.005);
     filledTrigonRGBA(surface, (int)(cx - w), (int)y0, (int)(cx + w), (int)y0, (int)cx,
-                     (int)(y0 - s * 0.026), 165, 200, 225, a);
+                     (int)(y0 - s * 0.026), 120, 155, 182, a);
+    filledTrigonRGBA(surface, (int)(cx - w), (int)y0, (int)cx, (int)y0, (int)cx,
+                     (int)(y0 - s * 0.026), 178, 212, 238, a);
   }
 }
 
@@ -3284,11 +3343,15 @@ static void hill_starry_obelisk(const HillEvent *event) {
   double cx = surface->w * (0.24 + 0.52 * hill_random(event, 409, 571));
   double g = hill_ground(event, cx);
   double h = s * 0.080;
-  boxRGBA(surface, (int)(cx - s * 0.008), (int)(g - h), (int)(cx + s * 0.008), (int)g, 55, 65, 82,
+  double w = s * 0.008;
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)g, 44, 52, 68,
           weapon_alpha(225.0 * event->fade));
-  filledTrigonRGBA(surface, (int)(cx - s * 0.008), (int)(g - h), (int)(cx + s * 0.008),
-                   (int)(g - h), (int)cx, (int)(g - h - s * 0.014), 75, 88, 110,
-                   weapon_alpha(225.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w * 0.25), (int)g, 68, 78, 98,
+          weapon_alpha(225.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)(g - h), (int)cx,
+                   (int)(g - h - s * 0.014), 68, 80, 102, weapon_alpha(225.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w), (int)(g - h), (int)cx, (int)(g - h), (int)cx,
+                   (int)(g - h - s * 0.014), 95, 110, 136, weapon_alpha(225.0 * event->fade));
   static const Uint8 gold[3] = {255, 215, 125};
   weapon_glow(surface, cx, g - h - s * 0.014, 0.9, gold, 180.0 * event->fade);
 }
@@ -3458,12 +3521,18 @@ static void hill_stone_arch(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double w = s * 0.022;
   double h = s * 0.044;
-  boxRGBA(surface, (int)(cx - w - 3), (int)(g - h), (int)(cx - w + 3), (int)g, 90, 95, 108,
+  boxRGBA(surface, (int)(cx - w - 3), (int)(g - h), (int)(cx - w + 3), (int)g, 72, 78, 90,
           weapon_alpha(220.0 * event->fade));
-  boxRGBA(surface, (int)(cx + w - 3), (int)(g - h), (int)(cx + w + 3), (int)g, 90, 95, 108,
+  boxRGBA(surface, (int)(cx - w - 3), (int)(g - h), (int)(cx - w), (int)g, 102, 108, 124,
           weapon_alpha(220.0 * event->fade));
-  boxRGBA(surface, (int)(cx - w - 5), (int)(g - h - 5), (int)(cx + w + 5), (int)(g - h + 2), 100,
-          105, 118, weapon_alpha(225.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 3), (int)(g - h), (int)(cx + w + 3), (int)g, 72, 78, 90,
+          weapon_alpha(220.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 3), (int)(g - h), (int)(cx + w), (int)g, 102, 108, 124,
+          weapon_alpha(220.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w - 5), (int)(g - h - 5), (int)(cx + w + 5), (int)(g - h + 2), 84,
+          90, 104, weapon_alpha(225.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w - 5), (int)(g - h - 5), (int)(cx + w + 5), (int)(g - h - 5), 125,
+           132, 148, weapon_alpha(225.0 * event->fade));
   static const Uint8 hth[3] = {255, 175, 90};
   weapon_glow(surface, cx, g - s * 0.008, 0.9, hth, 165.0 * event->fade);
 }
@@ -3511,8 +3580,13 @@ static void hill_star_sundial(const HillEvent *event) {
   double s = event->scale;
   double cx = surface->w * (0.26 + 0.48 * hill_random(event, 479, 643));
   double g = hill_ground(event, cx);
-  boxRGBA(surface, (int)(cx - s * 0.022), (int)(g - s * 0.010), (int)(cx + s * 0.022), (int)g, 95,
-          100, 115, weapon_alpha(215.0 * event->fade));
+  double w = s * 0.022;
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.010), (int)(cx + w), (int)g, 76, 82, 96,
+          weapon_alpha(215.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.010), (int)(cx - w * 0.35), (int)g, 108, 114,
+          130, weapon_alpha(215.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w), (int)(g - s * 0.010), (int)(cx + w), (int)(g - s * 0.010), 135,
+           142, 158, weapon_alpha(215.0 * event->fade));
   double ang = -SCENE_PI * 0.5 + sin(event->t * 0.9) * 0.65;
   double gx = cx + cos(ang) * s * 0.032;
   double gy = g - s * 0.010 + sin(ang) * s * 0.032;
@@ -3531,7 +3605,9 @@ static void hill_windmill_beacon(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double h = s * 0.048;
   filledTrigonRGBA(surface, (int)(cx - s * 0.014), (int)g, (int)(cx + s * 0.014), (int)g,
-                   (int)cx, (int)(g - h), 85, 80, 90, weapon_alpha(215.0 * event->fade));
+                   (int)cx, (int)(g - h), 68, 64, 74, weapon_alpha(215.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - s * 0.014), (int)g, (int)cx, (int)g, (int)cx,
+                   (int)(g - h), 102, 96, 110, weapon_alpha(210.0 * event->fade));
   double rot = event->t * 1.8 * event->direction;
   for (int i = 0; i < 4; i++) {
     double a = rot + i * SCENE_PI * 0.5;
@@ -3555,7 +3631,9 @@ static void hill_ice_crystals(const HillEvent *event) {
     double h = s * (0.044 - abs(i) * 0.011);
     double w = s * 0.007;
     filledTrigonRGBA(surface, (int)(px - w), (int)pg, (int)(px + w), (int)pg, (int)px,
-                     (int)(pg - h), 165, 220, 255, weapon_alpha(190.0 * event->fade));
+                     (int)(pg - h), 125, 182, 224, weapon_alpha(190.0 * event->fade));
+    filledTrigonRGBA(surface, (int)(px - w), (int)pg, (int)px, (int)pg, (int)px, (int)(pg - h),
+                     188, 232, 255, weapon_alpha(180.0 * event->fade));
   }
 }
 
@@ -3584,7 +3662,9 @@ static void hill_fire_totem(const HillEvent *event) {
   double cx = surface->w * (0.25 + 0.50 * hill_random(event, 503, 661));
   double g = hill_ground(event, cx);
   double h = s * 0.048;
-  boxRGBA(surface, (int)(cx - 3), (int)(g - h), (int)(cx + 3), (int)g, 95, 78, 65,
+  boxRGBA(surface, (int)(cx - 3), (int)(g - h), (int)(cx + 3), (int)g, 76, 62, 52,
+          weapon_alpha(220.0 * event->fade));
+  boxRGBA(surface, (int)(cx - 3), (int)(g - h), (int)(cx - 1), (int)g, 112, 90, 74,
           weapon_alpha(220.0 * event->fade));
   static const Uint8 flm[3] = {255, 160, 70};
   double pulse = 0.8 + 0.2 * sin(event->t * 4.5);
@@ -3657,7 +3737,9 @@ static void hill_crystal_obelisk(const HillEvent *event) {
   double h = s * 0.056;
   double w = s * 0.008;
   filledTrigonRGBA(surface, (int)(cx - w), (int)g, (int)(cx + w), (int)g, (int)cx, (int)(g - h),
-                   175, 135, 235, weapon_alpha(195.0 * event->fade));
+                   132, 98, 185, weapon_alpha(195.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w), (int)g, (int)cx, (int)g, (int)cx, (int)(g - h), 192,
+                   152, 245, weapon_alpha(180.0 * event->fade));
   static const Uint8 cry[3] = {205, 165, 255};
   double pulse = 0.7 + 0.3 * sin(event->t * 2.5);
   weapon_glow(surface, cx, g - h * 0.7, 1.0, cry, 165.0 * pulse * event->fade);
@@ -3871,8 +3953,10 @@ static void hill_star_pavilion(const HillEvent *event) {
   lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 100, 95, 110,
            weapon_alpha(205.0 * event->fade));
   filledTrigonRGBA(surface, (int)(cx - w - 4), (int)(g - h), (int)(cx + w + 4), (int)(g - h),
-                   (int)cx, (int)(g - h - s * 0.016), 85, 80, 95,
+                   (int)cx, (int)(g - h - s * 0.016), 68, 64, 78,
                    weapon_alpha(220.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w - 4), (int)(g - h), (int)cx, (int)(g - h), (int)cx,
+                   (int)(g - h - s * 0.016), 102, 96, 116, weapon_alpha(215.0 * event->fade));
   static const Uint8 lmp[3] = {255, 210, 120};
   weapon_glow(surface, cx, g - h * 0.5, 0.9, lmp, 180.0 * event->fade);
 }
@@ -3936,8 +4020,10 @@ static void hill_moonlit_gazebo(const HillEvent *event) {
   lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 110, 115, 130,
            weapon_alpha(205.0 * event->fade));
   filledTrigonRGBA(surface, (int)(cx - w * 1.25), (int)(g - h), (int)(cx + w * 1.25),
-                   (int)(g - h), (int)cx, (int)(g - h * 1.6), 95, 105, 135,
+                   (int)(g - h), (int)cx, (int)(g - h * 1.6), 74, 82, 108,
                    weapon_alpha(210.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w * 1.25), (int)(g - h), (int)cx, (int)(g - h), (int)cx,
+                   (int)(g - h * 1.6), 112, 122, 154, weapon_alpha(205.0 * event->fade));
   double sway = sin(event->t * 2.1) * 2.0;
   filledCircleRGBA(surface, (int)(cx + sway), (int)(g - h * 0.65), 3, 255, 220, 145,
                    weapon_alpha(220.0 * event->fade));
@@ -4054,10 +4140,14 @@ static void hill_ember_shrine(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double w = s * 0.018;
   double h = s * 0.022;
-  boxRGBA(surface, (int)(cx - w), (int)(g - h * 0.4), (int)(cx + w), (int)g, 92, 88, 96,
+  boxRGBA(surface, (int)(cx - w), (int)(g - h * 0.4), (int)(cx + w), (int)g, 74, 70, 78,
+          weapon_alpha(215.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w), (int)(g - h * 0.4), (int)(cx - w * 0.3), (int)g, 104, 98, 108,
           weapon_alpha(215.0 * event->fade));
   boxRGBA(surface, (int)(cx - w * 0.65), (int)(g - h * 0.8), (int)(cx + w * 0.65),
-          (int)(g - h * 0.4), 110, 104, 114, weapon_alpha(215.0 * event->fade));
+          (int)(g - h * 0.4), 88, 82, 92, weapon_alpha(215.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w * 0.65), (int)(g - h * 0.8), (int)(cx - w * 0.2),
+          (int)(g - h * 0.4), 122, 114, 126, weapon_alpha(215.0 * event->fade));
   double flicker = sin(event->t * 7.0) * 1.5;
   filledCircleRGBA(surface, (int)(cx + flicker * 0.5), (int)(g - h - 3), 3, 255, 165, 85,
                    weapon_alpha(230.0 * event->fade));
@@ -4094,8 +4184,12 @@ static void hill_lunar_sundial(const HillEvent *event) {
   double cx = surface->w * (0.20 + 0.60 * hill_random(event, 271, 409));
   double g = hill_ground(event, cx);
   double h = s * 0.024;
-  boxRGBA(surface, (int)(cx - 6), (int)(g - h), (int)(cx + 6), (int)g, 96, 102, 114,
+  boxRGBA(surface, (int)(cx - 6), (int)(g - h), (int)(cx + 6), (int)g, 76, 82, 94,
           weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx - 6), (int)(g - h), (int)(cx - 2), (int)g, 110, 118, 132,
+          weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx - 7), (int)(g - h), (int)(cx + 7), (int)(g - h), 140, 148, 162,
+           weapon_alpha(210.0 * event->fade));
   double tip_x = cx + sin(event->t * 0.8) * s * 0.014;
   double tip_y = g - h - s * 0.016;
   thickLineRGBA(surface, (int)cx, (int)(g - h), (int)tip_x, (int)tip_y, 2, 215, 225, 245,
@@ -4151,7 +4245,9 @@ static void hill_starry_pavilion_two(const HillEvent *event) {
   lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 102, 86, 72,
            weapon_alpha(205.0 * event->fade));
   filledTrigonRGBA(surface, (int)(cx - w * 1.2), (int)(g - h), (int)(cx + w * 1.2), (int)(g - h),
-                   (int)cx, (int)(g - h * 1.65), 88, 96, 118, weapon_alpha(210.0 * event->fade));
+                   (int)cx, (int)(g - h * 1.65), 68, 76, 96, weapon_alpha(210.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w * 1.2), (int)(g - h), (int)cx, (int)(g - h), (int)cx,
+                   (int)(g - h * 1.65), 104, 114, 140, weapon_alpha(205.0 * event->fade));
   filledCircleRGBA(surface, (int)(cx - w * 0.65), (int)(g - h * 0.6), 2, 255, 215, 135,
                    weapon_alpha(220.0 * event->fade));
   filledCircleRGBA(surface, (int)(cx + w * 0.65), (int)(g - h * 0.6), 2, 255, 215, 135,
@@ -4166,11 +4262,16 @@ static void hill_crystal_lantern(const HillEvent *event) {
   double cx = surface->w * (0.20 + 0.60 * hill_random(event, 313, 461));
   double g = hill_ground(event, cx);
   double h = s * 0.028;
-  boxRGBA(surface, (int)(cx - 5), (int)(g - h * 0.35), (int)(cx + 5), (int)g, 92, 98, 112,
+  boxRGBA(surface, (int)(cx - 5), (int)(g - h * 0.35), (int)(cx + 5), (int)g, 74, 80, 94,
           weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx - 5), (int)(g - h * 0.35), (int)(cx - 1), (int)g, 106, 114, 130,
+          weapon_alpha(210.0 * event->fade));
+  double glow = 185.0 + 45.0 * sin(event->t * 2.5);
   filledTrigonRGBA(surface, (int)(cx - 5), (int)(g - h * 0.35), (int)(cx + 5),
-                   (int)(g - h * 0.35), (int)cx, (int)(g - h), 165, 200, 255,
-                   weapon_alpha((185.0 + 45.0 * sin(event->t * 2.5)) * event->fade));
+                   (int)(g - h * 0.35), (int)cx, (int)(g - h), 125, 162, 224,
+                   weapon_alpha(glow * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - 5), (int)(g - h * 0.35), (int)cx, (int)(g - h * 0.35),
+                   (int)cx, (int)(g - h), 185, 220, 255, weapon_alpha(glow * event->fade));
 }
 
 
@@ -4201,7 +4302,9 @@ static void hill_beacon_windmill_two(const HillEvent *event) {
   double h = s * 0.042;
   double r = s * 0.018;
   filledTrigonRGBA(surface, (int)(cx - 5), (int)g, (int)(cx + 5), (int)g, (int)cx, (int)(g - h),
-                   82, 88, 102, weapon_alpha(210.0 * event->fade));
+                   64, 70, 84, weapon_alpha(210.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - 5), (int)g, (int)cx, (int)g, (int)cx, (int)(g - h), 98,
+                   106, 124, weapon_alpha(205.0 * event->fade));
   for (int i = 0; i < 4; i++) {
     double a = event->t * 1.8 + i * SCENE_PI * 0.5;
     lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + cos(a) * r), (int)(g - h + sin(a) * r),
@@ -4258,10 +4361,14 @@ static void hill_observatory_spire(const HillEvent *event) {
   double cx = surface->w * (0.20 + 0.60 * hill_random(event, 367, 521));
   double g = hill_ground(event, cx);
   double h = s * 0.044;
-  boxRGBA(surface, (int)(cx - 4), (int)(g - h), (int)(cx + 4), (int)g, 86, 92, 108,
+  boxRGBA(surface, (int)(cx - 4), (int)(g - h), (int)(cx + 4), (int)g, 70, 76, 92,
           weapon_alpha(210.0 * event->fade));
-  filledCircleRGBA(surface, (int)cx, (int)(g - h), 5, 105, 115, 138,
+  boxRGBA(surface, (int)(cx - 4), (int)(g - h), (int)(cx - 1), (int)g, 102, 110, 128,
+          weapon_alpha(210.0 * event->fade));
+  filledCircleRGBA(surface, (int)cx, (int)(g - h), 5, 92, 102, 124,
                    weapon_alpha(210.0 * event->fade));
+  filledCircleRGBA(surface, (int)(cx - 1), (int)(g - h - 1), 3, 128, 140, 165,
+                   weapon_alpha(190.0 * event->fade));
   double beam_dx = sin(event->t * 1.1) * s * 0.045;
   lineRGBA(surface, (int)cx, (int)(g - h - 2), (int)(cx + beam_dx), (int)(g - h - s * 0.04), 195,
            230, 255, weapon_alpha(150.0 * event->fade));
@@ -4338,7 +4445,9 @@ static void hill_lantern_cairn_row(const HillEvent *event) {
     double bx = cx + i * s * 0.026;
     double g = hill_ground(event, bx);
     filledTrigonRGBA(surface, (int)(bx - 6), (int)g, (int)(bx + 6), (int)g, (int)bx,
-                     (int)(g - s * 0.015), 90, 96, 108, weapon_alpha(205.0 * event->fade));
+                     (int)(g - s * 0.015), 72, 78, 90, weapon_alpha(205.0 * event->fade));
+    filledTrigonRGBA(surface, (int)(bx - 6), (int)g, (int)bx, (int)g, (int)bx,
+                     (int)(g - s * 0.015), 104, 112, 128, weapon_alpha(200.0 * event->fade));
     filledCircleRGBA(surface, (int)bx, (int)(g - s * 0.018), 2, 255, 205, 130,
                      weapon_alpha(225.0 * event->fade));
   }
@@ -4445,8 +4554,12 @@ static void hill_beacon_well(const HillEvent *event) {
   double s = event->scale;
   double cx = surface->w * (0.20 + 0.60 * hill_random(event, 491, 673));
   double g = hill_ground(event, cx);
-  boxRGBA(surface, (int)(cx - 7), (int)(g - 7), (int)(cx + 7), (int)g, 92, 98, 112,
+  boxRGBA(surface, (int)(cx - 7), (int)(g - 7), (int)(cx + 7), (int)g, 74, 80, 94,
           weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx - 7), (int)(g - 7), (int)(cx - 2), (int)g, 108, 116, 132,
+          weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx - 7), (int)(g - 7), (int)(cx + 7), (int)(g - 7), 135, 142, 160,
+           weapon_alpha(210.0 * event->fade));
   for (int i = 0; i < 3; i++) {
     double my = g - 10 - fmod(event->t * 14.0 + i * 8.0, s * 0.035);
     filledCircleRGBA(surface, (int)(cx + sin(event->t * 2.0 + i) * 2.5), (int)my, 2, 145, 235,
@@ -4633,8 +4746,12 @@ static void hill_lantern_well(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double w = s * 0.015;
   double h = s * 0.026;
-  boxRGBA(surface, (int)(cx - w), (int)(g - 6), (int)(cx + w), (int)g, 90, 96, 108,
+  boxRGBA(surface, (int)(cx - w), (int)(g - 6), (int)(cx + w), (int)g, 72, 78, 90,
           weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w), (int)(g - 6), (int)(cx - w * 0.3), (int)g, 104, 112, 128,
+          weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w), (int)(g - 6), (int)(cx + w), (int)(g - 6), 132, 140, 156,
+           weapon_alpha(210.0 * event->fade));
   lineRGBA(surface, (int)(cx - w * 0.8), (int)(g - 6), (int)(cx - w * 0.8), (int)(g - h), 104, 88,
            74, weapon_alpha(205.0 * event->fade));
   lineRGBA(surface, (int)(cx + w * 0.8), (int)(g - 6), (int)(cx + w * 0.8), (int)(g - h), 104, 88,
@@ -4654,9 +4771,13 @@ static void hill_beacon_gate(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double w = s * 0.018;
   double h = s * 0.032;
-  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w + 4), (int)g, 88, 94, 108,
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w + 4), (int)g, 72, 78, 92,
           weapon_alpha(210.0 * event->fade));
-  boxRGBA(surface, (int)(cx + w - 4), (int)(g - h), (int)(cx + w), (int)g, 88, 94, 108,
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w + 2), (int)g, 102, 110, 126,
+          weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 4), (int)(g - h), (int)(cx + w), (int)g, 72, 78, 92,
+          weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 4), (int)(g - h), (int)(cx + w - 2), (int)g, 102, 110, 126,
           weapon_alpha(210.0 * event->fade));
   thickLineRGBA(surface, (int)(cx - w - 2), (int)(g - h), (int)(cx + w + 2), (int)(g - h), 2, 155,
                 225, 255, weapon_alpha(215.0 * event->fade));
@@ -4773,7 +4894,9 @@ static void hill_frost_beacon(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double h = s * 0.042;
   filledTrigonRGBA(surface, (int)(cx - 4), (int)g, (int)(cx + 4), (int)g, (int)cx, (int)(g - h),
-                   130, 195, 235, weapon_alpha(205.0 * event->fade));
+                   96, 154, 198, weapon_alpha(205.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - 4), (int)g, (int)cx, (int)g, (int)cx, (int)(g - h), 162,
+                   218, 252, weapon_alpha(200.0 * event->fade));
   double pulse = 0.7 + 0.3 * sin(event->t * 3.0);
   filledCircleRGBA(surface, (int)cx, (int)(g - h - 2), 3, 200, 245, 255,
                    weapon_alpha(230.0 * pulse * event->fade));
@@ -4828,8 +4951,12 @@ static void hill_starlight_well_two(const HillEvent *event) {
   double s = event->scale;
   double cx = surface->w * (0.20 + 0.60 * hill_random(event, 733, 919));
   double g = hill_ground(event, cx);
-  boxRGBA(surface, (int)(cx - 7), (int)(g - 6), (int)(cx + 7), (int)g, 92, 96, 108,
+  boxRGBA(surface, (int)(cx - 7), (int)(g - 6), (int)(cx + 7), (int)g, 74, 78, 90,
           weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx - 7), (int)(g - 6), (int)(cx - 2), (int)g, 108, 114, 128,
+          weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx - 7), (int)(g - 6), (int)(cx + 7), (int)(g - 6), 138, 144, 160,
+           weapon_alpha(210.0 * event->fade));
   for (int i = 0; i < 3; i++) {
     double my = g - 9 - fmod(event->t * 13.0 + i * 7.5, s * 0.032);
     filledCircleRGBA(surface, (int)(cx + cos(event->t * 2.1 + i) * 3.0), (int)my, 2, 255, 225,
@@ -4846,9 +4973,13 @@ static void hill_celestial_archway(const HillEvent *event) {
   double g = hill_ground(event, cx);
   double w = s * 0.024;
   double h = s * 0.036;
-  boxRGBA(surface, (int)(cx - w - 2), (int)(g - h), (int)(cx - w + 2), (int)g, 92, 98, 114,
+  boxRGBA(surface, (int)(cx - w - 2), (int)(g - h), (int)(cx - w + 2), (int)g, 72, 78, 92,
           weapon_alpha(210.0 * event->fade));
-  boxRGBA(surface, (int)(cx + w - 2), (int)(g - h), (int)(cx + w + 2), (int)g, 92, 98, 114,
+  boxRGBA(surface, (int)(cx - w - 2), (int)(g - h), (int)(cx - w), (int)g, 104, 112, 130,
+          weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 2), (int)(g - h), (int)(cx + w + 2), (int)g, 72, 78, 92,
+          weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 2), (int)(g - h), (int)(cx + w), (int)g, 104, 112, 130,
           weapon_alpha(210.0 * event->fade));
   for (int i = 0; i < 5; i++) {
     double a = SCENE_PI + (i + 0.5) * SCENE_PI / 5.0;
