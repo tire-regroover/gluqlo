@@ -2747,6 +2747,22 @@ static void sky_event_257(const SkyEvent *event) {
 }
 
 
+// Star kite: a drifting diamond constellation with a trailing tail of sparks.
+static void sky_event_258(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 2;
+  lineRGBA(surface, x, y - r, x + r, y, 195, 225, 255, weapon_alpha(180.0 * fade));
+  lineRGBA(surface, x + r, y, x, y + r, 195, 225, 255, weapon_alpha(180.0 * fade));
+  lineRGBA(surface, x, y + r, x - r, y, 195, 225, 255, weapon_alpha(180.0 * fade));
+  lineRGBA(surface, x - r, y, x, y - r, 195, 225, 255, weapon_alpha(180.0 * fade));
+  for (int i = 1; i <= 3; i++) {
+    int ty = y + r + i * 5;
+    int tx = x - direction * i * 4 + (int)(sin(phase / 180.0 + i) * 3.0);
+    filledCircleRGBA(surface, tx, ty, 1, 255, 230, 175, weapon_alpha((190.0 - i * 35.0) * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2830,7 +2846,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
-    sky_event_257,
+    sky_event_257, sky_event_258,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

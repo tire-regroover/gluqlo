@@ -4064,6 +4064,29 @@ static void hill_ember_shrine(const HillEvent *event) {
 }
 
 
+// Wind chime arch: a curved hillside frame hung with swaying silver chimes.
+static void hill_wind_chime_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 251, 389));
+  double g = hill_ground(event, cx);
+  double w = s * 0.025;
+  double h = s * 0.036;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 108, 114, 128,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 108, 114, 128,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)(g - h), 118, 124, 138,
+           weapon_alpha(210.0 * event->fade));
+  for (int i = -2; i <= 2; i++) {
+    double bx = cx + i * w * 0.34;
+    double sway = sin(event->t * 2.8 + i * 0.8) * 3.0;
+    lineRGBA(surface, (int)bx, (int)(g - h), (int)(bx + sway), (int)(g - h * 0.55), 210, 225, 245,
+             weapon_alpha(210.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4325,6 +4348,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_starry_obelisk_pair,
     hill_glowing_reed_bed,
     hill_ember_shrine,
+    hill_wind_chime_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
