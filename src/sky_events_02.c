@@ -2659,6 +2659,16 @@ static void sky_event_250(const SkyEvent *event) {
 }
 
 
+// Aurora halo: an expanding emerald-teal ring with a soft inner shimmer.
+static void sky_event_251(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = (int)(size * (0.7 + 0.5 * sin(phase / 240.0)));
+  if (r < 3) r = 3;
+  circleRGBA(surface, x, y, r, 110, 240, 200, weapon_alpha(175.0 * fade));
+  circleRGBA(surface, x, y, r - 2, 165, 255, 230, weapon_alpha(115.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2741,6 +2751,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
+    sky_event_251,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
