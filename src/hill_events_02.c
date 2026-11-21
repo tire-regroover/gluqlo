@@ -4028,6 +4028,24 @@ static void hill_starry_obelisk_pair(const HillEvent *event) {
 }
 
 
+// Glowing reed bed: swaying hillside reeds tipped with pale lime-gold buds.
+static void hill_glowing_reed_bed(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.14 + 0.72 * hill_random(event, 223, 349));
+  for (int i = -3; i <= 3; i++) {
+    double rx = cx + i * s * 0.008;
+    double g = hill_ground(event, rx);
+    double sway = sin(event->t * 2.2 + i * 0.7) * 4.0;
+    double h = s * (0.022 + 0.004 * (3 - abs(i)));
+    lineRGBA(surface, (int)rx, (int)g, (int)(rx + sway), (int)(g - h), 85, 118, 92,
+             weapon_alpha(200.0 * event->fade));
+    filledCircleRGBA(surface, (int)(rx + sway), (int)(g - h), 2, 210, 245, 145,
+                     weapon_alpha(215.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4287,6 +4305,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_aurora_cairn,
     hill_signal_lantern_post,
     hill_starry_obelisk_pair,
+    hill_glowing_reed_bed,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
