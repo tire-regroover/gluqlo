@@ -4439,6 +4439,22 @@ static void hill_glowing_fern(const HillEvent *event) {
 }
 
 
+// Beacon well: a low stone well emitting a gentle upward column of cyan motes.
+static void hill_beacon_well(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 491, 673));
+  double g = hill_ground(event, cx);
+  boxRGBA(surface, (int)(cx - 7), (int)(g - 7), (int)(cx + 7), (int)g, 92, 98, 112,
+          weapon_alpha(210.0 * event->fade));
+  for (int i = 0; i < 3; i++) {
+    double my = g - 10 - fmod(event->t * 14.0 + i * 8.0, s * 0.035);
+    filledCircleRGBA(surface, (int)(cx + sin(event->t * 2.0 + i) * 2.5), (int)my, 2, 145, 235,
+                     255, weapon_alpha(205.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4720,6 +4736,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_tidebell_post,
     hill_starry_windmill_three,
     hill_glowing_fern,
+    hill_beacon_well,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
