@@ -2890,6 +2890,19 @@ static void sky_event_268(const SkyEvent *event) {
 }
 
 
+// Aurora ribbon: a sinusoidal emerald-violet wave across the upper sky.
+static void sky_event_269(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -3; i < 3; i++) {
+    int x0 = x + i * (size / 2 + 2);
+    int y0 = y + (int)(sin(phase / 180.0 + i * 0.7) * size * 0.45);
+    int x1 = x + (i + 1) * (size / 2 + 2);
+    int y1 = y + (int)(sin(phase / 180.0 + (i + 1) * 0.7) * size * 0.45);
+    thickLineRGBA(surface, x0, y0, x1, y1, 2, 125, 240, 210, weapon_alpha(175.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2975,6 +2988,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
+    sky_event_269,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
