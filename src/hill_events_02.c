@@ -3469,6 +3469,24 @@ static void hill_stone_arch(const HillEvent *event) {
 }
 
 
+// Lantern post row: four slender ridge posts lighting up in sequence.
+static void hill_lantern_post_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 463, 631));
+  static const Uint8 lan[3] = {255, 215, 130};
+  for (int i = 0; i < 4; i++) {
+    double px = cx + (i - 1.5) * s * 0.026;
+    double pg = hill_ground(event, px);
+    double h = s * 0.036;
+    lineRGBA(surface, (int)px, (int)pg, (int)px, (int)(pg - h), 100, 95, 90,
+             weapon_alpha(200.0 * event->fade));
+    double lit = smooth_step(i * 0.12, i * 0.12 + 0.15, event->progress);
+    weapon_glow(surface, px, pg - h, 0.85, lan, 180.0 * lit * event->fade);
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3698,6 +3716,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_frost_chimes,
     hill_ember_braziers,
     hill_stone_arch,
+    hill_lantern_post_row,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
