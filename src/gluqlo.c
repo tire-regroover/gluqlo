@@ -33,14 +33,14 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "src/gluqlo.h"
-#include "src/gfx_primitives.h"
-#include "src/scene_core.h"
-#include "src/ships_battles.h"
-#include "src/hill_events.h"
-#include "src/sky_events.h"
-#include "src/backdrop.h"
-#include "src/clock_render.h"
+#include "gluqlo.h"
+#include "gfx_primitives.h"
+#include "scene_core.h"
+#include "ships_battles.h"
+#include "hill_events.h"
+#include "sky_events.h"
+#include "backdrop.h"
+#include "clock_render.h"
 
 #include <errno.h>
 #include <time.h>

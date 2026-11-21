@@ -5,7 +5,7 @@ CXXFLAGS?=-O2
 CXXFLAGS+=-Wall $(shell pkg-config --cflags sdl3 sdl3-ttf fontconfig) -DFONT='"$(FONTDIR)/gluqlo.ttf"'
 LDFLAGS=$(shell pkg-config --libs sdl3 sdl3-ttf fontconfig) -lm
 
-SRCS=gluqlo.c src/gfx_primitives.c src/scene_core.c src/ships_battles.c \
+SRCS=src/gluqlo.c src/gfx_primitives.c src/scene_core.c src/ships_battles.c \
 	src/hill_events_01.c src/hill_events_02.c src/sky_events_01.c \
 	src/sky_events_02.c src/backdrop.c src/clock_render.c
 OBJS=$(SRCS:.c=.o)
