@@ -4362,6 +4362,25 @@ static void hill_skywatch_mast(const HillEvent *event) {
 }
 
 
+// Moonstone arch: a pale stone ring-gate glowing with cool silver-blue light.
+static void hill_moonstone_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 443, 619));
+  double g = hill_ground(event, cx);
+  double r = s * 0.022;
+  for (int i = 0; i < 8; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 8.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 8.0;
+    thickLineRGBA(surface, (int)(cx + cos(a0) * r), (int)(g + sin(a0) * r),
+                  (int)(cx + cos(a1) * r), (int)(g + sin(a1) * r), 2, 180, 210, 245,
+                  weapon_alpha(205.0 * event->fade));
+  }
+  filledCircleRGBA(surface, (int)cx, (int)(g - r), 2, 225, 245, 255,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4639,6 +4658,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_reed_pergola,
     hill_lantern_cairn_row,
     hill_skywatch_mast,
+    hill_moonstone_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

@@ -2965,6 +2965,18 @@ static void sky_event_273(const SkyEvent *event) {
 }
 
 
+// Orbiting twins: two bright cyan and gold sparks circling a shared center.
+static void sky_event_274(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double a = phase / 170.0;
+  int r = size / 2 + 2;
+  filledCircleRGBA(surface, x + (int)(cos(a) * r), y + (int)(sin(a) * r * 0.6), 2, 165, 230, 255,
+                   weapon_alpha(215.0 * fade));
+  filledCircleRGBA(surface, x - (int)(cos(a) * r), y - (int)(sin(a) * r * 0.6), 2, 255, 220, 155,
+                   weapon_alpha(215.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3050,7 +3062,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
-    sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273,
+    sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
