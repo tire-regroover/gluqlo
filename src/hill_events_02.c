@@ -4745,6 +4745,26 @@ static void hill_lantern_bridge_three(const HillEvent *event) {
 }
 
 
+// Ember chime: a slender hillside rod suspending three glowing coral-gold chimes.
+static void hill_ember_chime(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 673, 863));
+  double g = hill_ground(event, cx);
+  double h = s * 0.042;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 96, 84, 76,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx - s * 0.012), (int)(g - h), (int)(cx + s * 0.012), (int)(g - h), 96,
+           84, 76, weapon_alpha(210.0 * event->fade));
+  for (int i = -1; i <= 1; i++) {
+    double bx = cx + i * s * 0.008;
+    double sway = sin(event->t * 2.6 + i) * 2.0;
+    filledCircleRGBA(surface, (int)(bx + sway), (int)(g - h + 6), 2, 255, 180, 105,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5042,6 +5062,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_starry_mast,
     hill_dew_arbor,
     hill_lantern_bridge_three,
+    hill_ember_chime,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

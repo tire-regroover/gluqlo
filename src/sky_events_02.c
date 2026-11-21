@@ -3234,6 +3234,18 @@ static void sky_event_293(const SkyEvent *event) {
 }
 
 
+// Starlight pendulum: a swaying silver-cyan star hanging from a faint upper point.
+static void sky_event_294(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int len = size / 2 + 4;
+  double a = sin(phase / 190.0) * 0.7;
+  int bx = x + (int)(sin(a) * len);
+  int by = y + (int)(cos(a) * len) - len / 2;
+  lineRGBA(surface, x, y - len / 2, bx, by, 175, 210, 245, weapon_alpha(150.0 * fade));
+  filledCircleRGBA(surface, bx, by, 2, 215, 245, 255, weapon_alpha(225.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3323,7 +3335,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
     sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291, sky_event_292,
-    sky_event_293,
+    sky_event_293, sky_event_294,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
