@@ -3028,6 +3028,18 @@ static void sky_event_278(const SkyEvent *event) {
 }
 
 
+// Nebula ring: a soft tilted ellipse of violet and pale-aqua dust motes.
+static void sky_event_279(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int rx = size / 2 + 4;
+  int ry = size / 4 + 2;
+  ellipseRGBA(surface, x, y, rx, ry, 200, 175, 250, weapon_alpha(150.0 * fade));
+  filledCircleRGBA(surface, x + (int)(cos(phase / 190.0) * rx),
+                   y + (int)(sin(phase / 190.0) * ry), 2, 165, 240, 250,
+                   weapon_alpha(215.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3114,7 +3126,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
-    sky_event_275, sky_event_276, sky_event_277, sky_event_278,
+    sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
