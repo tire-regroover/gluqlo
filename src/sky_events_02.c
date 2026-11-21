@@ -3166,6 +3166,18 @@ static void sky_event_288(const SkyEvent *event) {
 }
 
 
+// Starlight plume: a drifting fan of four pale-gold spark trails.
+static void sky_event_289(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 4; i++) {
+    int tx = x - direction * (size / 2 + i * 3);
+    int ty = y + (i - 1) * 3;
+    lineRGBA(surface, x, y, tx, ty, 255, 225, 165, weapon_alpha((180.0 - i * 25.0) * fade));
+  }
+  filledCircleRGBA(surface, x, y, 2, 255, 245, 215, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3254,7 +3266,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
-    sky_event_287, sky_event_288,
+    sky_event_287, sky_event_288, sky_event_289,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

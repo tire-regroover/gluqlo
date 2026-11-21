@@ -4646,6 +4646,23 @@ static void hill_lantern_well(const HillEvent *event) {
 }
 
 
+// Beacon gate: two stone pillars with a glowing cyan lintel stone.
+static void hill_beacon_gate(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 619, 797));
+  double g = hill_ground(event, cx);
+  double w = s * 0.018;
+  double h = s * 0.032;
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w + 4), (int)g, 88, 94, 108,
+          weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 4), (int)(g - h), (int)(cx + w), (int)g, 88, 94, 108,
+          weapon_alpha(210.0 * event->fade));
+  thickLineRGBA(surface, (int)(cx - w - 2), (int)(g - h), (int)(cx + w + 2), (int)(g - h), 2, 155,
+                225, 255, weapon_alpha(215.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4938,6 +4955,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_moonlit_cairn,
     hill_signal_brazier,
     hill_lantern_well,
+    hill_beacon_gate,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
