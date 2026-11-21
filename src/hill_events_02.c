@@ -4174,6 +4174,24 @@ static void hill_crystal_lantern(const HillEvent *event) {
 }
 
 
+// Lantern boat two: a small crescent hull gliding along a misty hill crest.
+static void hill_lantern_boat_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * event->progress);
+  double g = hill_ground(event, cx) - 3.0;
+  double w = s * 0.020;
+  lineRGBA(surface, (int)(cx - w), (int)(g - 4), (int)(cx + w), (int)(g - 4), 130, 110, 92,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w * 0.7), (int)g, (int)(cx + w * 0.7), (int)g, 130, 110, 92,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)cx, (int)(g - 4), (int)cx, (int)(g - s * 0.022), 140, 125, 105,
+           weapon_alpha(195.0 * event->fade));
+  filledCircleRGBA(surface, (int)cx, (int)(g - s * 0.022), 2, 255, 205, 125,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4441,6 +4459,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_tidepool_glow,
     hill_starry_pavilion_two,
     hill_crystal_lantern,
+    hill_lantern_boat_two,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
