@@ -41,9 +41,10 @@ double smooth_step(double edge0, double edge1, double value) {
 // Height of the three ground ridges as a fraction of the screen height at
 // horizontal position nx (0..1). Effects use it to sit things on the ground.
 double ridge_height(int layer, double nx) {
-  double far_shift = (scene_offset % 9973) * 0.13;
-  double mid_shift = ((scene_offset / 7) % 9967) * 0.17;
-  double near_shift = ((scene_offset / 13) % 9949) * 0.19;
+  Uint32 hill_seed = scene_offset ^ ridge_offset;
+  double far_shift = (hill_seed % 9973) * 0.13;
+  double mid_shift = ((hill_seed / 7) % 9967) * 0.17;
+  double near_shift = ((hill_seed / 13) % 9949) * 0.19;
   switch (layer) {
     case RIDGE_FAR:
       return 0.68 + (smooth_noise(nx * 3.6 + far_shift, 1.0, 907) - 0.5) * 0.13;
@@ -148,9 +149,18 @@ int forced_kind = -1;
  * offset reproducible; -effect NAME starts it at 0.
  */
 Uint32 scene_offset = 0;
+Uint32 ridge_offset = 0;
 static const Uint32 SCENE_OFFSET_RANGE = 3600000;
 
 Uint32 scene_time(void) { return SDL_GetTicks() + scene_offset; }
+
+void randomize_hills(Uint32 seed) {
+  seed ^= ridge_offset * 2654435761u + 0x9e3779b9u;
+  seed ^= seed >> 16;
+  seed *= 2246822519u;
+  seed ^= seed >> 13;
+  ridge_offset = seed ? seed : 1u;
+}
 
 Uint32 scene_offset_from_seed(Uint32 seed) {
   seed ^= seed >> 16;

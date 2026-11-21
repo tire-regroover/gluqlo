@@ -10,6 +10,13 @@ SDL_Texture *backdrop_base = NULL;
 static const int MAX_RAIN_DROPS = 1200;
 static int backdrop_base_w = 0, backdrop_base_h = 0;
 
+void invalidate_backdrop(void) {
+  if (backdrop_base) {
+    SDL_DestroyTexture(backdrop_base);
+    backdrop_base = NULL;
+  }
+}
+
 void render_backdrop(RenderTarget *surface, Uint32 ticks) {
   int scale = surface->h < surface->w ? surface->h : surface->w;
   if (scale < 1) scale = 1;

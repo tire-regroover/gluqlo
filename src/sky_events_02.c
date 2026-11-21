@@ -1,4 +1,6 @@
 #include "sky_events_internal.h"
+#include "backdrop.h"
+#include "scene_core.h"
 
 // A thunderbird glides overhead, its wide wings edged with crackling blue
 // lightning.
@@ -2191,9 +2193,20 @@ void render_foreground_event(RenderTarget *surface, Uint32 ticks, int scale) {
 
 
 void render_rare_screen_fade(RenderTarget *surface, Uint32 ticks) {
+  static bool swapped = false;
+  static Uint32 last_slot = 0;
   EffectWindow window;
-  if (!effect_window(&EFFECT_SCREEN_FADE, ticks, &window)) return;
+  if (!effect_window(&EFFECT_SCREEN_FADE, ticks, &window)) {
+    swapped = false;
+    return;
+  }
+  Uint8 alpha = (Uint8)(255 * window.fade);
+  if (alpha == 255 && (!swapped || last_slot != window.slot)) {
+    randomize_hills(window.seed);
+    invalidate_backdrop();
+    swapped = true;
+    last_slot = window.slot;
+  }
   Uint8 color = (window.seed & 0x80) ? 255 : 0;
-  boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, color, color, color,
-          (Uint8)(255 * window.fade));
+  boxRGBA(surface, 0, 0, surface->w - 1, surface->h - 1, color, color, color, alpha);
 }

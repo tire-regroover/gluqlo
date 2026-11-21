@@ -5,6 +5,7 @@
 
 extern SDL_Texture *backdrop_base;
 
+void invalidate_backdrop(void);
 void render_backdrop(RenderTarget *surface, Uint32 ticks);
 
 #endif

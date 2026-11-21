@@ -51,6 +51,7 @@ extern const size_t effect_count;
 extern const EffectSpec *forced_effect;
 extern int forced_kind;
 extern Uint32 scene_offset;
+extern Uint32 ridge_offset;
 
 extern const EffectSpec EFFECT_FLEET_BATTLE;
 extern const EffectSpec EFFECT_BACKGROUND_BATTLE;
@@ -65,6 +66,7 @@ extern const EffectSpec EFFECT_LONG_SCENE;
 Uint32 scene_time(void);
 Uint32 scene_offset_from_seed(Uint32 seed);
 Uint32 random_scene_offset(void);
+void randomize_hills(Uint32 seed);
 const EffectSpec *find_effect(const char *name);
 int effect_kind(const EffectSpec *spec, int kind);
 bool effect_window(const EffectSpec *spec, Uint32 ticks, EffectWindow *window);
