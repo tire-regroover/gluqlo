@@ -3272,6 +3272,18 @@ static void sky_event_296(const SkyEvent *event) {
 }
 
 
+// Comet arrow: a sharp silver-blue arrowhead streak with a bright core.
+static void sky_event_297(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int tail = size + 4;
+  lineRGBA(surface, x - direction * tail, y - tail / 3, x, y, 175, 220, 255,
+           weapon_alpha(185.0 * fade));
+  lineRGBA(surface, x - direction * tail, y + tail / 3, x, y, 175, 220, 255,
+           weapon_alpha(185.0 * fade));
+  filledCircleRGBA(surface, x, y, 2, 240, 248, 255, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3361,7 +3373,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
     sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291, sky_event_292,
-    sky_event_293, sky_event_294, sky_event_295, sky_event_296,
+    sky_event_293, sky_event_294, sky_event_295, sky_event_296, sky_event_297,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

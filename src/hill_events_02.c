@@ -4801,6 +4801,27 @@ static void hill_reed_lantern_arch(const HillEvent *event) {
 }
 
 
+// Moonlit gazebo two: a slender domed pavilion with a cool cyan-silver center lamp.
+static void hill_moonlit_gazebo_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 719, 907));
+  double g = hill_ground(event, cx);
+  double w = s * 0.022;
+  double h = s * 0.026;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 100, 108, 124,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 100, 108, 124,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w * 1.1), (int)(g - h), (int)cx, (int)(g - h * 1.5), 115, 125, 145,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w * 1.1), (int)(g - h), (int)cx, (int)(g - h * 1.5), 115, 125, 145,
+           weapon_alpha(210.0 * event->fade));
+  filledCircleRGBA(surface, (int)cx, (int)(g - h * 0.65), 3, 170, 230, 255,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5101,6 +5122,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ember_chime,
     hill_frost_beacon,
     hill_reed_lantern_arch,
+    hill_moonlit_gazebo_two,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
