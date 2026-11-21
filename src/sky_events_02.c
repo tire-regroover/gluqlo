@@ -2580,6 +2580,18 @@ static void sky_event_244(const SkyEvent *event) {
 }
 
 
+// Stardust spiral: a curling helix of pale-gold motes drifting through the night.
+static void sky_event_245(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 8; i++) {
+    double a = phase / 180.0 + i * 0.65;
+    int sx = x - direction * i * size / 3 + (int)(cos(a) * size * 0.45);
+    int sy = y + (int)(sin(a) * size * 0.45);
+    pixelRGBA(surface, sx, sy, 255, 230, 165, weapon_alpha((220.0 - i * 20.0) * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2661,6 +2673,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
+    sky_event_245,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

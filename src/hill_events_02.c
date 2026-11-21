@@ -3805,6 +3805,24 @@ static void hill_frost_arch(const HillEvent *event) {
 }
 
 
+// Torch circle: four wooden torches arranged in a shallow arc on the ridge.
+static void hill_torch_circle(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 599, 757));
+  static const Uint8 trc[3] = {255, 165, 70};
+  for (int i = 0; i < 4; i++) {
+    double tx = cx + (i - 1.5) * s * 0.020;
+    double tg = hill_ground(event, tx);
+    double h = s * 0.024;
+    lineRGBA(surface, (int)tx, (int)tg, (int)tx, (int)(tg - h), 100, 80, 65,
+             weapon_alpha(205.0 * event->fade));
+    double flicker = 0.8 + 0.2 * sin(event->t * 5.0 + i * 1.3);
+    weapon_glow(surface, tx, tg - h, 0.8, trc, 175.0 * flicker * event->fade);
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4053,6 +4071,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_star_telescope,
     hill_glowing_moss,
     hill_frost_arch,
+    hill_torch_circle,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
