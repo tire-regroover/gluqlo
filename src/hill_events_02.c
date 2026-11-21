@@ -3648,6 +3648,22 @@ static void hill_ether_windmill(const HillEvent *event) {
 }
 
 
+// Crystal obelisk: a tall amethyst spire pulsing gently against the night sky.
+static void hill_crystal_obelisk(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 541, 691));
+  double g = hill_ground(event, cx);
+  double h = s * 0.056;
+  double w = s * 0.008;
+  filledTrigonRGBA(surface, (int)(cx - w), (int)g, (int)(cx + w), (int)g, (int)cx, (int)(g - h),
+                   175, 135, 235, weapon_alpha(195.0 * event->fade));
+  static const Uint8 cry[3] = {205, 165, 255};
+  double pulse = 0.7 + 0.3 * sin(event->t * 2.5);
+  weapon_glow(surface, cx, g - h * 0.7, 1.0, cry, 165.0 * pulse * event->fade);
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3887,6 +3903,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_star_flowerbed,
     hill_clockwork_owl,
     hill_ether_windmill,
+    hill_crystal_obelisk,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
