@@ -21,10 +21,10 @@ gluqlo: $(OBJS)
 install:
 	strip gluqlo
 	install -o root -m 0755 -D gluqlo $(DESTDIR)/usr/libexec/xscreensaver/gluqlo
-	install -o root -m 0644 -D gluqlo.ttf $(FONTDIR)/gluqlo.ttf
-	install -o root -m 0644 -D gluqlo.png $(DESTDIR)/usr/share/pixmaps/gluqlo.png
-	install -o root -m 0644 -D gluqlo.xml $(DESTDIR)/usr/share/xscreensaver/config/gluqlo.xml
-	install -o root -m 0644 -D gluqlo.desktop $(DESTDIR)/usr/share/applications/screensavers/gluqlo.desktop
+	install -o root -m 0644 -D assets/gluqlo.ttf $(FONTDIR)/gluqlo.ttf
+	install -o root -m 0644 -D assets/gluqlo.png $(DESTDIR)/usr/share/pixmaps/gluqlo.png
+	install -o root -m 0644 -D assets/gluqlo.xml $(DESTDIR)/usr/share/xscreensaver/config/gluqlo.xml
+	install -o root -m 0644 -D assets/gluqlo.desktop $(DESTDIR)/usr/share/applications/screensavers/gluqlo.desktop
 
 uninstall:
 	rm -f $(DESTDIR)/usr/share/xscreensaver/config/gluqlo.xml $(DESTDIR)/usr/share/applications/screensavers/gluqlo.desktop \

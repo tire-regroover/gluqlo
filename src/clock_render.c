@@ -631,11 +631,19 @@ static const char *resolve_clock_font_path(void) {
 
   const char *base_path = SDL_GetBasePath();
   char local_font[1024] = "";
+  char local_asset_font[1024] = "";
   if (base_path) {
     snprintf(local_font, sizeof(local_font), "%sgluqlo.ttf", base_path);
+    snprintf(local_asset_font, sizeof(local_asset_font), "%sassets/gluqlo.ttf", base_path);
   }
 
-  const char *clock_font_paths[] = {FONT, local_font[0] ? local_font : NULL, "./gluqlo.ttf"};
+  const char *clock_font_paths[] = {
+      FONT,
+      local_font[0] ? local_font : NULL,
+      local_asset_font[0] ? local_asset_font : NULL,
+      "./gluqlo.ttf",
+      "./assets/gluqlo.ttf",
+  };
   for (size_t i = 0; i < sizeof(clock_font_paths) / sizeof(clock_font_paths[0]); i++) {
     if (is_readable_file(clock_font_paths[i]) && font_supports_clock_text(clock_font_paths[i])) {
       snprintf(resolved_clock_font, sizeof(resolved_clock_font), "%s", clock_font_paths[i]);
