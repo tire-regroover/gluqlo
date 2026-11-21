@@ -15301,12 +15301,6 @@ void render_digits(RenderTarget *surface, SDL_Rect *background, int card_idx,
   draw_card_divider(surface, background);
 }
 
-// Backdrop picture reused by the frames of one flip while an overlay is
-// showing.
-static SDL_Texture *flip_backdrop = NULL;
-static int flip_backdrop_w = 0, flip_backdrop_h = 0;
-static bool flip_backdrop_valid = false;
-
 void render_clock(int maxsteps, int step, bool ambient_frame) {
   static Uint64 last_profile_report = 0;
   char buffer[3], buffer2[3];
@@ -15316,7 +15310,6 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
   static const int offset_x[] = {-1, 0, 1, 1, 1, 0, -1, -1};
   static const int offset_y[] = {0, -1, -1, 0, 1, 1, 0, -1};
   int phase, new_burnin_x, new_burnin_y;
-  bool moved = false;
   Uint64 frame_start = profile_rendering ? SDL_GetTicks() : 0;
   Uint64 backdrop_elapsed = 0;
 
@@ -15332,49 +15325,14 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
     minBackground.y += new_burnin_y - burnin_y;
     burnin_x = new_burnin_x;
     burnin_y = new_burnin_y;
-    moved = true;
   }
   Uint32 now = scene_time();
-  // In SDL3 with GPU rendering, we always render the full frame cleanly each
-  // present (backbuffers are not preserved across SDL_RenderPresent).
-  // For flip frames, we cache the backdrop in flip_backdrop texture so
-  // 20-fps flip animations don't re-draw the entire scenery every step.
-  bool is_flip_step = !ambient_frame && (step > 0 && step < maxsteps - 1);
-  if (is_flip_step && flip_backdrop_valid && flip_backdrop) {
-    SDL_RenderTexture(renderer, flip_backdrop, NULL, NULL);
-  } else if (!ambient_frame && step == 0 && !moved) {
-    if (flip_backdrop &&
-        (flip_backdrop_w != screen->w || flip_backdrop_h != screen->h)) {
-      SDL_DestroyTexture(flip_backdrop);
-      flip_backdrop = NULL;
-    }
-    if (!flip_backdrop) {
-      flip_backdrop =
-          SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-                            SDL_TEXTUREACCESS_TARGET, screen->w, screen->h);
-      if (flip_backdrop) {
-        flip_backdrop_w = screen->w;
-        flip_backdrop_h = screen->h;
-      }
-    }
-    if (flip_backdrop) {
-      Uint64 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
-      SDL_SetRenderTarget(renderer, flip_backdrop);
-      render_backdrop(screen, now);
-      SDL_SetRenderTarget(renderer, NULL);
-      if (profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
-      SDL_RenderTexture(renderer, flip_backdrop, NULL, NULL);
-      flip_backdrop_valid = true;
-    } else {
-      Uint64 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
-      render_backdrop(screen, now);
-      if (profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
-    }
-  } else {
+  // Render the live backdrop every frame (including during card flips) so
+  // sky, hill, weather, and battle events continue animating smoothly.
+  {
     Uint64 backdrop_start = profile_rendering ? SDL_GetTicks() : 0;
     render_backdrop(screen, now);
     if (profile_rendering) backdrop_elapsed = SDL_GetTicks() - backdrop_start;
-    if (ambient_frame || moved) flip_backdrop_valid = false;
   }
 
   bool time_changed = _time->tm_hour != past_h || _time->tm_min != past_m;
@@ -15774,7 +15732,6 @@ static void layout_clock(double display_scale_factor) {
   past_yday = -1;
   burnin_x = 0;
   burnin_y = 0;
-  flip_backdrop_valid = false;
 
   int rectsize, spacing, radius;
   int date_h = TTF_GetFontHeight(font_date);
@@ -16077,7 +16034,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Unable to start clock timer: %s\n", SDL_GetError());
     destroy_clock_caches();
     if (backdrop_base) SDL_DestroyTexture(backdrop_base);
-    if (flip_backdrop) SDL_DestroyTexture(flip_backdrop);
     if (date_texture_cache) SDL_DestroyTexture(date_texture_cache);
     if (ship_target_tex) SDL_DestroyTexture(ship_target_tex);
     TTF_CloseFont(font_time);
@@ -16148,7 +16104,6 @@ int main(int argc, char **argv) {
 
   destroy_clock_caches();
   if (backdrop_base) SDL_DestroyTexture(backdrop_base);
-  if (flip_backdrop) SDL_DestroyTexture(flip_backdrop);
   if (ship_target_tex) SDL_DestroyTexture(ship_target_tex);
   if (date_texture_cache) SDL_DestroyTexture(date_texture_cache);
 
