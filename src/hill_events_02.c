@@ -4138,6 +4138,27 @@ static void hill_tidepool_glow(const HillEvent *event) {
 }
 
 
+// Starry pavilion two: a peaked wooden roof over two glowing porch lanterns.
+static void hill_starry_pavilion_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 307, 449));
+  double g = hill_ground(event, cx);
+  double w = s * 0.028;
+  double h = s * 0.026;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 102, 86, 72,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 102, 86, 72,
+           weapon_alpha(205.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w * 1.2), (int)(g - h), (int)(cx + w * 1.2), (int)(g - h),
+                   (int)cx, (int)(g - h * 1.65), 88, 96, 118, weapon_alpha(210.0 * event->fade));
+  filledCircleRGBA(surface, (int)(cx - w * 0.65), (int)(g - h * 0.6), 2, 255, 215, 135,
+                   weapon_alpha(220.0 * event->fade));
+  filledCircleRGBA(surface, (int)(cx + w * 0.65), (int)(g - h * 0.6), 2, 255, 215, 135,
+                   weapon_alpha(220.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4403,6 +4424,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lunar_sundial,
     hill_beacon_tripod,
     hill_tidepool_glow,
+    hill_starry_pavilion_two,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
