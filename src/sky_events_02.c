@@ -2878,6 +2878,18 @@ static void sky_event_267(const SkyEvent *event) {
 }
 
 
+// Sky lantern trio: three warm paper lanterns drifting upward in a gentle arc.
+static void sky_event_268(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -1; i <= 1; i++) {
+    int lx = x + i * (size / 2 + 3);
+    int ly = y - abs(i) * 4 + (int)(sin(phase / 220.0 + i) * 3.0);
+    boxRGBA(surface, lx - 2, ly - 3, lx + 2, ly + 3, 255, 195, 115, weapon_alpha(195.0 * fade));
+    filledCircleRGBA(surface, lx, ly + 1, 1, 255, 240, 190, weapon_alpha(230.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2962,7 +2974,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
-    sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267,
+    sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

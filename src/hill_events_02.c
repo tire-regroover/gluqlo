@@ -4251,6 +4251,23 @@ static void hill_firefly_gate(const HillEvent *event) {
 }
 
 
+// Observatory spire: a slender dome-topped tower with a scanning starlight beam.
+static void hill_observatory_spire(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 367, 521));
+  double g = hill_ground(event, cx);
+  double h = s * 0.044;
+  boxRGBA(surface, (int)(cx - 4), (int)(g - h), (int)(cx + 4), (int)g, 86, 92, 108,
+          weapon_alpha(210.0 * event->fade));
+  filledCircleRGBA(surface, (int)cx, (int)(g - h), 5, 105, 115, 138,
+                   weapon_alpha(210.0 * event->fade));
+  double beam_dx = sin(event->t * 1.1) * s * 0.045;
+  lineRGBA(surface, (int)cx, (int)(g - h - 2), (int)(cx + beam_dx), (int)(g - h - s * 0.04), 195,
+           230, 255, weapon_alpha(150.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4522,6 +4539,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_beacon_windmill_two,
     hill_dew_lantern_row,
     hill_firefly_gate,
+    hill_observatory_spire,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
