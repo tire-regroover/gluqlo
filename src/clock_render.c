@@ -778,7 +778,7 @@ void layout_clock(double display_scale_factor) {
             clock_font_path ? SDL_GetError() : "no suitable clock font found");
     exit(1);
   }
-  float date_font_size = (float)((is_horizontal ? scaled_h : scaled_w) / 24.0);
+  float date_font_size = (float)((is_horizontal ? scaled_h : scaled_w) / 16.0);
   font_date = date_font_path ? TTF_OpenFont(date_font_path, date_font_size) : NULL;
   if (!font_date) {
     fprintf(stderr, "TTF_OpenFont (date font): %s\n",
