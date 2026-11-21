@@ -4551,6 +4551,29 @@ static void hill_starlight_pond(const HillEvent *event) {
 }
 
 
+// Lantern arbor: a curved wooden arch draped with three small glowing lanterns.
+static void hill_lantern_arbor(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 563, 743));
+  double g = hill_ground(event, cx);
+  double w = s * 0.024;
+  double h = s * 0.028;
+  for (int i = 0; i < 6; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 6.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 6.0;
+    lineRGBA(surface, (int)(cx + cos(a0) * w), (int)(g + sin(a0) * h),
+             (int)(cx + cos(a1) * w), (int)(g + sin(a1) * h), 108, 90, 74,
+             weapon_alpha(205.0 * event->fade));
+  }
+  for (int i = -1; i <= 1; i++) {
+    double a = SCENE_PI * 1.5 + i * 0.65;
+    filledCircleRGBA(surface, (int)(cx + cos(a) * w * 0.9), (int)(g + sin(a) * h * 0.9), 2, 255,
+                     210, 130, weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4838,6 +4861,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ember_lantern_row,
     hill_windwheel_tower,
     hill_starlight_pond,
+    hill_lantern_arbor,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

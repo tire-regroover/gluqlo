@@ -3096,6 +3096,19 @@ static void sky_event_283(const SkyEvent *event) {
 }
 
 
+// Solar mote: a warm golden orb surrounded by three orbiting ember specks.
+static void sky_event_284(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  filledCircleRGBA(surface, x, y, 3, 255, 225, 145, weapon_alpha(225.0 * fade));
+  int r = size / 2 + 2;
+  for (int i = 0; i < 3; i++) {
+    double a = phase / 160.0 + i * SCENE_TAU / 3.0;
+    filledCircleRGBA(surface, x + (int)(cos(a) * r), y + (int)(sin(a) * r), 1, 255, 190, 115,
+                     weapon_alpha(190.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3183,7 +3196,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
-    sky_event_281, sky_event_282, sky_event_283,
+    sky_event_281, sky_event_282, sky_event_283, sky_event_284,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
