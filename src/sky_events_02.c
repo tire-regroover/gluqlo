@@ -2562,6 +2562,15 @@ static void sky_event_242(const SkyEvent *event) {
 }
 
 
+// Floating lantern boat: a crescent paper skiff carrying a tiny amber lantern.
+static void sky_event_243(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  filledPieRGBA(surface, x, y, size, 0, 180, 210, 175, 130, weapon_alpha(190.0 * fade));
+  static const Uint8 lan[3] = {255, 200, 110};
+  weapon_glow(surface, x, y - size / 3, 0.9, lan, 180.0 * fade);
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2642,7 +2651,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
-    sky_event_239, sky_event_240, sky_event_241, sky_event_242,
+    sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

@@ -3773,6 +3773,21 @@ static void hill_star_telescope(const HillEvent *event) {
 }
 
 
+// Glowing moss: patches of bioluminescent teal moss pulsing along the ridge.
+static void hill_glowing_moss(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 587, 743));
+  static const Uint8 mos[3] = {105, 235, 195};
+  for (int i = -2; i <= 2; i++) {
+    double mx = cx + i * s * 0.018;
+    double mg = hill_ground(event, mx);
+    double pulse = 0.65 + 0.35 * sin(event->t * 2.0 + i * 1.1);
+    weapon_glow(surface, mx, mg - 2, 0.75, mos, 155.0 * pulse * event->fade);
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4019,6 +4034,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_moon_pond,
     hill_lantern_fence,
     hill_star_telescope,
+    hill_glowing_moss,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
