@@ -4305,6 +4305,30 @@ static void hill_frost_lantern(const HillEvent *event) {
 }
 
 
+// Reed pergola: a woven arch of slender reeds with glowing emerald firefly buds.
+static void hill_reed_pergola(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 409, 577));
+  double g = hill_ground(event, cx);
+  double w = s * 0.028;
+  double h = s * 0.030;
+  for (int i = 0; i < 6; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 6.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 6.0;
+    lineRGBA(surface, (int)(cx + cos(a0) * w), (int)(g + sin(a0) * h),
+             (int)(cx + cos(a1) * w), (int)(g + sin(a1) * h), 96, 128, 92,
+             weapon_alpha(205.0 * event->fade));
+  }
+  for (int i = -1; i <= 1; i++) {
+    double px = cx + i * w * 0.45;
+    double py = g - h * 0.75 + sin(event->t * 2.5 + i) * 2.0;
+    filledCircleRGBA(surface, (int)px, (int)py, 2, 165, 250, 175,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4579,6 +4603,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_observatory_spire,
     hill_ember_brazier_row,
     hill_frost_lantern,
+    hill_reed_pergola,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

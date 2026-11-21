@@ -2916,6 +2916,19 @@ static void sky_event_270(const SkyEvent *event) {
 }
 
 
+// Meteor showerlet: three parallel short silver-gold streaks descending together.
+static void sky_event_271(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -1; i <= 1; i++) {
+    int mx = x + i * (size / 2 + 2);
+    int my = y + i * 4;
+    lineRGBA(surface, mx - direction * size, my - size / 3, mx, my, 245, 225, 175,
+             weapon_alpha(190.0 * fade));
+    filledCircleRGBA(surface, mx, my, 1, 255, 248, 225, weapon_alpha(225.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3001,7 +3014,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
-    sky_event_269, sky_event_270,
+    sky_event_269, sky_event_270, sky_event_271,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
