@@ -338,6 +338,70 @@ void render_digits(RenderTarget *surface, SDL_Rect *background, int card_idx, ch
 }
 
 
+static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char *text,
+                                                   SDL_Color color) {
+  if (!font || !text || !*text) return NULL;
+  int font_h = TTF_GetFontHeight(font);
+  int extra_space = (int)(font_h * 0.10f);
+  if (extra_space < 2) extra_space = 2;
+
+  Uint32 codepoints[128];
+  int n_cp = 0;
+  const char *p = text;
+  size_t len = strlen(text);
+  while (len > 0 && n_cp < (int)(sizeof(codepoints) / sizeof(codepoints[0]))) {
+    Uint32 cp = SDL_StepUTF8(&p, &len);
+    if (cp == 0) break;
+    codepoints[n_cp++] = cp;
+  }
+  if (n_cp == 0) return NULL;
+
+  int total_w = 0;
+  int max_h = font_h;
+  for (int i = 0; i < n_cp; i++) {
+    int adv = 0;
+    TTF_GetGlyphMetrics(font, codepoints[i], NULL, NULL, NULL, NULL, &adv);
+    int kerning = 0;
+    if (i > 0) TTF_GetGlyphKerning(font, codepoints[i - 1], codepoints[i], &kerning);
+    total_w += adv + kerning;
+    if (i + 1 < n_cp) total_w += extra_space;
+  }
+  if (total_w < 1) total_w = 1;
+  if (max_h < 1) max_h = 1;
+
+  SDL_Surface *dst = SDL_CreateSurface(total_w, max_h, SDL_PIXELFORMAT_ARGB8888);
+  if (!dst) return NULL;
+  SDL_FillSurfaceRect(dst, NULL, 0);
+
+  int pen_x = 0;
+  for (int i = 0; i < n_cp; i++) {
+    int kerning = 0;
+    if (i > 0) TTF_GetGlyphKerning(font, codepoints[i - 1], codepoints[i], &kerning);
+    pen_x += kerning;
+
+    int adv = 0;
+    TTF_GetGlyphMetrics(font, codepoints[i], NULL, NULL, NULL, NULL, &adv);
+    SDL_Surface *glyph = TTF_RenderGlyph_Blended(font, codepoints[i], color);
+    if (glyph) {
+      if (glyph->h > max_h) {
+        // Clamp height if glyph surface is slightly taller than font height
+        SDL_Rect src = {0, 0, glyph->w, max_h};
+        SDL_Rect drect = {pen_x, 0, glyph->w, max_h};
+        SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
+        SDL_BlitSurface(glyph, &src, dst, &drect);
+      } else {
+        SDL_Rect drect = {pen_x, 0, glyph->w, glyph->h};
+        SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
+        SDL_BlitSurface(glyph, NULL, dst, &drect);
+      }
+      SDL_DestroySurface(glyph);
+    }
+    pen_x += adv + extra_space;
+  }
+  return dst;
+}
+
+
 void render_clock(int maxsteps, int step, bool ambient_frame) {
   static Uint64 last_profile_report = 0;
   char buffer[3], buffer2[3];
@@ -412,7 +476,7 @@ void render_clock(int maxsteps, int step, bool ambient_frame) {
     strftime(date, sizeof(date), "%A, %B", _time);
     snprintf(date + strlen(date), sizeof(date) - strlen(date), " %d, %d", _time->tm_mday,
              _time->tm_year + 1900);
-    SDL_Surface *new_date_surface = TTF_RenderText_Blended(font_date, date, 0, DATE_COLOR);
+    SDL_Surface *new_date_surface = render_date_surface_with_spacing(font_date, date, DATE_COLOR);
     if (!new_date_surface) {
       fprintf(stderr, "Unable to render date: %s\n", SDL_GetError());
     } else {
