@@ -4087,6 +4087,22 @@ static void hill_wind_chime_arch(const HillEvent *event) {
 }
 
 
+// Lunar sundial: a stone pedestal with a glowing silver gnomon sweeping slowly.
+static void hill_lunar_sundial(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 271, 409));
+  double g = hill_ground(event, cx);
+  double h = s * 0.024;
+  boxRGBA(surface, (int)(cx - 6), (int)(g - h), (int)(cx + 6), (int)g, 96, 102, 114,
+          weapon_alpha(210.0 * event->fade));
+  double tip_x = cx + sin(event->t * 0.8) * s * 0.014;
+  double tip_y = g - h - s * 0.016;
+  thickLineRGBA(surface, (int)cx, (int)(g - h), (int)tip_x, (int)tip_y, 2, 215, 225, 245,
+                weapon_alpha(215.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4349,6 +4365,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_glowing_reed_bed,
     hill_ember_shrine,
     hill_wind_chime_arch,
+    hill_lunar_sundial,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

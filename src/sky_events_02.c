@@ -2763,6 +2763,22 @@ static void sky_event_258(const SkyEvent *event) {
 }
 
 
+// Crescent mirage: a shimmering double crescent arc in pale silver-blue.
+static void sky_event_259(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 4;
+  for (int i = 0; i < 6; i++) {
+    double a0 = -0.9 + i * 0.3;
+    double a1 = a0 + 0.3;
+    lineRGBA(surface, x + (int)(cos(a0) * r), y + (int)(sin(a0) * r), x + (int)(cos(a1) * r),
+             y + (int)(sin(a1) * r), 205, 225, 255, weapon_alpha(190.0 * fade));
+    lineRGBA(surface, x + (int)(cos(a0) * (r - 4)) - 3, y + (int)(sin(a0) * (r - 4)),
+             x + (int)(cos(a1) * (r - 4)) - 3, y + (int)(sin(a1) * (r - 4)), 175, 200, 240,
+             weapon_alpha(140.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2846,7 +2862,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
-    sky_event_257, sky_event_258,
+    sky_event_257, sky_event_258, sky_event_259,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
