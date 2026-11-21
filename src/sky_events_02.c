@@ -3178,6 +3178,20 @@ static void sky_event_289(const SkyEvent *event) {
 }
 
 
+// Aurora spire: a tall tapering column of emerald-cyan shimmer.
+static void sky_event_290(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int h = size + 6;
+  for (int i = -1; i <= 1; i++) {
+    int sx = x + i * 3;
+    int top_y = y - h / 2 + abs(i) * 3;
+    int bot_y = y + h / 2 - abs(i) * 2;
+    lineRGBA(surface, sx, top_y, sx, bot_y, 130, 245, 210,
+             weapon_alpha((175.0 - abs(i) * 35.0) * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3266,7 +3280,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
-    sky_event_287, sky_event_288, sky_event_289,
+    sky_event_287, sky_event_288, sky_event_289, sky_event_290,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

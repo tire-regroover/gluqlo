@@ -4663,6 +4663,24 @@ static void hill_beacon_gate(const HillEvent *event) {
 }
 
 
+// Firefly reed row: five tall reeds with bobbing lime-yellow fireflies.
+static void hill_firefly_reed_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.18 + 0.64 * hill_random(event, 631, 811));
+  for (int i = -2; i <= 2; i++) {
+    double rx = cx + i * s * 0.011;
+    double g = hill_ground(event, rx);
+    double h = s * 0.024;
+    lineRGBA(surface, (int)rx, (int)g, (int)rx, (int)(g - h), 82, 118, 86,
+             weapon_alpha(195.0 * event->fade));
+    double fy = g - h - 4 + sin(event->t * 2.5 + i * 1.1) * 3.0;
+    filledCircleRGBA(surface, (int)rx, (int)fy, 2, 220, 255, 130,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4956,6 +4974,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_signal_brazier,
     hill_lantern_well,
     hill_beacon_gate,
+    hill_firefly_reed_row,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
