@@ -3149,6 +3149,23 @@ static void sky_event_287(const SkyEvent *event) {
 }
 
 
+// Twilight prism: a rotating pale-violet triangle with glowing vertices.
+static void sky_event_288(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 2;
+  for (int i = 0; i < 3; i++) {
+    double a0 = phase / 240.0 + i * SCENE_TAU / 3.0;
+    double a1 = phase / 240.0 + (i + 1) * SCENE_TAU / 3.0;
+    int x0 = x + (int)(cos(a0) * r);
+    int y0 = y + (int)(sin(a0) * r);
+    int x1 = x + (int)(cos(a1) * r);
+    int y1 = y + (int)(sin(a1) * r);
+    lineRGBA(surface, x0, y0, x1, y1, 200, 185, 255, weapon_alpha(175.0 * fade));
+    filledCircleRGBA(surface, x0, y0, 2, 235, 225, 255, weapon_alpha(220.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3237,7 +3254,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
-    sky_event_287,
+    sky_event_287, sky_event_288,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
