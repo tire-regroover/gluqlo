@@ -4329,6 +4329,22 @@ static void hill_reed_pergola(const HillEvent *event) {
 }
 
 
+// Lantern cairn row: three low stone mounds each crowned with a warm paper lamp.
+static void hill_lantern_cairn_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 421, 593));
+  for (int i = -1; i <= 1; i++) {
+    double bx = cx + i * s * 0.026;
+    double g = hill_ground(event, bx);
+    filledTrigonRGBA(surface, (int)(bx - 6), (int)g, (int)(bx + 6), (int)g, (int)bx,
+                     (int)(g - s * 0.015), 90, 96, 108, weapon_alpha(205.0 * event->fade));
+    filledCircleRGBA(surface, (int)bx, (int)(g - s * 0.018), 2, 255, 205, 130,
+                     weapon_alpha(225.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4604,6 +4620,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ember_brazier_row,
     hill_frost_lantern,
     hill_reed_pergola,
+    hill_lantern_cairn_row,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
