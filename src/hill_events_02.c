@@ -4288,6 +4288,23 @@ static void hill_ember_brazier_row(const HillEvent *event) {
 }
 
 
+// Frost lantern: a pale-blue crystalline lamp hanging from a curved iron crook.
+static void hill_frost_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 397, 563));
+  double g = hill_ground(event, cx);
+  double h = s * 0.042;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 96, 106, 122,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + s * 0.012), (int)(g - h + 3), 96, 106, 122,
+           weapon_alpha(210.0 * event->fade));
+  double sway = sin(event->t * 2.3) * 2.0;
+  filledCircleRGBA(surface, (int)(cx + s * 0.012 + sway), (int)(g - h + 7), 3, 175, 230, 255,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4561,6 +4578,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_firefly_gate,
     hill_observatory_spire,
     hill_ember_brazier_row,
+    hill_frost_lantern,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

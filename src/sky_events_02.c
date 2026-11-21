@@ -2903,6 +2903,19 @@ static void sky_event_269(const SkyEvent *event) {
 }
 
 
+// Starlight crown: a five-point upward arc of pale gold and cyan stars.
+static void sky_event_270(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -2; i <= 2; i++) {
+    double a = -SCENE_PI * 0.5 + i * 0.35;
+    int sx = x + (int)(cos(a) * size * 0.9);
+    int sy = y + (int)(sin(a) * size * 0.6) + size / 2;
+    filledCircleRGBA(surface, sx, sy, 2, i == 0 ? 255 : 195, i == 0 ? 235 : 225,
+                     i == 0 ? 175 : 255, weapon_alpha(210.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2988,7 +3001,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
-    sky_event_269,
+    sky_event_269, sky_event_270,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
