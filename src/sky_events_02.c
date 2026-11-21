@@ -2375,6 +2375,20 @@ static void sky_event_227(const SkyEvent *event) {
 }
 
 
+// Sky jellyfish: a translucent bell pulsing gently with trailing filaments.
+static void sky_event_228(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int rx = size;
+  int ry = (int)(size * (0.65 + 0.15 * sin(phase / 200.0)));
+  filledPieRGBA(surface, x, y, rx, 180, 360, 165, 215, 245, weapon_alpha(155.0 * fade));
+  for (int i = -2; i <= 2; i++) {
+    int tx = x + i * (rx / 3);
+    int wave = (int)(sin(phase / 180.0 + i) * size * 0.35);
+    lineRGBA(surface, tx, y, tx + wave, y + ry + size, 150, 200, 240, weapon_alpha(130.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2453,7 +2467,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_209, sky_event_210, sky_event_211, sky_event_212, sky_event_213, sky_event_214,
     sky_event_215, sky_event_216, sky_event_217, sky_event_218, sky_event_219, sky_event_220,
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
-    sky_event_227,
+    sky_event_227, sky_event_228,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

@@ -3505,6 +3505,24 @@ static void hill_reed_lanterns(const HillEvent *event) {
 }
 
 
+// Star sundial: a stone dial whose gnomon projects a rotating beam of starlight.
+static void hill_star_sundial(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.26 + 0.48 * hill_random(event, 479, 643));
+  double g = hill_ground(event, cx);
+  boxRGBA(surface, (int)(cx - s * 0.022), (int)(g - s * 0.010), (int)(cx + s * 0.022), (int)g, 95,
+          100, 115, weapon_alpha(215.0 * event->fade));
+  double ang = -SCENE_PI * 0.5 + sin(event->t * 0.9) * 0.65;
+  double gx = cx + cos(ang) * s * 0.032;
+  double gy = g - s * 0.010 + sin(ang) * s * 0.032;
+  thickLineRGBA(surface, (int)cx, (int)(g - s * 0.010), (int)gx, (int)gy, 2, 190, 210, 240,
+                weapon_alpha(210.0 * event->fade));
+  static const Uint8 tip[3] = {175, 220, 255};
+  weapon_glow(surface, gx, gy, 0.85, tip, 170.0 * event->fade);
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3736,6 +3754,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_stone_arch,
     hill_lantern_post_row,
     hill_reed_lanterns,
+    hill_star_sundial,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
