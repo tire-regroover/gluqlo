@@ -2591,7 +2591,8 @@ static void render_dogfight(RenderTarget *surface, const EffectWindow *window,
 //   2: stealth torpedo run — a lone bomber swoops low, fires a glowing torpedo
 //      at a distant silhouette cruiser, and banks away into the upper sky.
 //   3: FTL slingshot — a cruiser drops out of hyperspace in a bright flash,
-//      fires a broadside salvo at a patrolling picket, then accelerates to warp.
+//      fires a broadside salvo at a patrolling picket, then accelerates to
+//      warp.
 //   4: blockade break — a fast runner threads between two hovering gunboats
 //      firing crossfire flak bursts across its path.
 //   5: stealth decloak strike — a cloaked corvette shimmers into view behind a
@@ -2695,9 +2696,9 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
                    length, -dir, 1, opacity);
     // Cruiser decelerates in (0.0..0.28), coasts (0.28..0.68), then streaks
     // away in warp off-screen (0.68..1.0).
-    double warp_in =
-        (progress < 0.28) ? 0.22 * (1.0 - pow(1.0 - progress / 0.28, 2.2))
-                          : 0.22;
+    double warp_in = (progress < 0.28)
+                         ? 0.22 * (1.0 - pow(1.0 - progress / 0.28, 2.2))
+                         : 0.22;
     double coast = 0.22 * progress;
     double warp_out =
         (progress > 0.68) ? 0.75 * pow((progress - 0.68) / 0.32, 2.5) : 0.0;
@@ -2736,9 +2737,8 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
     for (int g = 0; g < 2; g++) {
       double gx = surface->w * (g == 0 ? 0.38 : 0.62) - dir * drift;
       double gy = center_y + (g == 0 ? -scale * 0.042 : scale * 0.042);
-      draw_ship_role(surface, (int)gx, (int)gy, SHIP_MID,
-                     window.seed + g * 19, (int)(length * 1.25), -dir, 1,
-                     opacity);
+      draw_ship_role(surface, (int)gx, (int)gy, SHIP_MID, window.seed + g * 19,
+                     (int)(length * 1.25), -dir, 1, opacity);
     }
     // Fast runner weaving between them
     double rx = (dir > 0)
@@ -2782,7 +2782,8 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
                    (int)(length * 1.4), dir, 1, opacity);
     // Decloaking attacker approaches from behind, fires, then banks upward
     // and flies off-screen while remaining visible.
-    double sx = fx - dir * surface->w * (0.20 - 0.06 * smooth_step(0.18, 0.52, progress));
+    double sx = fx - dir * surface->w *
+                         (0.20 - 0.06 * smooth_step(0.18, 0.52, progress));
     double climb = smooth_step(0.54, 1.0, progress);
     double sy = fy + scale * 0.025 - climb * climb * scale * 0.09;
     double cloak = smooth_step(0.18, 0.34, progress);
@@ -2794,7 +2795,8 @@ static void render_battle_flyby(RenderTarget *surface, Uint32 ticks,
     if (progress > 0.36 && progress < 0.62) {
       double age = (progress - 0.36) * window.duration;
       if (age < weapon_specs[WEAPON_RAIL].life_ms) {
-        double hit_p = 0.36 + weapon_specs[WEAPON_RAIL].impact_ms / window.duration;
+        double hit_p =
+            0.36 + weapon_specs[WEAPON_RAIL].impact_ms / window.duration;
         double hx = (dir > 0)
                         ? -length * 2.0 + hit_p * (surface->w + 4.0 * length)
                         : surface->w + length * 2.0 -
@@ -2883,10 +2885,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                   scale * 0.042;
       double heading = atan2(-dy, dx);
       int dir = dx >= 0 ? 1 : -1;
-      double pitch =
-          dir > 0 ? heading
-                  : atan2(sin(3.14159265359 - heading),
-                          cos(3.14159265359 - heading));
+      double pitch = dir > 0 ? heading
+                             : atan2(sin(3.14159265359 - heading),
+                                     cos(3.14159265359 - heading));
       draw_ship_role(surface, (int)x, (int)y, SHIP_SMALL,
                      window.seed + side * 19, length, dir, side, opacity,
                      pitch);
@@ -2894,10 +2895,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
         for (int puff = 1; puff <= 7; puff++) {
           double pu = u - puff * 0.012;
           if (pu < 0.0) break;
-          double px = (side == 0)
-                          ? -length + pu * (surface->w + 2.0 * length)
-                          : surface->w + length -
-                                pu * (surface->w + 2.0 * length);
+          double px = (side == 0) ? -length + pu * (surface->w + 2.0 * length)
+                                  : surface->w + length -
+                                        pu * (surface->w + 2.0 * length);
           double py = surface->h * 0.11 +
                       sin(pu * 18.84955592 + side * 3.14159265) * scale * 0.042;
           filledCircleRGBA(surface, (int)px, (int)py, 1 + puff / 2, 150, 150,
@@ -2917,17 +2917,17 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
           window.duration;
       if (fire_u > 0.10 && hit_u < destroy_p) {
         int target = 1 - shooter;
-        double sx = (shooter == 0)
-                        ? -length + fire_u * (surface->w + 2.0 * length)
-                        : surface->w + length -
-                              fire_u * (surface->w + 2.0 * length);
+        double sx =
+            (shooter == 0)
+                ? -length + fire_u * (surface->w + 2.0 * length)
+                : surface->w + length - fire_u * (surface->w + 2.0 * length);
         double sy =
             surface->h * 0.11 +
             sin(fire_u * 18.84955592 + shooter * 3.14159265) * scale * 0.042;
-        double tx = (target == 0)
-                        ? -length + hit_u * (surface->w + 2.0 * length)
-                        : surface->w + length -
-                              hit_u * (surface->w + 2.0 * length);
+        double tx =
+            (target == 0)
+                ? -length + hit_u * (surface->w + 2.0 * length)
+                : surface->w + length - hit_u * (surface->w + 2.0 * length);
         double ty =
             surface->h * 0.11 +
             sin(hit_u * 18.84955592 + target * 3.14159265) * scale * 0.042;
@@ -2944,9 +2944,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
       double ly =
           surface->h * 0.11 +
           sin(u * 18.84955592 + (1 - winner) * 3.14159265) * scale * 0.042;
-      draw_explosion(surface, lx, ly,
-                     (progress - destroy_p) * window.duration, length * 1.1,
-                     true, fx_hash(window.seed, 99), 1 - winner, fade);
+      draw_explosion(surface, lx, ly, (progress - destroy_p) * window.duration,
+                     length * 1.1, true, fx_hash(window.seed, 99), 1 - winner,
+                     fade);
     }
     return;
   }
@@ -2958,10 +2958,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
     int mid_len = (int)(sm_len * 1.6);
     Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
     int dir = (window.seed >> 5) & 1 ? 1 : -1;
-    double cx = (dir > 0)
-                    ? -mid_len + progress * (surface->w + 2.0 * mid_len)
-                    : surface->w + mid_len -
-                          progress * (surface->w + 2.0 * mid_len);
+    double cx = (dir > 0) ? -mid_len + progress * (surface->w + 2.0 * mid_len)
+                          : surface->w + mid_len -
+                                progress * (surface->w + 2.0 * mid_len);
     double cy = surface->h * 0.13 + sin(progress * 5.0) * scale * 0.012;
     draw_ship_role(surface, (int)cx, (int)cy, SHIP_MID, window.seed + 7,
                    mid_len, dir, 0, opacity);
@@ -2979,10 +2978,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
     double idy = sin(theta) * 6.0 * M_PI * scale * 0.055;
     double iheading = atan2(-idy, idx);
     int idir = idx >= 0 ? 1 : -1;
-    double ipitch =
-        idir > 0 ? iheading
-                 : atan2(sin(3.14159265359 - iheading),
-                         cos(3.14159265359 - iheading));
+    double ipitch = idir > 0 ? iheading
+                             : atan2(sin(3.14159265359 - iheading),
+                                     cos(3.14159265359 - iheading));
     draw_ship_role(surface, (int)ix, (int)iy, SHIP_SMALL, window.seed + 29,
                    sm_len, idir, 1, opacity, ipitch);
     double pass_u = fmod(progress * 3.0, 1.0);
@@ -3008,8 +3006,7 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
       // Parabolic climb & stall arc across the center of the sky
       double x = surface->w * (0.18 + u * 0.64) +
                  sin(u * 12.566 + side * 1.4) * scale * 0.02;
-      double y = surface->h * 0.20 -
-                 sin(u * M_PI) * scale * 0.14 +
+      double y = surface->h * 0.20 - sin(u * M_PI) * scale * 0.14 +
                  side * scale * 0.015;
       double dx = surface->w * 0.64;
       double dy = -cos(u * M_PI) * M_PI * scale * 0.14;
@@ -3028,10 +3025,10 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
         double u0 = hit_p;
         double x1 = surface->w * (0.18 + u1 * 0.64) +
                     sin(u1 * 12.566 + 1.4) * scale * 0.02;
-        double y1 = surface->h * 0.20 - sin(u1 * M_PI) * scale * 0.14 +
-                    scale * 0.015;
-        double x0 = surface->w * (0.18 + u0 * 0.64) +
-                    sin(u0 * 12.566) * scale * 0.02;
+        double y1 =
+            surface->h * 0.20 - sin(u1 * M_PI) * scale * 0.14 + scale * 0.015;
+        double x0 =
+            surface->w * (0.18 + u0 * 0.64) + sin(u0 * 12.566) * scale * 0.02;
         double y0 = surface->h * 0.20 - sin(u0 * M_PI) * scale * 0.14;
         draw_weapon_shot(surface, WEAPON_PULSE, 0, x1, y1, x0, y0, (double)age,
                          unit, 1, fade, fire_p > 0.60 ? 1 : 0,
@@ -3049,10 +3046,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
     double unit = weapon_unit(length);
     int dir = (window.seed >> 4) & 1 ? 1 : -1;
     // Fleeing damaged lead fighter (team 0)
-    double lx = (dir > 0)
-                    ? -length + progress * (surface->w + 2.0 * length)
-                    : surface->w + length -
-                          progress * (surface->w + 2.0 * length);
+    double lx = (dir > 0) ? -length + progress * (surface->w + 2.0 * length)
+                          : surface->w + length -
+                                progress * (surface->w + 2.0 * length);
     double ly = surface->h * 0.13 + sin(progress * 7.0) * scale * 0.016;
     draw_ship_role(surface, (int)lx, (int)ly, SHIP_SMALL, window.seed + 11,
                    length, dir, 0, opacity);
@@ -3067,11 +3063,11 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
                      length * 1.1, true, fx_hash(window.seed, 88), 1, fade);
     }
     // Rescuing wingman (team 0) swoops down from above to intercept
-    double wx = lx - dir * scale * (0.28 - 0.22 * smooth_step(0.15, 0.72, progress));
+    double wx =
+        lx - dir * scale * (0.28 - 0.22 * smooth_step(0.15, 0.72, progress));
     double wy = ly - scale * 0.11 * (1.0 - smooth_step(0.20, 0.72, progress));
     draw_ship_role(surface, (int)wx, (int)wy, SHIP_SMALL, window.seed + 37,
-                   length, dir, 0, opacity,
-                   progress < 0.70 ? -0.25 : 0.0);
+                   length, dir, 0, opacity, progress < 0.70 ? -0.25 : 0.0);
     Uint32 volley = window.phase % 900;
     if (volley < weapon_specs[WEAPON_MASS_DRIVER].life_ms &&
         window.phase >= volley) {
@@ -3086,7 +3082,8 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
         double fly = surface->h * 0.13 + sin(fire_p * 7.0) * scale * 0.016;
         double fwx =
             flx - dir * scale * (0.28 - 0.22 * smooth_step(0.15, 0.72, fire_p));
-        double fwy = fly - scale * 0.11 * (1.0 - smooth_step(0.20, 0.72, fire_p));
+        double fwy =
+            fly - scale * 0.11 * (1.0 - smooth_step(0.20, 0.72, fire_p));
         double hlx = (dir > 0) ? -length + hit_p * (surface->w + 2.0 * length)
                                : surface->w + length -
                                      hit_p * (surface->w + 2.0 * length);
@@ -3123,8 +3120,9 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
     for (int s = 0; s < 2; s++) {
       double u = progress - s * 0.08;
       if (u < 0.0 || u > 1.0) continue;
-      double sx = (dir > 0) ? -length + u * (surface->w + 2.0 * length)
-                            : surface->w + length - u * (surface->w + 2.0 * length);
+      double sx = (dir > 0)
+                      ? -length + u * (surface->w + 2.0 * length)
+                      : surface->w + length - u * (surface->w + 2.0 * length);
       double sy = surface->h * 0.13 + sin(u * 15.708 + s * 0.7) * scale * 0.036;
       draw_ship_role(surface, (int)sx, (int)sy, SHIP_SMALL,
                      window.seed + s * 29, length, dir, s, opacity);
@@ -3137,11 +3135,13 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
           window.duration;
       if (fp > 0.14 && hp < 0.92) {
         double fu = fp - 0.08;
-        double fsx = (dir > 0) ? -length + fu * (surface->w + 2.0 * length)
-                               : surface->w + length - fu * (surface->w + 2.0 * length);
+        double fsx =
+            (dir > 0) ? -length + fu * (surface->w + 2.0 * length)
+                      : surface->w + length - fu * (surface->w + 2.0 * length);
         double fsy = surface->h * 0.13 + sin(fu * 15.708 + 0.7) * scale * 0.036;
-        double htx = (dir > 0) ? -length + hp * (surface->w + 2.0 * length)
-                               : surface->w + length - hp * (surface->w + 2.0 * length);
+        double htx =
+            (dir > 0) ? -length + hp * (surface->w + 2.0 * length)
+                      : surface->w + length - hp * (surface->w + 2.0 * length);
         double hty = surface->h * 0.13 + sin(hp * 15.708) * scale * 0.036;
         draw_weapon_shot(surface, WEAPON_PULSE, 0, fsx, fsy, htx, hty,
                          (double)age, unit, 1, fade, fp > 0.65 ? 1 : 0,
@@ -3157,7 +3157,8 @@ static void render_dogfight_effect(RenderTarget *surface, Uint32 ticks,
 //   0: furball — two or three pairs fighting at once.
 //   1: convoy ambush — two mid-class ships cross the upper sky under fire from
 //      darting interceptors launching swarm missiles and flak bursts.
-//   2: orbital barrage — a pair of distant capital ships hold station on opposite
+//   2: orbital barrage — a pair of distant capital ships hold station on
+//   opposite
 //      flanks, trading heavy beam and railgun volleys across a fighter screen.
 //   3: minefield gauntlet — a mid-class blockade runner weaves through drifting
 //      proximity mines that detonate behind it while fighters give chase.
@@ -3176,16 +3177,15 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
     if (mid_len < 18) mid_len = 18;
     int sm_len = mid_len / 2;
     Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
-    double cx = dir > 0
-                    ? -mid_len * 2 + progress * (surface->w + 4.0 * mid_len)
-                    : surface->w + mid_len * 2 -
-                          progress * (surface->w + 4.0 * mid_len);
+    double cx = dir > 0 ? -mid_len * 2 + progress * (surface->w + 4.0 * mid_len)
+                        : surface->w + mid_len * 2 -
+                              progress * (surface->w + 4.0 * mid_len);
     double cy = surface->h * 0.13;
     for (int c = 0; c < 2; c++) {
       double sx = cx - dir * c * mid_len * 1.9;
       double sy = cy + (c == 0 ? -scale * 0.015 : scale * 0.022);
-      draw_ship_role(surface, (int)sx, (int)sy, SHIP_MID,
-                     window.seed + c * 17, mid_len, dir, 0, opacity);
+      draw_ship_role(surface, (int)sx, (int)sy, SHIP_MID, window.seed + c * 17,
+                     mid_len, dir, 0, opacity);
       // Raiders diving from above and below
       double rx = sx + sin(window.phase / 1300.0 + c * 2.1) * scale * 0.11;
       double ry = sy + (c == 0 ? -1 : 1) * scale * 0.055 *
@@ -3201,10 +3201,10 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
         double hit_p =
             (fire_ph + weapon_specs[weapon].impact_ms) / window.duration;
         if (fire_p > 0.06 && hit_p < 0.94) {
-          double fcx = dir > 0
-                           ? -mid_len * 2 + fire_p * (surface->w + 4.0 * mid_len)
-                           : surface->w + mid_len * 2 -
-                                 fire_p * (surface->w + 4.0 * mid_len);
+          double fcx =
+              dir > 0 ? -mid_len * 2 + fire_p * (surface->w + 4.0 * mid_len)
+                      : surface->w + mid_len * 2 -
+                            fire_p * (surface->w + 4.0 * mid_len);
           double fsx = fcx - dir * c * mid_len * 1.9;
           double frx = fsx + sin(fire_ph / 1300.0 + c * 2.1) * scale * 0.11;
           double fry = sy + (c == 0 ? -1 : 1) * scale * 0.055 *
@@ -3214,9 +3214,9 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
                            : surface->w + mid_len * 2 -
                                  hit_p * (surface->w + 4.0 * mid_len);
           double hsx = hcx - dir * c * mid_len * 1.9;
-          draw_weapon_shot(surface, weapon, 0, frx, fry, hsx, sy, (double)age,
-                           scale / 90.0, 1, fade, 1,
-                           fx_hash(window.seed, (int)(window.phase / 2100) + c));
+          draw_weapon_shot(
+              surface, weapon, 0, frx, fry, hsx, sy, (double)age, scale / 90.0,
+              1, fade, 1, fx_hash(window.seed, (int)(window.phase / 2100) + c));
         }
       }
     }
@@ -3240,10 +3240,12 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
                    big_len, -1, 1, opacity);
     // Fighter screen weaving in the middle
     for (int f = 0; f < 3; f++) {
-      double fx = surface->w * 0.50 +
-                  sin(window.phase / (1100.0 + f * 230) + f * 2.1) * scale * 0.15;
-      double fy = surface->h * 0.12 +
-                  cos(window.phase / (850.0 + f * 170) + f * 1.4) * scale * 0.035;
+      double fx =
+          surface->w * 0.50 +
+          sin(window.phase / (1100.0 + f * 230) + f * 2.1) * scale * 0.15;
+      double fy =
+          surface->h * 0.12 +
+          cos(window.phase / (850.0 + f * 170) + f * 1.4) * scale * 0.035;
       int fdir = cos(window.phase / (1100.0 + f * 230) + f * 2.1) >= 0 ? 1 : -1;
       draw_ship_role(surface, (int)fx, (int)fy, SHIP_SMALL,
                      window.seed + 50 + f, sm_len, fdir, f % 2, opacity);
@@ -3257,7 +3259,8 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
       double ty = side == 0 ? ry : ly;
       draw_weapon_shot(surface, side == 0 ? WEAPON_BEAM : WEAPON_RAIL, 0, sx,
                        sy, tx, ty, (double)b_age, weapon_unit(big_len), side,
-                       fade, 1, fx_hash(window.seed, (int)(window.phase / 2600)));
+                       fade, 1,
+                       fx_hash(window.seed, (int)(window.phase / 2600)));
     }
     return;
   }
@@ -3269,10 +3272,9 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
     if (mid_len < 18) mid_len = 18;
     int sm_len = mid_len / 2;
     Uint8 opacity = (Uint8)(SHIP_OPACITY * fade);
-    double rx = (dir > 0)
-                    ? -mid_len + progress * (surface->w + 2.0 * mid_len)
-                    : surface->w + mid_len -
-                          progress * (surface->w + 2.0 * mid_len);
+    double rx = (dir > 0) ? -mid_len + progress * (surface->w + 2.0 * mid_len)
+                          : surface->w + mid_len -
+                                progress * (surface->w + 2.0 * mid_len);
     double ry = surface->h * 0.12 + sin(progress * 11.0) * scale * 0.025;
     draw_ship_role(surface, (int)rx, (int)ry, SHIP_MID, window.seed + 5,
                    mid_len, dir, 0, opacity);
@@ -3287,9 +3289,9 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
     static const Uint8 mine_c[3] = {245, 110, 85};
     for (int m = 0; m < 7; m++) {
       double mp = 0.14 + m * 0.11;
-      double mx = (dir > 0) ? -mid_len + mp * (surface->w + 2.0 * mid_len)
-                            : surface->w + mid_len -
-                                  mp * (surface->w + 2.0 * mid_len);
+      double mx =
+          (dir > 0) ? -mid_len + mp * (surface->w + 2.0 * mid_len)
+                    : surface->w + mid_len - mp * (surface->w + 2.0 * mid_len);
       double my = surface->h * 0.12 +
                   sin(mp * 11.0 + (m % 2 ? 1.5 : -1.5)) * scale * 0.028;
       if (progress < mp + 0.04) {
@@ -3324,11 +3326,10 @@ static void render_background_battle(RenderTarget *surface, Uint32 ticks,
     // 2 incoming enemy mid-ships on the opposite flank
     double ex_arr[2], ey_arr[2];
     for (int e = 0; e < 2; e++) {
-      ex_arr[e] = (dir > 0)
-                      ? surface->w + sm_len * 2 -
-                            progress * (surface->w * 0.42 + sm_len * 2)
-                      : -sm_len * 2 +
-                            progress * (surface->w * 0.42 + sm_len * 2);
+      ex_arr[e] =
+          (dir > 0) ? surface->w + sm_len * 2 -
+                          progress * (surface->w * 0.42 + sm_len * 2)
+                    : -sm_len * 2 + progress * (surface->w * 0.42 + sm_len * 2);
       ey_arr[e] = surface->h * (0.10 + e * 0.045);
       draw_ship_role(surface, (int)ex_arr[e], (int)ey_arr[e], SHIP_MID,
                      window.seed + 61 + e, (int)(sm_len * 1.6), -dir, 1,
@@ -3448,16 +3449,20 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
     // Dreadnought siege: one side anchors around a central flagship while
     // the attackers orbit in a wider flanking column.
     if (side == fleet->winner) {
-      *x = anchor + (ship == 0 ? 0.0 : -direction * fleet->size * 2.6 * ((ship + 1) / 2)) +
+      *x = anchor +
+           (ship == 0 ? 0.0
+                      : -direction * fleet->size * 2.6 * ((ship + 1) / 2)) +
            sin(t / (700.0 + ship * 80)) * fleet->size * 0.4;
       *y = fleet->center_y + lane * fleet->scale / 30.0;
     } else {
       double ang = progress * 5.2 + ship * 0.55;
       double rad_x = fleet->scale * 0.24;
       double rad_y = fleet->scale * 0.068;
-      double edge = (side == 0) ? -fleet->size * 6.0 : width + fleet->size * 6.0;
-      double cx = edge + approach * (width * 0.50 - edge) +
-                  (side == 0 ? -retreat * width * 0.62 : retreat * width * 0.62);
+      double edge =
+          (side == 0) ? -fleet->size * 6.0 : width + fleet->size * 6.0;
+      double cx =
+          edge + approach * (width * 0.50 - edge) +
+          (side == 0 ? -retreat * width * 0.62 : retreat * width * 0.62);
       *x = cx + cos(ang) * rad_x;
       *y = fleet->center_y + sin(ang) * rad_y;
     }
@@ -3468,7 +3473,8 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
     // (left and right) closing around a retreating center column.
     if (side == fleet->winner) {
       int wing = ship % 2;
-      double start_x = wing == 0 ? -fleet->size * 6.0 : width + fleet->size * 6.0;
+      double start_x =
+          wing == 0 ? -fleet->size * 6.0 : width + fleet->size * 6.0;
       double target_x = wing == 0 ? width * 0.30 : width * 0.70;
       double wx = start_x + approach * (target_x - start_x);
       double wy = fleet->center_y + (wing == 0 ? -1 : 1) * fleet->scale * 0.042;
@@ -3476,7 +3482,8 @@ static void fleet_pose(const Fleet *fleet, int side, int ship, double t,
            sin(t / (540.0 + ship * 95)) * fleet->size * 0.5;
       *y = wy + cos(t / (480.0 + ship * 70)) * fleet->size * 0.5;
     } else {
-      double start_x = (side == 0) ? -fleet->size * 6.0 : width + fleet->size * 6.0;
+      double start_x =
+          (side == 0) ? -fleet->size * 6.0 : width + fleet->size * 6.0;
       double cx = start_x + approach * (width * 0.50 - start_x);
       double cy = fleet->center_y - retreat * fleet->scale * 0.22;
       *x = cx + lane * fleet->size * 2.2 +
@@ -3996,9 +4003,9 @@ static void render_long_scene(RenderTarget *surface, Uint32 ticks, int scale) {
       int prev_y = tide_y + band * scale / 34;
       for (int seg = 1; seg <= 22; seg++) {
         int next_x = surface->w * seg / 22;
-        int next_y =
-            tide_y + band * scale / 34 +
-            (int)(sin(seg * 0.75 + ticks / (420.0 + band * 90)) * scale * 0.011);
+        int next_y = tide_y + band * scale / 34 +
+                     (int)(sin(seg * 0.75 + ticks / (420.0 + band * 90)) *
+                           scale * 0.011);
         thickLineRGBA(surface, prev_x, prev_y, next_x, next_y, 2, 70, 228, 210,
                       (Uint8)((95 - band * 16) * fade));
         prev_x = next_x;
@@ -4008,9 +4015,9 @@ static void render_long_scene(RenderTarget *surface, Uint32 ticks, int scale) {
     static const Uint8 bio[3] = {80, 245, 215};
     for (int i = 0; i < 24; i++) {
       unsigned int h = fx_hash(seed, 700 + i);
-      double fx = fmod((h % 1000) / 1000.0 + progress * (0.2 + (h % 5) * 0.04),
-                       1.0) *
-                  surface->w;
+      double fx =
+          fmod((h % 1000) / 1000.0 + progress * (0.2 + (h % 5) * 0.04), 1.0) *
+          surface->w;
       double fy = tide_y + (h % 100) / 100.0 * (surface->h - tide_y);
       double pulse = 0.5 + 0.5 * sin(ticks / 340.0 + i * 1.3);
       weapon_glow(surface, fx, fy, 1.5 + (h % 3) * 0.6, bio,
@@ -4031,9 +4038,9 @@ static void render_long_scene(RenderTarget *surface, Uint32 ticks, int scale) {
                             : surface->w + len - u * (surface->w + 2.0 * len);
       double sy = surface->h * (0.14 + (s % 3) * 0.06) +
                   sin(ticks / 1400.0 + s * 1.7) * scale * 0.014;
-      draw_ship_role(surface, (int)sx, (int)sy, (s == 2) ? SHIP_MID : SHIP_SMALL,
-                     seed + s * 19, (s == 2) ? (int)(len * 1.5) : len, dir,
-                     s % 2, opacity);
+      draw_ship_role(surface, (int)sx, (int)sy,
+                     (s == 2) ? SHIP_MID : SHIP_SMALL, seed + s * 19,
+                     (s == 2) ? (int)(len * 1.5) : len, dir, s % 2, opacity);
     }
   }
 }
@@ -8824,8 +8831,8 @@ static void hill_abyssal_reach(const HillEvent *event) {
     const int segs = 10;
     for (int i = 1; i <= segs; i++) {
       double u = (double)i / segs;
-      double sway = sin(event->t * (0.65 + t * 0.09) + t * 1.4 - u * 2.2) *
-                    s * 0.022 * u;
+      double sway =
+          sin(event->t * (0.65 + t * 0.09) + t * 1.4 - u * 2.2) * s * 0.022 * u;
       double nx = base_x + sway + (t - 2) * s * 0.008 * u;
       double ny = ground + 3 - len * u;
       int thick = (int)(base_w * (1.0 - u * 0.85)) + 1;
@@ -8958,12 +8965,11 @@ static void hill_derelict_galleon(const HillEvent *event) {
     double y_y = my0 - mh * 0.65;
     double y_x = mx + lean * 0.65;
     double yw = s * (m == 0 ? 0.032 : 0.022);
-    lineRGBA(surface, (int)(y_x - yw), (int)(y_y + yw * 0.15),
-             (int)(y_x + yw), (int)(y_y - yw * 0.15), 26, 30, 40, alpha);
+    lineRGBA(surface, (int)(y_x - yw), (int)(y_y + yw * 0.15), (int)(y_x + yw),
+             (int)(y_y - yw * 0.15), 26, 30, 40, alpha);
     // Faint St. Elmo's fire at the masthead & yardarm tips
     double flick = 0.4 + 0.6 * fabs(sin(event->t * 2.4 + m * 1.9));
-    weapon_glow(surface, top_x, top_y, 1.7, elmo,
-                165.0 * flick * event->fade);
+    weapon_glow(surface, top_x, top_y, 1.7, elmo, 165.0 * flick * event->fade);
     weapon_glow(surface, y_x - yw, y_y + yw * 0.15, 1.2, elmo,
                 115.0 * flick * event->fade);
   }
@@ -9001,8 +9007,7 @@ static void hill_threshold_arch(const HillEvent *event) {
     double sx = cx + (hill_random(event, i, 10) - 0.5) * aw * 1.05;
     double sy = ground - (0.15 + 0.78 * hill_random(event, i, 11)) * ah;
     double tw = 0.5 + 0.5 * sin(event->t * 2.2 + i * 1.7);
-    weapon_glow(surface, sx, sy, 1.3, rift_c,
-                195.0 * tw * hum * event->fade);
+    weapon_glow(surface, sx, sy, 1.3, rift_c, 195.0 * tw * hum * event->fade);
   }
 }
 
@@ -9091,9 +9096,9 @@ static void hill_canal_skiff(const HillEvent *event) {
   lineRGBA(surface, (int)x, (int)(ground - 3), (int)x, (int)(ground - mast),
            176, 138, 86, hull_a);
   filledTrigonRGBA(surface, (int)x, (int)(ground - mast), (int)x,
-                   (int)(ground - mast * 0.25),
-                   (int)(x + dir * hull * 0.52), (int)(ground - mast * 0.42),
-                   188, 154, 102, weapon_alpha(110.0 * event->fade));
+                   (int)(ground - mast * 0.25), (int)(x + dir * hull * 0.52),
+                   (int)(ground - mast * 0.42), 188, 154, 102,
+                   weapon_alpha(110.0 * event->fade));
   // Prow lantern
   static const Uint8 lantern[3] = {250, 205, 115};
   weapon_glow(surface, x + dir * hull * 0.55, ground - 4, 1.8, lantern,
@@ -9119,9 +9124,9 @@ static void hill_prism_observatory(const HillEvent *event) {
   double tilt = -0.35 + 0.25 * sin(event->t * 0.45);
   double bx = x + sin(tilt) * s * 0.19;
   double by = ground - r * 1.2 - cos(tilt) * s * 0.19;
-  filledTrigonRGBA(surface, (int)(x - 3), (int)(ground - r * 1.1),
-                   (int)(x + 3), (int)(ground - r * 1.1), (int)bx, (int)by,
-                   125, 205, 250, weapon_alpha(48.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(x - 3), (int)(ground - r * 1.1), (int)(x + 3),
+                   (int)(ground - r * 1.1), (int)bx, (int)by, 125, 205, 250,
+                   weapon_alpha(48.0 * event->fade));
   static const Uint8 slit[3] = {150, 225, 255};
   weapon_glow(surface, x, ground - r * 1.15, 2.2, slit, 175.0 * event->fade);
 }
@@ -9233,8 +9238,7 @@ static void hill_signal_pyre(const HillEvent *event) {
     double u = fmod(event->t * 0.65 + i / 8.0, 1.0);
     double ex = x + sin(event->t * 3.0 + i * 1.7) * w * 1.4;
     double ey = ground - h - s * 0.016 - u * s * 0.065;
-    weapon_glow(surface, ex, ey, 1.0, flame_c,
-                (1.0 - u) * 175.0 * event->fade);
+    weapon_glow(surface, ex, ey, 1.0, flame_c, (1.0 - u) * 175.0 * event->fade);
   }
 }
 
@@ -9409,8 +9413,7 @@ static void hill_beacon_windmill(const HillEvent *event) {
     double a = rot + i * (M_PI * 0.5);
     double tx = x + cos(a) * arm;
     double ty = hub_y + sin(a) * arm;
-    lineRGBA(surface, (int)x, (int)hub_y, (int)tx, (int)ty, 34, 42, 58,
-             hull_a);
+    lineRGBA(surface, (int)x, (int)hub_y, (int)tx, (int)ty, 34, 42, 58, hull_a);
     weapon_glow(surface, tx, ty, 1.2, lamp_c, 180.0 * event->fade);
   }
 }
@@ -9433,7 +9436,8 @@ static void hill_star_basin(const HillEvent *event) {
   for (int i = 0; i < 6; i++) {
     double u = -0.75 + 0.3 * i;
     double sx = x + u * w;
-    double sy = ground - s * 0.011 - fabs(sin(event->t * 1.8 + i * 1.3)) * s * 0.012;
+    double sy =
+        ground - s * 0.011 - fabs(sin(event->t * 1.8 + i * 1.3)) * s * 0.012;
     double tw = 0.4 + 0.6 * sin(event->t * 3.2 + i * 1.7);
     weapon_glow(surface, sx, sy, 1.0, star_c, 165.0 * tw * event->fade);
   }
@@ -9472,11 +9476,11 @@ static void hill_crystal_geode(const HillEvent *event) {
   double r = s * 0.036;
   Uint8 hull_a = weapon_alpha(230.0 * event->fade);
   filledTrigonRGBA(surface, (int)(x - r), (int)(ground + 2), (int)(x - r * 0.2),
-                   (int)(ground + 2), (int)(x - r * 0.7), (int)(ground - r * 0.9),
-                   20, 22, 32, hull_a);
+                   (int)(ground + 2), (int)(x - r * 0.7),
+                   (int)(ground - r * 0.9), 20, 22, 32, hull_a);
   filledTrigonRGBA(surface, (int)(x + r), (int)(ground + 2), (int)(x + r * 0.2),
-                   (int)(ground + 2), (int)(x + r * 0.7), (int)(ground - r * 0.9),
-                   20, 22, 32, hull_a);
+                   (int)(ground + 2), (int)(x + r * 0.7),
+                   (int)(ground - r * 0.9), 20, 22, 32, hull_a);
   static const Uint8 gem_c[3] = {205, 130, 255};
   for (int i = -1; i <= 1; i++) {
     double gx = x + i * r * 0.24;
@@ -9534,8 +9538,8 @@ static void hill_echo_spire(const HillEvent *event) {
     double u = fmod(event->t * 0.5 + i / 3.0, 1.0);
     double ry = ground - h - u * s * 0.045;
     double rx = s * (0.008 + u * 0.032);
-    ellipseRGBA(surface, (int)x, (int)ry, (int)rx, (int)(rx * 0.35),
-                ring_c[0], ring_c[1], ring_c[2],
+    ellipseRGBA(surface, (int)x, (int)ry, (int)rx, (int)(rx * 0.35), ring_c[0],
+                ring_c[1], ring_c[2],
                 weapon_alpha((1.0 - u) * 185.0 * event->fade));
   }
 }
@@ -9560,8 +9564,7 @@ static void hill_amber_kiln(const HillEvent *event) {
     double u = fmod(event->t * 0.6 + i / 6.0, 1.0);
     double sx = x + sin(event->t * 2.5 + i * 1.9) * r * 0.6;
     double sy = ground - r * 1.3 - u * s * 0.05;
-    weapon_glow(surface, sx, sy, 1.0, fire_c,
-                (1.0 - u) * 165.0 * event->fade);
+    weapon_glow(surface, sx, sy, 1.0, fire_c, (1.0 - u) * 165.0 * event->fade);
   }
 }
 
@@ -9581,8 +9584,8 @@ static void hill_starlight_mill(const HillEvent *event) {
   double hy = ground - h * 0.85;
   double r = s * 0.028;
   static const Uint8 crys_c[3] = {135, 210, 255};
-  circleRGBA(surface, (int)x, (int)hy, (int)r, crys_c[0], crys_c[1],
-             crys_c[2], weapon_alpha(135.0 * event->fade));
+  circleRGBA(surface, (int)x, (int)hy, (int)r, crys_c[0], crys_c[1], crys_c[2],
+             weapon_alpha(135.0 * event->fade));
   double rot = event->t * 0.7;
   for (int i = 0; i < 6; i++) {
     double a = rot + i * (M_PI / 3.0);
@@ -9607,8 +9610,8 @@ static void hill_reed_beacons(const HillEvent *event) {
     double rg = hill_ground(event, rx);
     double rh = s * (0.036 + (i % 2 == 0 ? 0.012 : 0.0));
     double sway = sin(event->t * 1.9 + i * 0.7) * s * 0.006;
-    lineRGBA(surface, (int)rx, (int)(rg + 2), (int)(rx + sway),
-             (int)(rg - rh), 26, 36, 40, hull_a);
+    lineRGBA(surface, (int)rx, (int)(rg + 2), (int)(rx + sway), (int)(rg - rh),
+             26, 36, 40, hull_a);
     weapon_glow(surface, rx + sway, rg - rh, 1.1, wisp_c, 175.0 * event->fade);
   }
 }
@@ -9627,8 +9630,7 @@ static void hill_stargate_pylon(const HillEvent *event) {
   circleRGBA(surface, (int)x, (int)cy, (int)(r - 1), 36, 42, 60, hull_a);
   static const Uint8 portal_c[3] = {155, 165, 255};
   double pulse = 0.75 + 0.25 * sin(event->t * 2.4);
-  weapon_glow(surface, x, cy, r * 0.65 * pulse, portal_c,
-              140.0 * event->fade);
+  weapon_glow(surface, x, cy, r * 0.65 * pulse, portal_c, 140.0 * event->fade);
 }
 
 // Tide chimes: a row of five slender bronze chimes hanging from a ridge beam
@@ -9641,10 +9643,10 @@ static void hill_tide_chimes(const HillEvent *event) {
   double w = s * 0.048;
   double top = ground - s * 0.056;
   Uint8 hull_a = weapon_alpha(230.0 * event->fade);
-  lineRGBA(surface, (int)(x - w), (int)(ground + 2), (int)(x - w), (int)top,
-           22, 26, 38, hull_a);
-  lineRGBA(surface, (int)(x + w), (int)(ground + 2), (int)(x + w), (int)top,
-           22, 26, 38, hull_a);
+  lineRGBA(surface, (int)(x - w), (int)(ground + 2), (int)(x - w), (int)top, 22,
+           26, 38, hull_a);
+  lineRGBA(surface, (int)(x + w), (int)(ground + 2), (int)(x + w), (int)top, 22,
+           26, 38, hull_a);
   thickLineRGBA(surface, (int)(x - w), (int)top, (int)(x + w), (int)top, 2, 26,
                 30, 44, hull_a);
   static const Uint8 chime_c[3] = {145, 235, 225};
@@ -9696,8 +9698,8 @@ static void hill_mist_crane(const HillEvent *event) {
   double dip = sin(event->t * 1.1) * s * 0.008;
   double hx = x + s * 0.018;
   double hy = ground - leg_h - s * 0.020 + dip;
-  thickLineRGBA(surface, (int)x, (int)(ground - leg_h), (int)hx, (int)hy, 2,
-                26, 32, 46, hull_a);
+  thickLineRGBA(surface, (int)x, (int)(ground - leg_h), (int)hx, (int)hy, 2, 26,
+                32, 46, hull_a);
   lineRGBA(surface, (int)hx, (int)hy, (int)(hx + s * 0.012),
            (int)(hy + s * 0.004), 165, 195, 225,
            weapon_alpha(185.0 * event->fade));
@@ -9735,10 +9737,10 @@ static void hill_lantern_arch(const HillEvent *event) {
   double w = s * 0.034;
   double h = s * 0.068;
   Uint8 hull_a = weapon_alpha(230.0 * event->fade);
-  thickLineRGBA(surface, (int)(x - w), (int)(ground + 2),
-                (int)(x - w * 0.85), (int)(ground - h), 2, 22, 24, 34, hull_a);
-  thickLineRGBA(surface, (int)(x + w), (int)(ground + 2),
-                (int)(x + w * 0.85), (int)(ground - h), 2, 22, 24, 34, hull_a);
+  thickLineRGBA(surface, (int)(x - w), (int)(ground + 2), (int)(x - w * 0.85),
+                (int)(ground - h), 2, 22, 24, 34, hull_a);
+  thickLineRGBA(surface, (int)(x + w), (int)(ground + 2), (int)(x + w * 0.85),
+                (int)(ground - h), 2, 22, 24, 34, hull_a);
   thickLineRGBA(surface, (int)(x - w * 1.25), (int)(ground - h),
                 (int)(x + w * 1.25), (int)(ground - h), 3, 24, 26, 38, hull_a);
   double sway = sin(event->t * 1.7) * s * 0.005;
@@ -9812,8 +9814,7 @@ static void hill_tide_clock(const HillEvent *event) {
   thickLineRGBA(surface, (int)x, (int)(ground - s * 0.008), (int)x,
                 (int)(ground - h * level), 3, aqua_c[0], aqua_c[1], aqua_c[2],
                 weapon_alpha(185.0 * event->fade));
-  weapon_glow(surface, x, ground - h * level, 1.2, aqua_c,
-              185.0 * event->fade);
+  weapon_glow(surface, x, ground - h * level, 1.2, aqua_c, 185.0 * event->fade);
 }
 
 // Fire wheel: a festival Catherine wheel mounted on a ridge post, spinning
@@ -9928,8 +9929,7 @@ static void hill_star_well(const HillEvent *event) {
     double u = fmod(event->t * 0.45 + i / 7.0, 1.0);
     double mx = x + sin(event->t * 2.0 + i * 1.5) * w * 0.65;
     double my = ground - h - u * s * 0.068;
-    weapon_glow(surface, mx, my, 1.1, mote_c,
-                (1.0 - u) * 185.0 * event->fade);
+    weapon_glow(surface, mx, my, 1.1, mote_c, (1.0 - u) * 185.0 * event->fade);
   }
 }
 
@@ -9991,10 +9991,12 @@ static void hill_twin_monoliths(const HillEvent *event) {
   Uint8 hull_a = weapon_alpha(230.0 * event->fade);
   filledTrigonRGBA(surface, (int)(x - sep - s * 0.014), (int)(ground + 2),
                    (int)(x - sep + s * 0.010), (int)(ground + 2),
-                   (int)(x - sep * 0.65), (int)(ground - h), 20, 24, 34, hull_a);
+                   (int)(x - sep * 0.65), (int)(ground - h), 20, 24, 34,
+                   hull_a);
   filledTrigonRGBA(surface, (int)(x + sep + s * 0.014), (int)(ground + 2),
                    (int)(x + sep - s * 0.010), (int)(ground + 2),
-                   (int)(x + sep * 0.65), (int)(ground - h), 20, 24, 34, hull_a);
+                   (int)(x + sep * 0.65), (int)(ground - h), 20, 24, 34,
+                   hull_a);
   static const Uint8 arc_c[3] = {255, 215, 135};
   double mid_y = ground - h - sin(event->t * 3.5) * s * 0.010;
   lineRGBA(surface, (int)(x - sep * 0.65), (int)(ground - h), (int)x,
@@ -10073,45 +10075,151 @@ static void hill_pendulum(const HillEvent *event) {
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
-    hill_village,       hill_caravan,   hill_turbines,    hill_lanterns,
-    hill_campfire,      hill_bloom,     hill_herd,        hill_volcano,
-    hill_beacons,       hill_fireflies, hill_kites,       hill_fireworks,
-    hill_train,         hill_rocket,    hill_abduction,   hill_geysers,
-    hill_stones,        hill_ferris,    hill_observatory, hill_windmills,
-    hill_lighttree,     hill_meteorite, hill_dustdevils,  hill_lasers,
-    hill_tesla,         hill_balloons,  hill_giant,       hill_clocktower,
-    hill_drones,        hill_bats,      hill_gate,        hill_lighthouse,
-    hill_cherry,        hill_wolf,      hill_pumpkins,    hill_castle,
-    hill_spaceelevator, hill_airstrip,  hill_hotsprings,  hill_market,
-    hill_lotus,         hill_bonfire,   hill_waterfall,   hill_scarecrows,
-    hill_pagoda,        hill_skaters,   hill_shepherd,    hill_bridge,
-    hill_totems,        hill_snowmen,   hill_sunflowers,  hill_crystals,
-    hill_mushrooms,     hill_tents,     hill_fountain,    hill_harvester,
-    hill_cairns,        hill_watermill, hill_marsh,       hill_stargazers,
-    hill_carousel,      hill_trebuchet, hill_orchard,     hill_radiomast,
-    hill_greenhouse,    hill_swings,    hill_beehives,    hill_cableway,
-    hill_ruins,         hill_geodome,   hill_cabin,       hill_windchimes,
-    hill_picnic,        hill_wishtree,  hill_mine,        hill_eggs,
-    hill_hammock,       hill_telegraph, hill_hamlet,      hill_stepstones,
-    hill_seesaw,        hill_laundry,   hill_well,        hill_kiln,
-    hill_ropebridge,    hill_belltower, hill_maze,        hill_fisher,
-    hill_lanterntree,   hill_forge,     hill_seedtree,    hill_stonecircle,
-    hill_sandcastle,    hill_musicbox,  hill_lightstairs, hill_armillary,
-    hill_monolith,      hill_abyssal_reach, hill_shrikes_tree,
-    hill_pale_lighthouse, hill_derelict_galleon, hill_threshold_arch,
-    hill_glass_forest, hill_tidal_bell, hill_canal_skiff,
-    hill_prism_observatory, hill_aurora_turbine, hill_solar_mirror,
-    hill_ether_fountain, hill_signal_pyre, hill_tide_lantern,
-    hill_frost_obelisk, hill_wind_harp, hill_lantern_bridge,
-    hill_sun_dial, hill_glacier_arch, hill_beacon_windmill,
-    hill_star_basin, hill_signal_semaphores, hill_crystal_geode,
-    hill_hanging_gardens, hill_echo_spire, hill_amber_kiln,
-    hill_starlight_mill, hill_reed_beacons, hill_stargate_pylon,
-    hill_tide_chimes, hill_ember_cairn, hill_mist_crane,
-    hill_moon_dome, hill_lantern_arch, hill_bio_grove, hill_beacon_mast,
-    hill_tide_clock, hill_fire_wheel, hill_rune_pillar, hill_star_antenna,
-    hill_lantern_pergola, hill_star_well, hill_bell_arch, hill_aurora_reeds,
-    hill_twin_monoliths, hill_paper_boats, hill_glow_cave, hill_pendulum,
+    hill_village,
+    hill_caravan,
+    hill_turbines,
+    hill_lanterns,
+    hill_campfire,
+    hill_bloom,
+    hill_herd,
+    hill_volcano,
+    hill_beacons,
+    hill_fireflies,
+    hill_kites,
+    hill_fireworks,
+    hill_train,
+    hill_rocket,
+    hill_abduction,
+    hill_geysers,
+    hill_stones,
+    hill_ferris,
+    hill_observatory,
+    hill_windmills,
+    hill_lighttree,
+    hill_meteorite,
+    hill_dustdevils,
+    hill_lasers,
+    hill_tesla,
+    hill_balloons,
+    hill_giant,
+    hill_clocktower,
+    hill_drones,
+    hill_bats,
+    hill_gate,
+    hill_lighthouse,
+    hill_cherry,
+    hill_wolf,
+    hill_pumpkins,
+    hill_castle,
+    hill_spaceelevator,
+    hill_airstrip,
+    hill_hotsprings,
+    hill_market,
+    hill_lotus,
+    hill_bonfire,
+    hill_waterfall,
+    hill_scarecrows,
+    hill_pagoda,
+    hill_skaters,
+    hill_shepherd,
+    hill_bridge,
+    hill_totems,
+    hill_snowmen,
+    hill_sunflowers,
+    hill_crystals,
+    hill_mushrooms,
+    hill_tents,
+    hill_fountain,
+    hill_harvester,
+    hill_cairns,
+    hill_watermill,
+    hill_marsh,
+    hill_stargazers,
+    hill_carousel,
+    hill_trebuchet,
+    hill_orchard,
+    hill_radiomast,
+    hill_greenhouse,
+    hill_swings,
+    hill_beehives,
+    hill_cableway,
+    hill_ruins,
+    hill_geodome,
+    hill_cabin,
+    hill_windchimes,
+    hill_picnic,
+    hill_wishtree,
+    hill_mine,
+    hill_eggs,
+    hill_hammock,
+    hill_telegraph,
+    hill_hamlet,
+    hill_stepstones,
+    hill_seesaw,
+    hill_laundry,
+    hill_well,
+    hill_kiln,
+    hill_ropebridge,
+    hill_belltower,
+    hill_maze,
+    hill_fisher,
+    hill_lanterntree,
+    hill_forge,
+    hill_seedtree,
+    hill_stonecircle,
+    hill_sandcastle,
+    hill_musicbox,
+    hill_lightstairs,
+    hill_armillary,
+    hill_monolith,
+    hill_abyssal_reach,
+    hill_shrikes_tree,
+    hill_pale_lighthouse,
+    hill_derelict_galleon,
+    hill_threshold_arch,
+    hill_glass_forest,
+    hill_tidal_bell,
+    hill_canal_skiff,
+    hill_prism_observatory,
+    hill_aurora_turbine,
+    hill_solar_mirror,
+    hill_ether_fountain,
+    hill_signal_pyre,
+    hill_tide_lantern,
+    hill_frost_obelisk,
+    hill_wind_harp,
+    hill_lantern_bridge,
+    hill_sun_dial,
+    hill_glacier_arch,
+    hill_beacon_windmill,
+    hill_star_basin,
+    hill_signal_semaphores,
+    hill_crystal_geode,
+    hill_hanging_gardens,
+    hill_echo_spire,
+    hill_amber_kiln,
+    hill_starlight_mill,
+    hill_reed_beacons,
+    hill_stargate_pylon,
+    hill_tide_chimes,
+    hill_ember_cairn,
+    hill_mist_crane,
+    hill_moon_dome,
+    hill_lantern_arch,
+    hill_bio_grove,
+    hill_beacon_mast,
+    hill_tide_clock,
+    hill_fire_wheel,
+    hill_rune_pillar,
+    hill_star_antenna,
+    hill_lantern_pergola,
+    hill_star_well,
+    hill_bell_arch,
+    hill_aurora_reeds,
+    hill_twin_monoliths,
+    hill_paper_boats,
+    hill_glow_cave,
+    hill_pendulum,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
@@ -13500,8 +13608,7 @@ static void sky_event_139(const SkyEvent *event) {
     Uint8 g = alt ? violet[1] : blight[1];
     Uint8 b = alt ? violet[2] : blight[2];
     filledEllipseRGBA(surface, (int)lx, (int)ly, (int)(lr * 1.2),
-                      (int)(lr * 0.75), r, g, b,
-                      weapon_alpha(26.0 * fade));
+                      (int)(lr * 0.75), r, g, b, weapon_alpha(26.0 * fade));
   }
   // Anomalous core: a dark void-heart rimmed with shifting alien spectra
   filledCircleRGBA(surface, (int)cx, (int)cy, (int)(size * 0.42) + 1, 10, 6, 18,
@@ -13555,8 +13662,8 @@ static void sky_event_140(const SkyEvent *event) {
   // Faint constellation filaments connecting the black stars
   for (int i = 0; i < 3; i++) {
     int j = (i + 1) % 3;
-    lineRGBA(surface, (int)px[i], (int)py[i], (int)px[j], (int)py[j],
-             corona[0], corona[1], corona[2], weapon_alpha(55.0 * fade));
+    lineRGBA(surface, (int)px[i], (int)py[i], (int)px[j], (int)py[j], corona[0],
+             corona[1], corona[2], weapon_alpha(55.0 * fade));
   }
   // Draw each black star: pale eclipse corona, void disc, and cold rays
   for (int i = 0; i < 3; i++) {
@@ -13572,10 +13679,9 @@ static void sky_event_140(const SkyEvent *event) {
     for (int ray = 0; ray < 4; ray++) {
       double ra = ray * (M_PI / 2.0) + phase / 1900.0 * (i % 2 ? -1 : 1);
       double len = r * (1.9 + 0.35 * pulse);
-      lineRGBA(surface, (int)(px[i] + cos(ra) * r),
-               (int)(py[i] + sin(ra) * r), (int)(px[i] + cos(ra) * len),
-               (int)(py[i] + sin(ra) * len), ember[0], ember[1], ember[2],
-               weapon_alpha(110.0 * fade));
+      lineRGBA(surface, (int)(px[i] + cos(ra) * r), (int)(py[i] + sin(ra) * r),
+               (int)(px[i] + cos(ra) * len), (int)(py[i] + sin(ra) * len),
+               ember[0], ember[1], ember[2], weapon_alpha(110.0 * fade));
     }
   }
 }
@@ -13594,8 +13700,8 @@ static void sky_event_141(const SkyEvent *event) {
   int px_prev = 0, py_prev = 0;
   for (int i = 0; i <= pts; i++) {
     double a = (2.0 * M_PI * i) / pts;
-    double wobble = 1.0 + 0.24 * sin(a * 3.0 + morph) +
-                    0.14 * cos(a * 5.0 - morph * 1.3);
+    double wobble =
+        1.0 + 0.24 * sin(a * 3.0 + morph) + 0.14 * cos(a * 5.0 - morph * 1.3);
     int px = x + (int)(cos(a) * r0 * wobble);
     int py = y + (int)(sin(a) * r0 * 0.72 * wobble);
     if (i > 0) {
@@ -13737,8 +13843,7 @@ static void sky_event_145(const SkyEvent *event) {
     int thick = 1 + (int)(2.5 * (0.5 + 0.5 * sin(a0 * 3.0 + seed * 0.7)));
     thickLineRGBA(surface, x0, y0, x1, y1, thick, 18, 22, 32,
                   weapon_alpha(230.0 * fade));
-    lineRGBA(surface, x0, y0, x1, y1, 145, 165, 190,
-             weapon_alpha(70.0 * fade));
+    lineRGBA(surface, x0, y0, x1, y1, 145, 165, 190, weapon_alpha(70.0 * fade));
     // Wispy ink tendrils radiating from thick clusters
     if (i % 4 == 0) {
       double tr = r * (1.28 + 0.18 * sin(phase / 700.0 + i));
@@ -13806,8 +13911,8 @@ static void sky_event_147(const SkyEvent *event) {
     double ry = rx * (0.28 + (i % 3) * 0.12);
     double px = x + cos(a) * rx;
     double py = y + sin(a) * ry;
-    boxRGBA(surface, (int)px - 2, (int)py - 1, (int)px + 2, (int)py + 1, 22,
-            28, 40, weapon_alpha(230.0 * fade));
+    boxRGBA(surface, (int)px - 2, (int)py - 1, (int)px + 2, (int)py + 1, 22, 28,
+            40, weapon_alpha(230.0 * fade));
     if ((i + (int)(phase / 260)) % 4 == 0) {
       weapon_glow(surface, px, py, 1.3, glint_c, 150.0 * fade);
     }
@@ -13824,8 +13929,8 @@ static void sky_event_148(const SkyEvent *event) {
   double sweep = phase / 340.0;
   double beam_len = size * 3.4;
   // Equator accretion ring
-  ellipseRGBA(surface, x, y, (int)(size * 1.45), (int)(size * 0.42),
-              halo_c[0], halo_c[1], halo_c[2], weapon_alpha(115.0 * fade));
+  ellipseRGBA(surface, x, y, (int)(size * 1.45), (int)(size * 0.42), halo_c[0],
+              halo_c[1], halo_c[2], weapon_alpha(115.0 * fade));
   // Twin rotating relativistic jets
   for (int j = 0; j < 2; j++) {
     double a = sweep + j * M_PI;
@@ -13843,9 +13948,11 @@ static void sky_event_148(const SkyEvent *event) {
 // starlight ray into a fanning rainbow spectrum across the upper sky.
 static void sky_event_149(const SkyEvent *event) {
   SKY_EVENT_UNPACK(event);
-  static const Uint8 spec_c[5][3] = {
-      {255, 115, 115}, {255, 200, 105}, {140, 245, 165},
-      {115, 215, 255}, {195, 145, 255}};
+  static const Uint8 spec_c[5][3] = {{255, 115, 115},
+                                     {255, 200, 105},
+                                     {140, 245, 165},
+                                     {115, 215, 255},
+                                     {195, 145, 255}};
   double r = size * 1.15;
   double rot = phase / 1900.0;
   int px[4], py[4];
@@ -13922,10 +14029,11 @@ static void sky_event_151(const SkyEvent *event) {
     for (int s = 1; s <= 5; s++) {
       double t = s / 5.0;
       double nx = ax + (bx - ax) * t;
-      double jitter = (s < 5)
-                          ? (((int)(fx_hash(seed + f * 31, step * 7 + s) % 100) - 50) / 50.0) *
-                                size * 0.48
-                          : 0.0;
+      double jitter =
+          (s < 5) ? (((int)(fx_hash(seed + f * 31, step * 7 + s) % 100) - 50) /
+                     50.0) *
+                        size * 0.48
+                  : 0.0;
       double ny = ay + (by - ay) * t + jitter;
       thickLineRGBA(surface, (int)px, (int)py, (int)nx, (int)ny, f == 0 ? 2 : 1,
                     f == 0 ? 185 : 225, f == 0 ? 140 : 235, 255,
@@ -14146,8 +14254,7 @@ static void sky_event_161(const SkyEvent *event) {
     double a = phase / 950.0 + i * (M_PI / 4.0);
     double mx = x + cos(a) * rx;
     double my = y + sin(a) * ry;
-    weapon_glow(surface, mx, my, (i % 2 == 0 ? 1.4 : 1.0), ice_c,
-                185.0 * fade);
+    weapon_glow(surface, mx, my, (i % 2 == 0 ? 1.4 : 1.0), ice_c, 185.0 * fade);
   }
 }
 
@@ -14183,8 +14290,7 @@ static void sky_event_163(const SkyEvent *event) {
     thickLineRGBA(surface, (int)cx, (int)(y - h * 0.5), (int)cx,
                   (int)(y + h * 0.5), 2, chime_c[0], chime_c[1], chime_c[2],
                   weapon_alpha(185.0 * pulse * fade));
-    weapon_glow(surface, cx, y - h * 0.5, 1.1, chime_c,
-                160.0 * pulse * fade);
+    weapon_glow(surface, cx, y - h * 0.5, 1.1, chime_c, 160.0 * pulse * fade);
   }
 }
 
@@ -14234,10 +14340,9 @@ static void sky_event_166(const SkyEvent *event) {
   static const Uint8 jet_c[3] = {165, 235, 255};
   double rot = phase / 650.0;
   double jlen = size * 1.9;
-  thickLineRGBA(surface, (int)(x - cos(rot) * jlen),
-                (int)(y - sin(rot) * jlen), (int)(x + cos(rot) * jlen),
-                (int)(y + sin(rot) * jlen), 2, jet_c[0], jet_c[1], jet_c[2],
-                weapon_alpha(175.0 * fade));
+  thickLineRGBA(surface, (int)(x - cos(rot) * jlen), (int)(y - sin(rot) * jlen),
+                (int)(x + cos(rot) * jlen), (int)(y + sin(rot) * jlen), 2,
+                jet_c[0], jet_c[1], jet_c[2], weapon_alpha(175.0 * fade));
   ellipseRGBA(surface, x, y, (int)(size * 0.9), (int)(size * 0.35), 140, 195,
               240, weapon_alpha(120.0 * fade));
   weapon_glow(surface, x, y, 1.8, jet_c, 225.0 * fade);
@@ -14254,12 +14359,11 @@ static void sky_event_167(const SkyEvent *event) {
                     weapon_alpha(225.0 * fade));
   double tail_x = x - direction * rx * 1.15;
   double fluke = sin(phase / 450.0) * size * 0.3;
-  filledTrigonRGBA(surface, (int)(x - direction * rx * 0.75), y,
-                   (int)(tail_x - direction * size * 0.4),
-                   (int)(y - size * 0.45 + fluke),
-                   (int)(tail_x - direction * size * 0.4),
-                   (int)(y + size * 0.45 + fluke), 26, 38, 62,
-                   weapon_alpha(225.0 * fade));
+  filledTrigonRGBA(
+      surface, (int)(x - direction * rx * 0.75), y,
+      (int)(tail_x - direction * size * 0.4), (int)(y - size * 0.45 + fluke),
+      (int)(tail_x - direction * size * 0.4), (int)(y + size * 0.45 + fluke),
+      26, 38, 62, weapon_alpha(225.0 * fade));
   for (int i = -1; i <= 1; i++) {
     weapon_glow(surface, x + i * size * 0.55, y + size * 0.1, 1.0, bio_c,
                 165.0 * fade);
@@ -14293,8 +14397,7 @@ static void sky_event_169(const SkyEvent *event) {
     double sy = y + sin(ang) * sep * 0.55;
     weapon_glow(surface, sx, sy, 1.4, star_c, 210.0 * fade);
   }
-  circleRGBA(surface, x, y, (int)sep, 115, 175, 225,
-             weapon_alpha(75.0 * fade));
+  circleRGBA(surface, x, y, (int)sep, 115, 175, 225, weapon_alpha(75.0 * fade));
 }
 
 // Sky lantern fleet: five warm paper-gold lanterns drifting upward in a
@@ -14304,7 +14407,8 @@ static void sky_event_170(const SkyEvent *event) {
   static const Uint8 lan_c[3] = {255, 195, 105};
   for (int i = 0; i < 5; i++) {
     double lx = x + (i - 2) * size * 0.85;
-    double ly = y + sin(phase / 500.0 + i) * size * 0.35 - progress * size * 0.8;
+    double ly =
+        y + sin(phase / 500.0 + i) * size * 0.35 - progress * size * 0.8;
     boxRGBA(surface, (int)(lx - 3), (int)(ly - 4), (int)(lx + 3), (int)(ly + 4),
             lan_c[0], lan_c[1], lan_c[2], weapon_alpha(195.0 * fade));
     weapon_glow(surface, lx, ly + 2, 1.2, lan_c, 175.0 * fade);
@@ -14369,9 +14473,8 @@ static void sky_event_174(const SkyEvent *event) {
   static const Uint8 dol_c[3] = {125, 225, 255};
   double arc = sin(progress * M_PI) * size * 1.2;
   double dy = y - arc;
-  filledEllipseRGBA(surface, x, (int)dy, (int)(size * 1.25),
-                    (int)(size * 0.42), 55, 145, 205,
-                    weapon_alpha(195.0 * fade));
+  filledEllipseRGBA(surface, x, (int)dy, (int)(size * 1.25), (int)(size * 0.42),
+                    55, 145, 205, weapon_alpha(195.0 * fade));
   filledTrigonRGBA(surface, x, (int)(dy - size * 0.35),
                    (int)(x - direction * size * 0.45), (int)(dy - size * 0.85),
                    (int)(x - direction * size * 0.35), (int)(dy - size * 0.25),
@@ -14483,9 +14586,9 @@ static void sky_event_181(const SkyEvent *event) {
   double len = size * 1.9;
   for (int i = -3; i <= 3; i++) {
     double a = -M_PI * 0.5 + i * spread;
-    lineRGBA(surface, x, (int)(y + size * 0.5),
-             (int)(x + cos(a) * len), (int)(y + size * 0.5 + sin(a) * len),
-             fan_c[0], fan_c[1], fan_c[2], weapon_alpha(145.0 * fade));
+    lineRGBA(surface, x, (int)(y + size * 0.5), (int)(x + cos(a) * len),
+             (int)(y + size * 0.5 + sin(a) * len), fan_c[0], fan_c[1], fan_c[2],
+             weapon_alpha(145.0 * fade));
     weapon_glow(surface, x + cos(a) * len, y + size * 0.5 + sin(a) * len, 1.0,
                 fan_c, 175.0 * fade);
   }
@@ -14499,9 +14602,9 @@ static void sky_event_182(const SkyEvent *event) {
   for (int i = 0; i < 2; i++) {
     double cx = x + (i == 0 ? -size * 0.6 : size * 0.6);
     double cy = y + (i == 0 ? -size * 0.45 : size * 0.45);
-    thickLineRGBA(surface, (int)cx, (int)cy,
-                  (int)(cx - direction * size * 2.8), (int)(cy - size * 0.6), 2,
-                  125, 195, 245, weapon_alpha(135.0 * fade));
+    thickLineRGBA(surface, (int)cx, (int)cy, (int)(cx - direction * size * 2.8),
+                  (int)(cy - size * 0.6), 2, 125, 195, 245,
+                  weapon_alpha(135.0 * fade));
     weapon_glow(surface, cx, cy, 1.5, head_c, 210.0 * fade);
   }
 }
@@ -14558,8 +14661,8 @@ static void sky_event_185(const SkyEvent *event) {
     filledEllipseRGBA(surface, (int)wx, (int)wy, (int)(size * 1.4 * sc),
                       (int)(size * 0.44 * sc), 34, 58, 96,
                       weapon_alpha(215.0 * fade));
-    weapon_glow(surface, wx + direction * size * 0.4 * sc, wy, 1.1 * sc,
-                bio_c, 175.0 * fade);
+    weapon_glow(surface, wx + direction * size * 0.4 * sc, wy, 1.1 * sc, bio_c,
+                175.0 * fade);
   }
 }
 
@@ -15107,8 +15210,7 @@ static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h,
     if (max_x >= min_x && max_y >= min_y) {
       int crop_w = max_x - min_x + 1;
       int crop_h = max_y - min_y + 1;
-      SDL_Surface *cropped =
-          SDL_CreateSurface(crop_w, crop_h, surf->format);
+      SDL_Surface *cropped = SDL_CreateSurface(crop_w, crop_h, surf->format);
       if (cropped) {
         SDL_Rect src_rect = {min_x, min_y, crop_w, crop_h};
         SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_NONE);
