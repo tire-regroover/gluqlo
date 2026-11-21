@@ -2843,6 +2843,19 @@ static void sky_event_264(const SkyEvent *event) {
 }
 
 
+// Comet wheel: a rotating ring of four amber-white comet sparks.
+static void sky_event_265(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 2;
+  for (int i = 0; i < 4; i++) {
+    double a = phase / 200.0 + i * SCENE_PI * 0.5;
+    int sx = x + (int)(cos(a) * r);
+    int sy = y + (int)(sin(a) * r);
+    filledCircleRGBA(surface, sx, sy, 2, 255, 225, 165, weapon_alpha(205.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2927,7 +2940,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
-    sky_event_263, sky_event_264,
+    sky_event_263, sky_event_264, sky_event_265,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

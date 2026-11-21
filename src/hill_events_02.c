@@ -4192,6 +4192,26 @@ static void hill_lantern_boat_two(const HillEvent *event) {
 }
 
 
+// Beacon windmill two: a hillside windmill with a glowing cyan hub and spinning sails.
+static void hill_beacon_windmill_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 331, 479));
+  double g = hill_ground(event, cx);
+  double h = s * 0.042;
+  double r = s * 0.018;
+  filledTrigonRGBA(surface, (int)(cx - 5), (int)g, (int)(cx + 5), (int)g, (int)cx, (int)(g - h),
+                   82, 88, 102, weapon_alpha(210.0 * event->fade));
+  for (int i = 0; i < 4; i++) {
+    double a = event->t * 1.8 + i * SCENE_PI * 0.5;
+    lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + cos(a) * r), (int)(g - h + sin(a) * r),
+             195, 210, 230, weapon_alpha(205.0 * event->fade));
+  }
+  filledCircleRGBA(surface, (int)cx, (int)(g - h), 2, 130, 235, 255,
+                   weapon_alpha(230.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4460,6 +4480,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_starry_pavilion_two,
     hill_crystal_lantern,
     hill_lantern_boat_two,
+    hill_beacon_windmill_two,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
