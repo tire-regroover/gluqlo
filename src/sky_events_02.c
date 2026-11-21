@@ -2669,6 +2669,22 @@ static void sky_event_251(const SkyEvent *event) {
 }
 
 
+// Stardust spiral: a rotating pinwheel of tiny gold and violet sparks.
+static void sky_event_252(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 6; i++) {
+    double a = phase / 210.0 + i * SCENE_TAU / 6.0;
+    double r = size * (0.25 + 0.14 * i);
+    int sx = x + (int)(cos(a) * r);
+    int sy = y + (int)(sin(a) * r * 0.7);
+    Uint8 cr = (i & 1) ? 210 : 255;
+    Uint8 cg = (i & 1) ? 175 : 225;
+    Uint8 cb = (i & 1) ? 255 : 155;
+    filledCircleRGBA(surface, sx, sy, 2, cr, cg, cb, weapon_alpha(195.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2751,7 +2767,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
-    sky_event_251,
+    sky_event_251, sky_event_252,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
