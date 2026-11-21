@@ -3068,6 +3068,20 @@ static void sky_event_281(const SkyEvent *event) {
 }
 
 
+// Aurora arch: a high curved ribbon of pale green and cyan light segments.
+static void sky_event_282(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size + 4;
+  for (int i = 0; i < 6; i++) {
+    double a0 = -2.6 + i * 0.35;
+    double a1 = a0 + 0.35;
+    thickLineRGBA(surface, x + (int)(cos(a0) * r), y + (int)(sin(a0) * r * 0.6),
+                  x + (int)(cos(a1) * r), y + (int)(sin(a1) * r * 0.6), 2, 135, 245, 200,
+                  weapon_alpha(165.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3155,7 +3169,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
-    sky_event_281,
+    sky_event_281, sky_event_282,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

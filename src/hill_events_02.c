@@ -4513,6 +4513,26 @@ static void hill_ember_lantern_row(const HillEvent *event) {
 }
 
 
+// Windwheel tower: a slim lattice mast with a spinning golden pinwheel.
+static void hill_windwheel_tower(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 541, 719));
+  double g = hill_ground(event, cx);
+  double h = s * 0.044;
+  double r = s * 0.015;
+  lineRGBA(surface, (int)(cx - 4), (int)g, (int)cx, (int)(g - h), 96, 102, 114,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + 4), (int)g, (int)cx, (int)(g - h), 96, 102, 114,
+           weapon_alpha(205.0 * event->fade));
+  for (int i = 0; i < 6; i++) {
+    double a = event->t * 2.4 + i * SCENE_TAU / 6.0;
+    lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + cos(a) * r), (int)(g - h + sin(a) * r),
+             255, 215, 135, weapon_alpha(205.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4798,6 +4818,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_starlight_trellis,
     hill_bell_lantern,
     hill_ember_lantern_row,
+    hill_windwheel_tower,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
