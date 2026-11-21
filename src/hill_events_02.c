@@ -3900,6 +3900,29 @@ static void hill_star_arch(const HillEvent *event) {
 }
 
 
+// Star pergola: hillside pergola draped with glowing cyan-gold starlight vines.
+static void hill_star_pergola(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 101, 211));
+  double g = hill_ground(event, cx);
+  double w = s * 0.032;
+  double h = s * 0.034;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 95, 78, 66,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 95, 78, 66,
+           weapon_alpha(210.0 * event->fade));
+  thickLineRGBA(surface, (int)(cx - w * 1.15), (int)(g - h), (int)(cx + w * 1.15), (int)(g - h), 2,
+                115, 92, 74, weapon_alpha(220.0 * event->fade));
+  for (int i = -2; i <= 2; i++) {
+    double vx = cx + i * w * 0.4;
+    double vy = g - h + 4 + (i & 1) * 4 + sin(event->t * 2.0 + i) * 1.5;
+    filledCircleRGBA(surface, (int)vx, (int)vy, 2, 165, 235, 245,
+                     weapon_alpha(210.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4153,6 +4176,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_beacon_cairn,
     hill_star_pavilion,
     hill_star_arch,
+    hill_star_pergola,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
