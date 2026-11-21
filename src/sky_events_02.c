@@ -2538,6 +2538,17 @@ static void sky_event_240(const SkyEvent *event) {
 }
 
 
+// Starlit ringlet: a spinning golden hoop trailing tiny sparkling motes.
+static void sky_event_241(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size;
+  circleRGBA(surface, x, y, r, 245, 215, 130, weapon_alpha(190.0 * fade));
+  double a = phase / 200.0;
+  filledCircleRGBA(surface, x + (int)(cos(a) * r), y + (int)(sin(a) * r), 2, 255, 245, 200,
+                   weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2618,7 +2629,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
-    sky_event_239, sky_event_240,
+    sky_event_239, sky_event_240, sky_event_241,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

@@ -3734,6 +3734,26 @@ static void hill_moon_pond(const HillEvent *event) {
 }
 
 
+// Lantern fence: a low wooden ridge fence hung with three warm paper lanterns.
+static void hill_lantern_fence(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 571, 733));
+  static const Uint8 lan[3] = {255, 195, 105};
+  for (int i = -1; i <= 1; i++) {
+    double px = cx + i * s * 0.025;
+    double pg = hill_ground(event, px);
+    lineRGBA(surface, (int)px, (int)pg, (int)px, (int)(pg - s * 0.022), 95, 82, 70,
+             weapon_alpha(200.0 * event->fade));
+    weapon_glow(surface, px, pg - s * 0.022, 0.75, lan, 165.0 * event->fade);
+  }
+  double g0 = hill_ground(event, cx - s * 0.025);
+  double g1 = hill_ground(event, cx + s * 0.025);
+  lineRGBA(surface, (int)(cx - s * 0.025), (int)(g0 - s * 0.016), (int)(cx + s * 0.025),
+           (int)(g1 - s * 0.016), 95, 82, 70, weapon_alpha(190.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3978,6 +3998,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_bell_post,
     hill_fire_pit,
     hill_moon_pond,
+    hill_lantern_fence,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
