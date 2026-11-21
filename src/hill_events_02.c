@@ -4681,6 +4681,26 @@ static void hill_firefly_reed_row(const HillEvent *event) {
 }
 
 
+// Starry mast: a tall hillside pole with three glowing crossarm beacons.
+static void hill_starry_mast(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 643, 823));
+  double g = hill_ground(event, cx);
+  double h = s * 0.048;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 100, 106, 120,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx - s * 0.012), (int)(g - h * 0.7), (int)(cx + s * 0.012),
+           (int)(g - h * 0.7), 100, 106, 120, weapon_alpha(205.0 * event->fade));
+  filledCircleRGBA(surface, (int)cx, (int)(g - h), 2, 235, 245, 255,
+                   weapon_alpha(230.0 * event->fade));
+  filledCircleRGBA(surface, (int)(cx - s * 0.012), (int)(g - h * 0.7), 2, 255, 215, 135,
+                   weapon_alpha(215.0 * event->fade));
+  filledCircleRGBA(surface, (int)(cx + s * 0.012), (int)(g - h * 0.7), 2, 255, 215, 135,
+                   weapon_alpha(215.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4975,6 +4995,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_well,
     hill_beacon_gate,
     hill_firefly_reed_row,
+    hill_starry_mast,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

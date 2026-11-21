@@ -3192,6 +3192,23 @@ static void sky_event_290(const SkyEvent *event) {
 }
 
 
+// Silver crescent pair: two facing pale-silver crescents drifting together.
+static void sky_event_291(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 2;
+  for (int side = -1; side <= 1; side += 2) {
+    int cx = x + side * (r / 2 + 2);
+    for (int i = 0; i < 4; i++) {
+      double a0 = (side > 0 ? 0.6 : 2.5) + i * 0.35;
+      double a1 = a0 + 0.35;
+      lineRGBA(surface, cx + (int)(cos(a0) * r), y + (int)(sin(a0) * r),
+               cx + (int)(cos(a1) * r), y + (int)(sin(a1) * r), 215, 230, 255,
+               weapon_alpha(185.0 * fade));
+    }
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3280,7 +3297,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
-    sky_event_287, sky_event_288, sky_event_289, sky_event_290,
+    sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
