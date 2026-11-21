@@ -4608,6 +4608,23 @@ static void hill_moonlit_cairn(const HillEvent *event) {
 }
 
 
+// Signal brazier: a tall iron bowl on a hillside post burning with bright gold sparks.
+static void hill_signal_brazier(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 599, 773));
+  double g = hill_ground(event, cx);
+  double h = s * 0.036;
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 88, 92, 102,
+                weapon_alpha(210.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - 5), (int)(g - h), (int)(cx + 5), (int)(g - h), (int)cx,
+                   (int)(g - h + 5), 96, 100, 112, weapon_alpha(210.0 * event->fade));
+  double sway = sin(event->t * 6.0) * 1.5;
+  filledCircleRGBA(surface, (int)(cx + sway), (int)(g - h - 3), 3, 255, 195, 95,
+                   weapon_alpha(230.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4898,6 +4915,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_arbor,
     hill_frost_crystal_arch,
     hill_moonlit_cairn,
+    hill_signal_brazier,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

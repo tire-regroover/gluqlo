@@ -3135,6 +3135,20 @@ static void sky_event_286(const SkyEvent *event) {
 }
 
 
+// Sky chime: a horizontal silver bar with three dangling star-pendants.
+static void sky_event_287(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int hw = size / 2 + 2;
+  lineRGBA(surface, x - hw, y - 4, x + hw, y - 4, 200, 220, 245, weapon_alpha(175.0 * fade));
+  for (int i = -1; i <= 1; i++) {
+    int px = x + i * (hw / 2 + 1);
+    int len = 6 + (1 - abs(i)) * 4;
+    lineRGBA(surface, px, y - 4, px, y - 4 + len, 180, 205, 240, weapon_alpha(150.0 * fade));
+    filledCircleRGBA(surface, px, y - 4 + len, 2, 255, 230, 170, weapon_alpha(215.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3223,6 +3237,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
+    sky_event_287,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
