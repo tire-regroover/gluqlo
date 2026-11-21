@@ -3858,6 +3858,26 @@ static void hill_beacon_cairn(const HillEvent *event) {
 }
 
 
+// Star pavilion: a small pointed-roof ridge pavilion lit by a warm central lamp.
+static void hill_star_pavilion(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 613, 773));
+  double g = hill_ground(event, cx);
+  double w = s * 0.020;
+  double h = s * 0.028;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 100, 95, 110,
+           weapon_alpha(205.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 100, 95, 110,
+           weapon_alpha(205.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - w - 4), (int)(g - h), (int)(cx + w + 4), (int)(g - h),
+                   (int)cx, (int)(g - h - s * 0.016), 85, 80, 95,
+                   weapon_alpha(220.0 * event->fade));
+  static const Uint8 lmp[3] = {255, 210, 120};
+  weapon_glow(surface, cx, g - h * 0.5, 0.9, lmp, 180.0 * event->fade);
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4109,6 +4129,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_torch_circle,
     hill_reed_wind,
     hill_beacon_cairn,
+    hill_star_pavilion,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
