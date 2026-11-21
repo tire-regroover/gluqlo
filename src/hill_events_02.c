@@ -4574,6 +4574,23 @@ static void hill_lantern_arbor(const HillEvent *event) {
 }
 
 
+// Frost crystal arch: twin angled ice spires leaning toward a glowing center.
+static void hill_frost_crystal_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 571, 751));
+  double g = hill_ground(event, cx);
+  double w = s * 0.022;
+  double h = s * 0.036;
+  thickLineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w * 0.2), (int)(g - h), 2, 160, 220,
+                255, weapon_alpha(205.0 * event->fade));
+  thickLineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w * 0.2), (int)(g - h), 2, 160, 220,
+                255, weapon_alpha(205.0 * event->fade));
+  filledCircleRGBA(surface, (int)cx, (int)(g - h), 2, 225, 248, 255,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4862,6 +4879,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_windwheel_tower,
     hill_starlight_pond,
     hill_lantern_arbor,
+    hill_frost_crystal_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
