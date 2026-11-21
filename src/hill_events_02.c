@@ -3986,6 +3986,25 @@ static void hill_aurora_cairn(const HillEvent *event) {
 }
 
 
+// Signal lantern post: a tall iron post with twin blinking harbor-style lamps.
+static void hill_signal_lantern_post(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.18 + 0.64 * hill_random(event, 191, 307));
+  double g = hill_ground(event, cx);
+  double h = s * 0.048;
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 85, 92, 108,
+                weapon_alpha(215.0 * event->fade));
+  lineRGBA(surface, (int)(cx - s * 0.012), (int)(g - h * 0.85), (int)(cx + s * 0.012),
+           (int)(g - h * 0.85), 95, 102, 118, weapon_alpha(205.0 * event->fade));
+  bool left_on = ((int)(event->t * 2.0) % 2) == 0;
+  filledCircleRGBA(surface, (int)(cx - s * 0.012), (int)(g - h * 0.85), 3, 255, 175, 95,
+                   weapon_alpha((left_on ? 235.0 : 85.0) * event->fade));
+  filledCircleRGBA(surface, (int)(cx + s * 0.012), (int)(g - h * 0.85), 3, 130, 230, 255,
+                   weapon_alpha((left_on ? 85.0 : 235.0) * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4243,6 +4262,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_moonlit_gazebo,
     hill_lantern_belfry,
     hill_aurora_cairn,
+    hill_signal_lantern_post,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

@@ -2701,6 +2701,17 @@ static void sky_event_253(const SkyEvent *event) {
 }
 
 
+// Comet cross: two brief pale-gold shooting streaks crossing at an angle.
+static void sky_event_254(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int d = size;
+  lineRGBA(surface, x - d, y - d / 2, x + d, y + d / 2, 255, 225, 165, weapon_alpha(185.0 * fade));
+  lineRGBA(surface, x - d / 2, y + d / 2, x + d / 2, y - d / 2, 200, 230, 255,
+           weapon_alpha(175.0 * fade));
+  filledCircleRGBA(surface, x, y, 2, 255, 248, 225, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2783,7 +2794,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
-    sky_event_251, sky_event_252, sky_event_253,
+    sky_event_251, sky_event_252, sky_event_253, sky_event_254,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
