@@ -3432,6 +3432,24 @@ static void hill_frost_chimes(const HillEvent *event) {
 }
 
 
+// Ember braziers: three low iron bowls glowing with pulsing orange coals.
+static void hill_ember_braziers(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 457, 617));
+  static const Uint8 coal[3] = {255, 130, 60};
+  for (int i = -1; i <= 1; i++) {
+    double bx = cx + i * s * 0.032;
+    double bg = hill_ground(event, bx);
+    double pulse = 0.75 + 0.25 * sin(event->t * 3.5 + i * 1.4);
+    filledTrigonRGBA(surface, (int)(bx - s * 0.010), (int)(bg - s * 0.012),
+                     (int)(bx + s * 0.010), (int)(bg - s * 0.012), (int)bx, (int)bg, 75, 70, 75,
+                     weapon_alpha(215.0 * event->fade));
+    weapon_glow(surface, bx, bg - s * 0.014, 1.0, coal, 175.0 * pulse * event->fade);
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3659,6 +3677,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_dew_flowers,
     hill_star_lantern,
     hill_frost_chimes,
+    hill_ember_braziers,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
