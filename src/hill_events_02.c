@@ -4591,6 +4591,23 @@ static void hill_frost_crystal_arch(const HillEvent *event) {
 }
 
 
+// Moonlit cairn: a balanced stone stack topped with a soft silver-blue crescent.
+static void hill_moonlit_cairn(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 587, 761));
+  double g = hill_ground(event, cx);
+  double r = s * 0.008;
+  if (r < 2.5) r = 2.5;
+  for (int i = 0; i < 3; i++) {
+    filledCircleRGBA(surface, (int)cx, (int)(g - r - i * r * 1.4), (int)(r * (1.0 - 0.18 * i)),
+                     96, 102, 114, weapon_alpha(210.0 * event->fade));
+  }
+  filledCircleRGBA(surface, (int)cx, (int)(g - r * 5.0), 2, 200, 228, 255,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4880,6 +4897,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_starlight_pond,
     hill_lantern_arbor,
     hill_frost_crystal_arch,
+    hill_moonlit_cairn,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

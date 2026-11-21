@@ -3123,6 +3123,18 @@ static void sky_event_285(const SkyEvent *event) {
 }
 
 
+// Meteor arc: a bright silver meteor leaving a curved trail of three fading sparks.
+static void sky_event_286(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 1; i <= 3; i++) {
+    int tx = x - direction * i * (size / 2);
+    int ty = y + i * i;
+    filledCircleRGBA(surface, tx, ty, 1, 210, 230, 255, weapon_alpha((180.0 - i * 40.0) * fade));
+  }
+  filledCircleRGBA(surface, x, y, 2, 245, 250, 255, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3210,7 +3222,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
-    sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285,
+    sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
