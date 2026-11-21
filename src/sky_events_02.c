@@ -2029,6 +2029,277 @@ static void sky_event_203(const SkyEvent *event) {
 }
 
 
+// Albatross pair: two long-winged ocean gliders banking slowly in tandem.
+static void sky_event_204(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 2; i++) {
+    double bx = x - direction * i * size * 1.4;
+    double by = y + (i - 0.5) * size * 0.65 + sin(phase / 600.0 + i) * size * 0.2;
+    double flap = 0.15 + sin(phase / 480.0 + i * 0.9) * 0.25;
+    draw_sleek_bird(surface, bx, by, size * 1.4, direction, flap, sin(phase / 700.0) * 0.14, 210,
+                    220, 235, weapon_alpha(205.0 * fade), true);
+  }
+}
+
+
+// Comet shower: three small icy comets streaking in parallel with cyan tails.
+static void sky_event_205(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 ice_c[3] = {155, 225, 255};
+  for (int i = 0; i < 3; i++) {
+    double cx = x - direction * i * size * 1.1;
+    double cy = y + (i - 1) * size * 0.75;
+    double tx = cx - direction * size * 3.2;
+    double ty = cy - size * 0.75;
+    thickLineRGBA(surface, (int)cx, (int)cy, (int)tx, (int)ty, 2, 130, 205, 245,
+                  weapon_alpha(150.0 * fade));
+    weapon_glow(surface, cx, cy, 1.1, ice_c, 175.0 * fade);
+    filledCircleRGBA(surface, (int)cx, (int)cy, size / 4 + 1, 225, 245, 255,
+                     weapon_alpha(230.0 * fade));
+  }
+}
+
+
+// Prism halo: a rotating hexagonal ice-crystal halo around a pale moonlet.
+static void sky_event_206(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double rot = progress * 1.4;
+  int r = size * 2;
+  filledCircleRGBA(surface, x, y, size / 3 + 1, 235, 240, 250, weapon_alpha(190.0 * fade));
+  for (int i = 0; i < 6; i++) {
+    double a0 = rot + i * SCENE_TAU / 6.0;
+    double a1 = rot + (i + 1) * SCENE_TAU / 6.0;
+    thickLineRGBA(surface, x + (int)(cos(a0) * r), y + (int)(sin(a0) * r),
+                  x + (int)(cos(a1) * r), y + (int)(sin(a1) * r), 1, 175, 210, 245,
+                  weapon_alpha(150.0 * fade));
+  }
+}
+
+
+// Wind ribbons: two sinuous pale-lavender air currents drifting across.
+static void sky_event_207(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int s = 0; s < 2; s++) {
+    double prev_x = x - direction * size * 3.0;
+    double prev_y = y + (s - 0.5) * size * 0.9;
+    for (int i = 1; i <= 14; i++) {
+      double u = i / 14.0;
+      double nx = x + direction * (u - 0.5) * size * 6.0;
+      double ny = y + (s - 0.5) * size * 0.9 + sin(u * 5.5 + phase / 260.0 + s * 1.4) * size * 0.45;
+      thickLineRGBA(surface, (int)prev_x, (int)prev_y, (int)nx, (int)ny, 2, 185, 175, 230,
+                    weapon_alpha(145.0 * sin(u * SCENE_PI) * fade));
+      prev_x = nx;
+      prev_y = ny;
+    }
+  }
+}
+
+
+// Celestial whale: a slow dark silhouette with soft cyan bioluminescent spots.
+static void sky_event_208(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double bob = sin(phase / 420.0) * size * 0.3;
+  double cy = y + bob;
+  filledEllipseRGBA(surface, x, (int)cy, size * 2, size * 2 / 3, 24, 34, 52,
+                    weapon_alpha(210.0 * fade));
+  filledTrigonRGBA(surface, x - direction * size * 2, (int)cy,
+                   x - direction * size * 3, (int)(cy - size * 0.7),
+                   x - direction * size * 3, (int)(cy + size * 0.6), 24, 34, 52,
+                   weapon_alpha(200.0 * fade));
+  static const Uint8 bio_c[3] = {120, 215, 235};
+  for (int i = -1; i <= 1; i++) {
+    weapon_glow(surface, x + direction * i * size * 0.65, cy, 0.7, bio_c, 155.0 * fade);
+  }
+}
+
+
+// Paper gliders: four crisp folded gliders riding a gentle thermal.
+static void sky_event_209(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 4; i++) {
+    double gx = x - direction * i * size * 1.1;
+    double gy = y + ((i % 2) ? 1 : -1) * size * 0.45 + sin(phase / 320.0 + i) * size * 0.2;
+    int tip_x = (int)(gx + direction * size * 0.8);
+    int tail_x = (int)(gx - direction * size * 0.6);
+    filledTrigonRGBA(surface, tip_x, (int)gy, tail_x, (int)(gy - size * 0.4), tail_x,
+                     (int)(gy + size * 0.25), 225, 228, 235, weapon_alpha(185.0 * fade));
+    lineRGBA(surface, tip_x, (int)gy, tail_x, (int)gy, 155, 165, 185, weapon_alpha(190.0 * fade));
+  }
+}
+
+
+// Eclipse ring: a dark disc with a thin glowing golden corona drifting by.
+static void sky_event_210(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size + 2;
+  static const Uint8 cor_c[3] = {255, 210, 130};
+  weapon_glow(surface, x, y, 2.2, cor_c, 130.0 * fade);
+  circleRGBA(surface, x, y, r + 1, 255, 220, 150, weapon_alpha(205.0 * fade));
+  filledCircleRGBA(surface, x, y, r, 12, 16, 28, weapon_alpha(235.0 * fade));
+}
+
+
+// Crane chevron: five cranes gliding in an asymmetric V-formation.
+static void sky_event_211(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 5; i++) {
+    int rank = i / 2 + (i % 2);
+    int side = (i == 0) ? 0 : ((i % 2) ? 1 : -1);
+    double bx = x - direction * rank * size * 0.95;
+    double by = y + side * rank * size * 0.6;
+    double flap = sin(phase / 240.0 + i * 0.7) * 0.75;
+    draw_sleek_bird(surface, bx, by, size * 0.9, direction, flap, 0.0, 215, 225, 238,
+                    weapon_alpha(200.0 * fade), true);
+  }
+}
+
+
+// Astrolabe wheel: delicate spinning brass-toned rings and pointers.
+static void sky_event_212(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size * 2;
+  circleRGBA(surface, x, y, r, 215, 185, 120, weapon_alpha(175.0 * fade));
+  circleRGBA(surface, x, y, r * 2 / 3, 195, 165, 105, weapon_alpha(150.0 * fade));
+  double a = phase / 650.0;
+  thickLineRGBA(surface, x - (int)(cos(a) * r), y - (int)(sin(a) * r),
+                x + (int)(cos(a) * r), y + (int)(sin(a) * r), 1, 230, 200, 135,
+                weapon_alpha(170.0 * fade));
+  thickLineRGBA(surface, x - (int)(cos(a + 1.1) * r), y - (int)(sin(a + 1.1) * r),
+                x + (int)(cos(a + 1.1) * r), y + (int)(sin(a + 1.1) * r), 1, 210, 180, 120,
+                weapon_alpha(140.0 * fade));
+}
+
+
+// Noctilucent wisps: layered silver-blue high-altitude cloud streaks.
+static void sky_event_213(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 4; i++) {
+    int wy = y + (i - 1) * (size / 2 + 2);
+    int w = size * (3 - (i % 2));
+    filledEllipseRGBA(surface, x + (i - 1) * size / 2, wy, w, size / 4 + 1, 150, 195, 235,
+                      weapon_alpha((110.0 - i * 16.0) * fade));
+  }
+}
+
+
+// Sky lantern cluster: five warm paper lanterns drifting gently upward.
+static void sky_event_214(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 lan_c[3] = {255, 175, 85};
+  for (int i = 0; i < 5; i++) {
+    double lx = x + (i - 2) * size * 0.95 + sin(phase / 380.0 + i * 1.3) * size * 0.25;
+    double ly = y + ((i % 3) - 1) * size * 0.7 - progress * size * 1.4;
+    weapon_glow(surface, lx, ly, 1.1, lan_c, 145.0 * fade);
+    filledEllipseRGBA(surface, (int)lx, (int)ly, size / 4 + 2, size / 3 + 2, 245, 165, 80,
+                      weapon_alpha(205.0 * fade));
+  }
+}
+
+
+// Manta pair: two graceful sky mantas gliding with undulating wingtips.
+static void sky_event_215(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 2; i++) {
+    double mx = x - direction * i * size * 1.6;
+    double my = y + (i - 0.5) * size * 0.8 + sin(phase / 340.0 + i) * size * 0.25;
+    double wing = sin(phase / 240.0 + i * 1.1) * size * 0.9;
+    filledTrigonRGBA(surface, (int)(mx + direction * size), (int)my,
+                     (int)(mx - direction * size * 0.6), (int)(my - wing),
+                     (int)(mx - direction * size * 0.6), (int)(my + wing * 0.8), 115, 145, 195,
+                     weapon_alpha(185.0 * fade));
+    lineRGBA(surface, (int)(mx - direction * size * 0.6), (int)my,
+             (int)(mx - direction * size * 2.0), (int)my, 135, 165, 215,
+             weapon_alpha(160.0 * fade));
+  }
+}
+
+
+// Shooting star arc: a curved meteor leaving a sparkling amber-white wake.
+static void sky_event_216(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double arc = sin(progress * SCENE_PI) * size * 1.2;
+  double hx = x;
+  double hy = y - arc;
+  double tx = x - direction * size * 3.5;
+  double ty = y - sin(fmax(0.0, progress - 0.12) * SCENE_PI) * size * 1.2;
+  thickLineRGBA(surface, (int)hx, (int)hy, (int)tx, (int)ty, 2, 255, 230, 175,
+                weapon_alpha(200.0 * fade));
+  filledCircleRGBA(surface, (int)hx, (int)hy, size / 4 + 2, 255, 248, 225,
+                   weapon_alpha(235.0 * fade));
+}
+
+
+// Sundog twin: pale prismatic mock-suns flanking a faint central arc.
+static void sky_event_217(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int span = size * 2;
+  circleRGBA(surface, x, y, span, 165, 195, 225, weapon_alpha(75.0 * fade));
+  static const Uint8 dog_c[3] = {255, 215, 160};
+  weapon_glow(surface, x - span, y, 1.3, dog_c, 165.0 * fade);
+  weapon_glow(surface, x + span, y, 1.3, dog_c, 165.0 * fade);
+}
+
+
+// Swallowtail drift: three large nocturnal moths gliding on high thermals.
+static void sky_event_218(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 3; i++) {
+    double mx = x - direction * i * size * 1.1;
+    double my = y + (i - 1) * size * 0.65 + sin(phase / 190.0 + i * 1.2) * size * 0.3;
+    double flap = 0.4 + 0.6 * fabs(sin(phase / 120.0 + i));
+    int w = (int)(size * 0.55 * flap) + 2;
+    filledEllipseRGBA(surface, (int)mx, (int)(my - w / 2), size / 3 + 1, w, 195, 185, 220,
+                      weapon_alpha(175.0 * fade));
+    filledEllipseRGBA(surface, (int)mx, (int)(my + w / 2), size / 3 + 1, w, 175, 165, 205,
+                      weapon_alpha(160.0 * fade));
+  }
+}
+
+
+// Starlight harp: vertical shimmering aurora strings plucked by a passing wave.
+static void sky_event_219(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -3; i <= 3; i++) {
+    double sx = x + i * size * 0.42;
+    double wave = sin(progress * 8.0 + i * 0.7) * size * 0.25;
+    thickLineRGBA(surface, (int)sx, y - size * 2, (int)(sx + wave), y + size * 2, 1, 130, 230,
+                  195, weapon_alpha((145.0 - abs(i) * 14.0) * fade));
+  }
+}
+
+
+// Cloud galleon: a translucent mist-ship with billowing vapor sails.
+static void sky_event_220(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  filledEllipseRGBA(surface, x, y + size / 2, size * 2, size / 3 + 1, 165, 185, 215,
+                    weapon_alpha(145.0 * fade));
+  for (int m = -1; m <= 1; m += 2) {
+    int mx = x + direction * m * size * 2 / 3;
+    lineRGBA(surface, mx, y + size / 2, mx, y - size * 3 / 2, 190, 205, 225,
+             weapon_alpha(140.0 * fade));
+    filledTrigonRGBA(surface, mx, y - size * 3 / 2, mx + direction * size, y - size / 4, mx,
+                     y + size / 4, 185, 205, 230, weapon_alpha(130.0 * fade));
+  }
+}
+
+
+// Moonbow arc: a faint pale-silver and soft-violet lunar rainbow arc.
+static void sky_event_221(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size * 3;
+  for (int i = 0; i < 12; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 12.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 12.0;
+    thickLineRGBA(surface, x + (int)(cos(a0) * r), y + (int)(sin(a0) * r),
+                  x + (int)(cos(a1) * r), y + (int)(sin(a1) * r), 2, 195, 205, 235,
+                  weapon_alpha(125.0 * fade));
+    thickLineRGBA(surface, x + (int)(cos(a0) * (r - 3)), y + (int)(sin(a0) * (r - 3)),
+                  x + (int)(cos(a1) * (r - 3)), y + (int)(sin(a1) * (r - 3)), 1, 185, 165, 225,
+                  weapon_alpha(105.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2103,7 +2374,10 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_185, sky_event_186, sky_event_187, sky_event_188, sky_event_189, sky_event_190,
     sky_event_191, sky_event_192, sky_event_193, sky_event_194, sky_event_195, sky_event_196,
     sky_event_197, sky_event_198, sky_event_199, sky_event_200, sky_event_201, sky_event_202,
-    sky_event_203,
+    sky_event_203, sky_event_204, sky_event_205, sky_event_206, sky_event_207, sky_event_208,
+    sky_event_209, sky_event_210, sky_event_211, sky_event_212, sky_event_213, sky_event_214,
+    sky_event_215, sky_event_216, sky_event_217, sky_event_218, sky_event_219, sky_event_220,
+    sky_event_221,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

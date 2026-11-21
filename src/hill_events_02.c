@@ -2278,6 +2278,1112 @@ static void hill_gull_ridge(const HillEvent *event) {
 }
 
 
+// Signal tower: a tall wooden watchtower with a rotating amber searchlight.
+static void hill_signal_tower(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 101, 233));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(230.0 * event->fade);
+  double h = s * 0.085;
+  thickLineRGBA(surface, (int)(cx - s * 0.015), (int)g, (int)(cx - s * 0.006), (int)(g - h), 2,
+                110, 95, 80, a);
+  thickLineRGBA(surface, (int)(cx + s * 0.015), (int)g, (int)(cx + s * 0.006), (int)(g - h), 2,
+                110, 95, 80, a);
+  lineRGBA(surface, (int)(cx - s * 0.011), (int)(g - h * 0.45), (int)(cx + s * 0.011),
+           (int)(g - h * 0.45), 110, 95, 80, a);
+  double ang = sin(event->t * 1.2) * 0.55;
+  double bx = cx + sin(ang) * s * 0.14;
+  double by = (g - h) - cos(ang) * s * 0.04;
+  thickLineRGBA(surface, (int)cx, (int)(g - h), (int)bx, (int)by, 3, 255, 215, 130,
+                weapon_alpha(55.0 * event->fade));
+  static const Uint8 lamp[3] = {255, 215, 135};
+  weapon_glow(surface, cx, g - h, 1.3, lamp, 210.0 * event->fade);
+}
+
+
+// Moon garden: pale silver blossoms opening along the ridge crest.
+static void hill_moon_garden(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 103, 239));
+  double open = smooth_step(0.05, 0.45, event->progress);
+  static const Uint8 glow_c[3] = {195, 225, 255};
+  for (int i = 0; i < 7; i++) {
+    double fx = cx + (i - 3) * s * 0.024;
+    double fg = hill_ground(event, fx);
+    double fh = s * (0.018 + 0.006 * (i % 3)) * open;
+    lineRGBA(surface, (int)fx, (int)fg, (int)fx, (int)(fg - fh), 75, 125, 95,
+             weapon_alpha(200.0 * event->fade));
+    filledCircleRGBA(surface, (int)fx, (int)(fg - fh), (int)(2 + 2 * open), 220, 235, 255,
+                     weapon_alpha(210.0 * open * event->fade));
+    weapon_glow(surface, fx, fg - fh, 0.85, glow_c, 120.0 * open * event->fade);
+  }
+}
+
+
+// Windmill row: three slender modern turbines turning together on the slope.
+static void hill_windmill_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 107, 241));
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  for (int i = -1; i <= 1; i++) {
+    double tx = cx + i * s * 0.045;
+    double tg = hill_ground(event, tx);
+    double h = s * (0.068 - abs(i) * 0.010);
+    thickLineRGBA(surface, (int)tx, (int)tg, (int)tx, (int)(tg - h), 2, 165, 175, 195, a);
+    for (int b = 0; b < 3; b++) {
+      double ang = event->t * 2.2 + i * 0.8 + b * SCENE_TAU / 3.0;
+      lineRGBA(surface, (int)tx, (int)(tg - h), (int)(tx + cos(ang) * s * 0.028),
+               (int)(tg - h + sin(ang) * s * 0.028), 205, 215, 230, a);
+    }
+  }
+}
+
+
+// Shrine torii: a vermilion-tinted gate with two warm stone lanterns.
+static void hill_shrine_torii(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 109, 251));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(230.0 * event->fade);
+  double w = s * 0.026, h = s * 0.055;
+  thickLineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 3, 185, 70, 55, a);
+  thickLineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 3, 185, 70, 55, a);
+  thickLineRGBA(surface, (int)(cx - w * 1.35), (int)(g - h), (int)(cx + w * 1.35), (int)(g - h), 3,
+                205, 80, 60, a);
+  thickLineRGBA(surface, (int)(cx - w * 1.1), (int)(g - h * 0.78), (int)(cx + w * 1.1),
+                (int)(g - h * 0.78), 2, 180, 70, 55, a);
+  static const Uint8 lan[3] = {255, 185, 95};
+  weapon_glow(surface, cx - w * 1.6, g - s * 0.014, 0.9, lan, 180.0 * event->fade);
+  weapon_glow(surface, cx + w * 1.6, g - s * 0.014, 0.9, lan, 180.0 * event->fade);
+}
+
+
+// Starry tent: a glowing amber canvas tent beside a crackling campfire.
+static void hill_starry_tent(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 113, 257));
+  double g = hill_ground(event, cx);
+  double w = s * 0.032, h = s * 0.036;
+  filledTrigonRGBA(surface, (int)(cx - w), (int)g, (int)(cx + w), (int)g, (int)cx, (int)(g - h),
+                   220, 145, 70, weapon_alpha(205.0 * event->fade));
+  static const Uint8 fire[3] = {255, 165, 75};
+  double fx = cx + w * 1.6;
+  double fg = hill_ground(event, fx);
+  weapon_glow(surface, fx, fg - s * 0.008, 1.0 + 0.2 * sin(event->t * 7.0), fire,
+              195.0 * event->fade);
+}
+
+
+// Ice spire: a faceted frost pillar catching faint cyan starlight.
+static void hill_ice_spire(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 127, 263));
+  double g = hill_ground(event, cx);
+  double h = s * 0.075 * smooth_step(0.0, 0.25, event->progress);
+  filledTrigonRGBA(surface, (int)(cx - s * 0.016), (int)g, (int)(cx + s * 0.016), (int)g, (int)cx,
+                   (int)(g - h), 140, 205, 240, weapon_alpha(190.0 * event->fade));
+  filledTrigonRGBA(surface, (int)cx, (int)g, (int)(cx + s * 0.016), (int)g, (int)cx, (int)(g - h),
+                   185, 230, 255, weapon_alpha(150.0 * event->fade));
+}
+
+
+// Lantern procession: five small walkers carrying warm lanterns across the hill.
+static void hill_lantern_procession(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double lead = (dir > 0) ? surface->w * (0.12 + 0.76 * event->progress)
+                          : surface->w * (0.88 - 0.76 * event->progress);
+  for (int i = 0; i < 5; i++) {
+    double wx = lead - dir * i * s * 0.032;
+    double wg = hill_ground(event, wx);
+    hill_walker(surface, wx, wg, s * 0.022, dir, event->t * 3.5 + i * 0.9, true, event->fade,
+                event->t, i);
+  }
+}
+
+
+// Observatory dome: a silver dome opening its slit toward the zenith.
+static void hill_observatory_dome(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 131, 269));
+  double g = hill_ground(event, cx);
+  int r = (int)(s * 0.034);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  filledPieRGBA(surface, (int)cx, (int)(g - s * 0.012), r, 180, 360, 135, 150, 175, a);
+  boxRGBA(surface, (int)(cx - r), (int)(g - s * 0.012), (int)(cx + r), (int)g, 95, 108, 128, a);
+  double beam = smooth_step(0.2, 0.5, event->progress);
+  if (beam > 0.01) {
+    lineRGBA(surface, (int)cx, (int)(g - s * 0.044), (int)(cx + s * 0.05),
+             (int)(g - s * 0.16), 195, 225, 255, weapon_alpha(110.0 * beam * event->fade));
+  }
+}
+
+
+// Weather vane: a tall iron mast with spinning anemometer cups and arrow.
+static void hill_weather_vane(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 137, 271));
+  double g = hill_ground(event, cx);
+  double h = s * 0.068;
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 145, 155, 170, a);
+  double spin = cos(event->t * 4.5) * s * 0.018;
+  lineRGBA(surface, (int)(cx - spin), (int)(g - h * 0.85), (int)(cx + spin), (int)(g - h * 0.85),
+           200, 210, 225, a);
+  filledCircleRGBA(surface, (int)(cx + spin), (int)(g - h * 0.85), 2, 220, 230, 240, a);
+  filledCircleRGBA(surface, (int)(cx - spin), (int)(g - h * 0.85), 2, 220, 230, 240, a);
+  thickLineRGBA(surface, (int)(cx - s * 0.018), (int)(g - h), (int)(cx + s * 0.020), (int)(g - h),
+                2, 215, 185, 120, a);
+}
+
+
+// Geyser vent: steam building and erupting in a tall pale plume.
+static void hill_geyser_vent(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 139, 277));
+  double g = hill_ground(event, cx);
+  double erupt = sin(event->progress * SCENE_PI);
+  for (int i = 0; i < 12; i++) {
+    double u = fmod(event->t * 1.4 + i / 12.0, 1.0);
+    double py = g - u * s * 0.13 * (0.3 + 0.7 * erupt);
+    double px = cx + sin(u * 6.0 + i) * s * 0.008 * u;
+    filledCircleRGBA(surface, (int)px, (int)py, (int)(2 + u * s * 0.008), 205, 225, 240,
+                     weapon_alpha(150.0 * (1.0 - u) * event->fade));
+  }
+}
+
+
+// Bonsai pine: a windswept cliff pine silhouetted against a soft lantern.
+static void hill_bonsai_pine(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 149, 281));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(230.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)(cx + s * 0.018), (int)(g - s * 0.045), 3, 75, 58,
+                48, a);
+  filledEllipseRGBA(surface, (int)(cx + s * 0.022), (int)(g - s * 0.048), (int)(s * 0.024),
+                    (int)(s * 0.010), 42, 78, 56, a);
+  filledEllipseRGBA(surface, (int)(cx - s * 0.004), (int)(g - s * 0.036), (int)(s * 0.016),
+                    (int)(s * 0.008), 38, 70, 50, a);
+}
+
+
+// Brazier tripod: an iron tripod bowl burning with steady orange flame.
+static void hill_brazier_tripod(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 151, 283));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(230.0 * event->fade);
+  double h = s * 0.030;
+  lineRGBA(surface, (int)(cx - s * 0.014), (int)g, (int)cx, (int)(g - h), 110, 105, 105, a);
+  lineRGBA(surface, (int)(cx + s * 0.014), (int)g, (int)cx, (int)(g - h), 110, 105, 105, a);
+  filledEllipseRGBA(surface, (int)cx, (int)(g - h), (int)(s * 0.014), (int)(s * 0.005), 95, 90, 95,
+                    a);
+  static const Uint8 flame[3] = {255, 145, 55};
+  weapon_glow(surface, cx, g - h - s * 0.008, 1.3 + 0.25 * sin(event->t * 8.0), flame,
+              215.0 * event->fade);
+}
+
+
+// Flagpole: a tall mast with a pennant snapping briskly in the ridge wind.
+static void hill_flagpole(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 157, 293));
+  double g = hill_ground(event, cx);
+  double h = s * 0.075;
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 185, 195, 210, a);
+  double wave = sin(event->t * 9.0) * s * 0.006;
+  filledTrigonRGBA(surface, (int)cx, (int)(g - h), (int)cx, (int)(g - h + s * 0.018),
+                   (int)(cx + event->direction * s * 0.036), (int)(g - h + s * 0.009 + wave), 195,
+                   75, 75, a);
+}
+
+
+// Glowworm arch: a natural stone arch draped in faint blue-green glowworms.
+static void hill_glowworm_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 163, 307));
+  double g = hill_ground(event, cx);
+  double r = s * 0.036;
+  Uint8 a = weapon_alpha(215.0 * event->fade);
+  for (int i = 0; i < 8; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 8.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 8.0;
+    thickLineRGBA(surface, (int)(cx + cos(a0) * r), (int)(g + sin(a0) * r),
+                  (int)(cx + cos(a1) * r), (int)(g + sin(a1) * r), 4, 65, 72, 85, a);
+  }
+  static const Uint8 gw[3] = {115, 235, 195};
+  for (int i = 1; i < 7; i++) {
+    double ang = SCENE_PI + i * SCENE_PI / 7.0;
+    weapon_glow(surface, cx + cos(ang) * r * 0.85, g + sin(ang) * r * 0.85, 0.6, gw,
+                (140.0 + 50.0 * sin(event->t * 2.5 + i)) * event->fade);
+  }
+}
+
+
+// Haystacks: three rounded harvest stacks under drifting firefly-like chaff.
+static void hill_haystacks(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 167, 311));
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  for (int i = -1; i <= 1; i++) {
+    double hx = cx + i * s * 0.036;
+    double hg = hill_ground(event, hx);
+    int r = (int)(s * (0.016 - abs(i) * 0.002));
+    filledPieRGBA(surface, (int)hx, (int)hg, r, 180, 360, 175, 145, 75, a);
+  }
+}
+
+
+// Standing stones: a pair of weathered megaliths with a carved glowing rune.
+static void hill_standing_stones(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 173, 313));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  boxRGBA(surface, (int)(cx - s * 0.022), (int)(g - s * 0.048), (int)(cx - s * 0.010), (int)g, 85,
+          92, 105, a);
+  boxRGBA(surface, (int)(cx + s * 0.008), (int)(g - s * 0.062), (int)(cx + s * 0.022), (int)g, 92,
+          98, 112, a);
+  static const Uint8 rune[3] = {135, 205, 255};
+  weapon_glow(surface, cx + s * 0.015, g - s * 0.036, 0.85, rune,
+              (135.0 + 55.0 * sin(event->t * 2.0)) * event->fade);
+}
+
+
+// Kite festival: three colorful diamond kites tugging on lines from the hill.
+static void hill_kite_festival(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 179, 317));
+  double g = hill_ground(event, cx);
+  static const Uint8 cols[3][3] = {{235, 115, 95}, {115, 205, 235}, {245, 205, 95}};
+  for (int i = 0; i < 3; i++) {
+    double ax = cx + (i - 1) * s * 0.030;
+    double ag = hill_ground(event, ax);
+    double kx = ax + event->direction * s * 0.028 + sin(event->t * 2.2 + i) * s * 0.010;
+    double ky = ag - s * (0.075 + 0.015 * i) + cos(event->t * 2.7 + i) * s * 0.007;
+    lineRGBA(surface, (int)ax, (int)ag, (int)kx, (int)ky, 180, 190, 205,
+             weapon_alpha(130.0 * event->fade));
+    filledTrigonRGBA(surface, (int)kx, (int)(ky - s * 0.010), (int)(kx - s * 0.008), (int)ky,
+                     (int)(kx + s * 0.008), (int)ky, cols[i][0], cols[i][1], cols[i][2],
+                     weapon_alpha(220.0 * event->fade));
+    filledTrigonRGBA(surface, (int)kx, (int)(ky + s * 0.012), (int)(kx - s * 0.008), (int)ky,
+                     (int)(kx + s * 0.008), (int)ky, cols[i][0], cols[i][1], cols[i][2],
+                     weapon_alpha(190.0 * event->fade));
+  }
+  (void)g;
+}
+
+
+// Firepot row: five clay firepots lining the ridge path with warm embers.
+static void hill_firepot_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 181, 331));
+  static const Uint8 emb[3] = {255, 155, 70};
+  for (int i = -2; i <= 2; i++) {
+    double px = cx + i * s * 0.024;
+    double pg = hill_ground(event, px);
+    boxRGBA(surface, (int)(px - 3), (int)(pg - 5), (int)(px + 3), (int)pg, 120, 75, 55,
+            weapon_alpha(220.0 * event->fade));
+    weapon_glow(surface, px, pg - 7, 0.85, emb,
+                (170.0 + 45.0 * sin(event->t * 6.0 + i * 1.3)) * event->fade);
+  }
+}
+
+
+// Clockwork bird: a brass mechanical bird flapping steadily on a tall perch.
+static void hill_clockwork_bird(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 191, 337));
+  double g = hill_ground(event, cx);
+  double h = s * 0.052;
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 175, 145, 85,
+                weapon_alpha(220.0 * event->fade));
+  double flap = sin(event->t * 4.2) * 0.8;
+  draw_sleek_bird(surface, cx, g - h - s * 0.008, s * 0.022, event->direction, flap, 0.0, 225, 190,
+                  110, weapon_alpha(230.0 * event->fade), true);
+}
+
+
+// Mirage pool: a still reflective basin mirroring two faint star points.
+static void hill_mirage_pool(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 193, 347));
+  double g = hill_ground(event, cx);
+  filledEllipseRGBA(surface, (int)cx, (int)g, (int)(s * 0.042), (int)(s * 0.007), 75, 135, 185,
+                    weapon_alpha(180.0 * event->fade));
+  static const Uint8 star[3] = {215, 235, 255};
+  weapon_glow(surface, cx - s * 0.014, g, 0.65, star,
+              (130.0 + 40.0 * sin(event->t * 3.1)) * event->fade);
+  weapon_glow(surface, cx + s * 0.016, g, 0.65, star,
+              (130.0 + 40.0 * cos(event->t * 2.7)) * event->fade);
+}
+
+
+// Signal mirror: flashes of reflected moonlight blinking in slow Morse pulses.
+static void hill_signal_mirror(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 197, 349));
+  double g = hill_ground(event, cx);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - s * 0.036), 2, 145, 155, 170,
+                weapon_alpha(210.0 * event->fade));
+  double pulse = fmax(0.0, sin(event->t * 5.0));
+  static const Uint8 flash[3] = {235, 245, 255};
+  weapon_glow(surface, cx, g - s * 0.038, 0.9 + 1.1 * pulse, flash,
+              (80.0 + 170.0 * pulse) * event->fade);
+}
+
+
+// Cairn lantern: a stacked stone cairn crowned with a blue-white trail lamp.
+static void hill_cairn_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 199, 353));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  double y = g;
+  for (int i = 0; i < 4; i++) {
+    int rx = (int)(s * (0.014 - i * 0.0025));
+    int ry = (int)(s * 0.005) + 1;
+    filledEllipseRGBA(surface, (int)cx, (int)(y - ry), rx, ry, 105 + i * 10, 112 + i * 10,
+                      125 + i * 10, a);
+    y -= ry * 1.8;
+  }
+  static const Uint8 lamp[3] = {175, 225, 255};
+  weapon_glow(surface, cx, y - 3, 1.0, lamp, 195.0 * event->fade);
+}
+
+
+// Reed boat: a curved crescent skiff resting on the dark ridge swell.
+static void hill_reed_boat(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 211, 359));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  double sway = sin(event->t * 1.8) * 0.08;
+  filledEllipseRGBA(surface, (int)cx, (int)(g - s * 0.005), (int)(s * 0.034), (int)(s * 0.008),
+                    155, 130, 85, a);
+  lineRGBA(surface, (int)cx, (int)(g - s * 0.005), (int)(cx + sway * s * 0.1),
+           (int)(g - s * 0.045), 185, 165, 120, a);
+  filledTrigonRGBA(surface, (int)cx, (int)(g - s * 0.045), (int)cx, (int)(g - s * 0.012),
+                   (int)(cx + event->direction * s * 0.024), (int)(g - s * 0.018), 215, 210, 195,
+                   weapon_alpha(180.0 * event->fade));
+}
+
+
+// Wind chimes row: three wooden frames with swaying silver tubes.
+static void hill_wind_chimes_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 223, 367));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  double h = s * 0.048;
+  thickLineRGBA(surface, (int)(cx - s * 0.025), (int)g, (int)(cx - s * 0.025), (int)(g - h), 2,
+                130, 100, 75, a);
+  thickLineRGBA(surface, (int)(cx + s * 0.025), (int)g, (int)(cx + s * 0.025), (int)(g - h), 2,
+                130, 100, 75, a);
+  thickLineRGBA(surface, (int)(cx - s * 0.028), (int)(g - h), (int)(cx + s * 0.028), (int)(g - h),
+                2, 150, 115, 85, a);
+  for (int i = -2; i <= 2; i++) {
+    double tx = cx + i * s * 0.009;
+    double sw = sin(event->t * 3.4 + i * 0.7) * s * 0.004;
+    lineRGBA(surface, (int)tx, (int)(g - h), (int)(tx + sw), (int)(g - h * 0.45), 205, 220, 240,
+             a);
+  }
+}
+
+
+// Sundial plinth: a stone column casting a rotating shadow needle.
+static void hill_sundial_plinth(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 227, 373));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  boxRGBA(surface, (int)(cx - s * 0.008), (int)(g - s * 0.032), (int)(cx + s * 0.008), (int)g, 130,
+          135, 145, a);
+  filledEllipseRGBA(surface, (int)cx, (int)(g - s * 0.034), (int)(s * 0.018), (int)(s * 0.005),
+                    165, 170, 180, a);
+  double ang = event->t * 0.6;
+  lineRGBA(surface, (int)cx, (int)(g - s * 0.034), (int)(cx + cos(ang) * s * 0.015),
+           (int)(g - s * 0.044), 225, 200, 130, a);
+}
+
+
+// Star map table: an illuminated circular chart glowing softly on a pedestal.
+static void hill_star_map_table(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 229, 379));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  boxRGBA(surface, (int)(cx - s * 0.005), (int)(g - s * 0.026), (int)(cx + s * 0.005), (int)g, 95,
+          100, 115, a);
+  filledEllipseRGBA(surface, (int)cx, (int)(g - s * 0.028), (int)(s * 0.026), (int)(s * 0.008), 55,
+                    95, 145, a);
+  static const Uint8 chart[3] = {155, 220, 255};
+  weapon_glow(surface, cx, g - s * 0.028, 1.1, chart, 165.0 * event->fade);
+}
+
+
+// Lantern gate: a wooden archway hung with a swaying paper lantern.
+static void hill_lantern_gate(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 233, 383));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  double w = s * 0.022, h = s * 0.052;
+  thickLineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 2, 115, 85, 65, a);
+  thickLineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 2, 115, 85, 65, a);
+  thickLineRGBA(surface, (int)(cx - w * 1.2), (int)(g - h), (int)(cx + w * 1.2), (int)(g - h), 3,
+                135, 95, 70, a);
+  double lx = cx + sin(event->t * 2.4) * s * 0.006;
+  double ly = g - h + s * 0.016;
+  lineRGBA(surface, (int)cx, (int)(g - h), (int)lx, (int)ly, 160, 140, 120, a);
+  static const Uint8 lan[3] = {255, 185, 95};
+  weapon_glow(surface, lx, ly, 1.0, lan, 195.0 * event->fade);
+}
+
+
+// Dew web: a silver orb-weaver web glistening between two tall grass stalks.
+static void hill_dew_web(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 239, 389));
+  double g = hill_ground(event, cx);
+  double h = s * 0.045;
+  Uint8 a = weapon_alpha(190.0 * event->fade);
+  lineRGBA(surface, (int)(cx - s * 0.020), (int)g, (int)(cx - s * 0.022), (int)(g - h), 85, 125,
+           95, a);
+  lineRGBA(surface, (int)(cx + s * 0.020), (int)g, (int)(cx + s * 0.022), (int)(g - h), 85, 125,
+           95, a);
+  circleRGBA(surface, (int)cx, (int)(g - h * 0.6), (int)(s * 0.016), 195, 220, 240, a);
+  circleRGBA(surface, (int)cx, (int)(g - h * 0.6), (int)(s * 0.009), 195, 220, 240, a);
+}
+
+
+// Ember tree: a leafless dark tree whose tips glow like cooling coals.
+static void hill_ember_tree(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 241, 397));
+  double g = hill_ground(event, cx);
+  double h = s * 0.065;
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h * 0.6), 3, 65, 50, 48, a);
+  static const Uint8 emb[3] = {255, 125, 65};
+  for (int i = -2; i <= 2; i++) {
+    double bx = cx + i * s * 0.015;
+    double by = g - h + abs(i) * s * 0.008;
+    lineRGBA(surface, (int)cx, (int)(g - h * 0.55), (int)bx, (int)by, 75, 55, 50, a);
+    weapon_glow(surface, bx, by, 0.75, emb,
+                (145.0 + 45.0 * sin(event->t * 3.0 + i)) * event->fade);
+  }
+}
+
+
+// Ice lantern: a carved hollow ice block lit from within by a warm candle.
+static void hill_ice_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 251, 401));
+  double g = hill_ground(event, cx);
+  int r = (int)(s * 0.014) + 2;
+  boxRGBA(surface, (int)(cx - r), (int)(g - r * 2), (int)(cx + r), (int)g, 165, 215, 245,
+          weapon_alpha(180.0 * event->fade));
+  static const Uint8 can[3] = {255, 195, 105};
+  weapon_glow(surface, cx, g - r, 1.1, can,
+              (180.0 + 35.0 * sin(event->t * 7.5)) * event->fade);
+}
+
+
+// Bell buoy: a grounded coastal bell frame rocking gently as if on waves.
+static void hill_bell_buoy(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 257, 409));
+  double g = hill_ground(event, cx);
+  double sway = sin(event->t * 2.0) * s * 0.006;
+  double h = s * 0.055;
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  lineRGBA(surface, (int)(cx - s * 0.015), (int)g, (int)(cx + sway), (int)(g - h), 145, 155, 170,
+           a);
+  lineRGBA(surface, (int)(cx + s * 0.015), (int)g, (int)(cx + sway), (int)(g - h), 145, 155, 170,
+           a);
+  filledCircleRGBA(surface, (int)(cx + sway), (int)(g - h * 0.65), (int)(s * 0.006) + 2, 215, 185,
+                   110, a);
+}
+
+
+// Frost ferns: delicate silver-blue fern fronds unfurling along the ridge.
+static void hill_frost_ferns(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 263, 419));
+  double grow = smooth_step(0.0, 0.4, event->progress);
+  for (int i = -2; i <= 2; i++) {
+    double fx = cx + i * s * 0.018;
+    double fg = hill_ground(event, fx);
+    double h = s * 0.036 * grow;
+    double lean = i * s * 0.008;
+    thickLineRGBA(surface, (int)fx, (int)fg, (int)(fx + lean), (int)(fg - h), 2, 165, 215, 245,
+                  weapon_alpha(195.0 * event->fade));
+  }
+}
+
+
+// Paper lanterns: a low string of warm glowing festival lanterns between posts.
+static void hill_paper_lanterns(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 269, 421));
+  double span = s * 0.055;
+  double g0 = hill_ground(event, cx - span);
+  double g1 = hill_ground(event, cx + span);
+  double h = s * 0.040;
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  thickLineRGBA(surface, (int)(cx - span), (int)g0, (int)(cx - span), (int)(g0 - h), 2, 115, 95,
+                80, a);
+  thickLineRGBA(surface, (int)(cx + span), (int)g1, (int)(cx + span), (int)(g1 - h), 2, 115, 95,
+                80, a);
+  static const Uint8 lan[3] = {255, 180, 90};
+  for (int i = -2; i <= 2; i++) {
+    double u = (i + 2) / 4.0;
+    double lx = (cx - span) + u * 2.0 * span;
+    double ly = ((g0 - h) * (1.0 - u) + (g1 - h) * u) + sin(u * SCENE_PI) * s * 0.012;
+    weapon_glow(surface, lx, ly, 0.85, lan, 185.0 * event->fade);
+  }
+}
+
+
+// Crystal cluster: five translucent amethyst crystals catching moonlight.
+static void hill_crystal_cluster(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 271, 431));
+  double g = hill_ground(event, cx);
+  for (int i = -2; i <= 2; i++) {
+    double bx = cx + i * s * 0.010;
+    double h = s * (0.045 - abs(i) * 0.008);
+    double tip_x = bx + i * s * 0.007;
+    filledTrigonRGBA(surface, (int)(bx - s * 0.006), (int)g, (int)(bx + s * 0.006), (int)g,
+                     (int)tip_x, (int)(g - h), 175, 125, 225, weapon_alpha(195.0 * event->fade));
+  }
+}
+
+
+// Smoke signals: rhythmic puffs of pale smoke rising from a ridge fire.
+static void hill_smoke_signals(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 277, 433));
+  double g = hill_ground(event, cx);
+  static const Uint8 emb[3] = {255, 145, 65};
+  weapon_glow(surface, cx, g - 3, 0.85, emb, 175.0 * event->fade);
+  for (int i = 0; i < 6; i++) {
+    double u = fmod(event->t * 0.35 + i / 6.0, 1.0);
+    double px = cx + event->direction * u * s * 0.045;
+    double py = g - u * s * 0.14;
+    filledCircleRGBA(surface, (int)px, (int)py, (int)(3 + u * s * 0.012), 185, 195, 210,
+                     weapon_alpha(130.0 * (1.0 - u) * event->fade));
+  }
+}
+
+
+// Shepherd hut: a small wheeled wooden hut with one warm window.
+static void hill_shepherd_hut(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 281, 439));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  double w = s * 0.026, h = s * 0.028;
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)(g - s * 0.005), 115, 92, 74,
+          a);
+  filledEllipseRGBA(surface, (int)cx, (int)(g - h), (int)(w * 1.05), (int)(s * 0.007), 95, 105,
+                    120, a);
+  circleRGBA(surface, (int)(cx - w * 0.65), (int)(g - s * 0.005), (int)(s * 0.006) + 1, 135, 120,
+             100, a);
+  circleRGBA(surface, (int)(cx + w * 0.65), (int)(g - s * 0.005), (int)(s * 0.006) + 1, 135, 120,
+             100, a);
+  boxRGBA(surface, (int)(cx - 3), (int)(g - h * 0.65), (int)(cx + 3), (int)(g - h * 0.35), 255,
+          205, 115, weapon_alpha(230.0 * event->fade));
+}
+
+
+// Moonstone ring: seven low pale stones arranged in an arc on the hill.
+static void hill_moonstone_ring(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 283, 443));
+  static const Uint8 ms[3] = {190, 220, 255};
+  for (int i = -3; i <= 3; i++) {
+    double sx = cx + i * s * 0.016;
+    double sg = hill_ground(event, sx);
+    double h = s * (0.018 - abs(i) * 0.002);
+    filledEllipseRGBA(surface, (int)sx, (int)(sg - h * 0.5), (int)(s * 0.005) + 1, (int)(h * 0.5),
+                      165, 185, 215, weapon_alpha(210.0 * event->fade));
+    weapon_glow(surface, sx, sg - h * 0.7, 0.55, ms, 110.0 * event->fade);
+  }
+}
+
+
+// Weather balloon: a silver sounding balloon tethered and bobbing above.
+static void hill_weather_balloon(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 293, 449));
+  double g = hill_ground(event, cx);
+  double bx = cx + sin(event->t * 1.4) * s * 0.015;
+  double by = g - s * 0.095 + cos(event->t * 1.9) * s * 0.006;
+  lineRGBA(surface, (int)cx, (int)g, (int)bx, (int)by, 165, 175, 190,
+           weapon_alpha(150.0 * event->fade));
+  filledCircleRGBA(surface, (int)bx, (int)by, (int)(s * 0.016) + 2, 215, 225, 238,
+                   weapon_alpha(215.0 * event->fade));
+}
+
+
+// Water wheel: a wooden mill wheel turning beside a dark sluice trough.
+static void hill_water_wheel(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 307, 457));
+  double g = hill_ground(event, cx);
+  int r = (int)(s * 0.026);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  circleRGBA(surface, (int)cx, (int)(g - r), r, 155, 115, 80, a);
+  for (int i = 0; i < 6; i++) {
+    double ang = event->t * 1.6 + i * SCENE_TAU / 6.0;
+    lineRGBA(surface, (int)(cx - cos(ang) * r), (int)(g - r - sin(ang) * r),
+             (int)(cx + cos(ang) * r), (int)(g - r + sin(ang) * r), 145, 105, 75, a);
+  }
+}
+
+
+// Starry campfire: a bright hearth with drifting golden sparks rising high.
+static void hill_starry_campfire(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 311, 461));
+  double g = hill_ground(event, cx);
+  static const Uint8 fire[3] = {255, 165, 70};
+  weapon_glow(surface, cx, g - 4, 1.3 + 0.25 * sin(event->t * 9.0), fire, 210.0 * event->fade);
+  for (int i = 0; i < 8; i++) {
+    double u = fmod(event->t * 0.7 + i * 0.13, 1.0);
+    double sx = cx + sin(u * 9.0 + i) * s * 0.015;
+    double sy = g - u * s * 0.09;
+    pixelRGBA(surface, (int)sx, (int)sy, 255, 215, 125,
+              weapon_alpha(220.0 * (1.0 - u) * event->fade));
+  }
+}
+
+
+// Beacon arch: a stone gateway crowned with a steady blue-green beacon.
+static void hill_beacon_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 313, 463));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  double w = s * 0.022, h = s * 0.050;
+  boxRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx - w * 0.55), (int)g, 95, 105, 120, a);
+  boxRGBA(surface, (int)(cx + w * 0.55), (int)(g - h), (int)(cx + w), (int)g, 95, 105, 120, a);
+  boxRGBA(surface, (int)(cx - w * 1.1), (int)(g - h - s * 0.010), (int)(cx + w * 1.1),
+          (int)(g - h), 115, 125, 140, a);
+  static const Uint8 bcn[3] = {120, 235, 205};
+  weapon_glow(surface, cx, g - h - s * 0.016, 1.2, bcn, 205.0 * event->fade);
+}
+
+
+// Night heron: a tall wading silhouette pacing slowly along the ridge.
+static void hill_night_heron(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double hx = (dir > 0) ? surface->w * (0.20 + 0.60 * event->progress)
+                        : surface->w * (0.80 - 0.60 * event->progress);
+  double hg = hill_ground(event, hx);
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  lineRGBA(surface, (int)hx, (int)hg, (int)hx, (int)(hg - s * 0.024), 145, 160, 180, a);
+  filledEllipseRGBA(surface, (int)hx, (int)(hg - s * 0.026), (int)(s * 0.012), (int)(s * 0.006),
+                    155, 175, 200, a);
+  thickLineRGBA(surface, (int)(hx + dir * s * 0.008), (int)(hg - s * 0.028),
+                (int)(hx + dir * s * 0.014), (int)(hg - s * 0.042), 2, 165, 185, 210, a);
+  lineRGBA(surface, (int)(hx + dir * s * 0.014), (int)(hg - s * 0.042),
+           (int)(hx + dir * s * 0.026), (int)(hg - s * 0.040), 215, 200, 155, a);
+}
+
+
+// Firefly bush: a dark shrub pulsing with a dozen tiny chartreuse lights.
+static void hill_firefly_bush(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 317, 467));
+  double g = hill_ground(event, cx);
+  filledEllipseRGBA(surface, (int)cx, (int)(g - s * 0.012), (int)(s * 0.028), (int)(s * 0.016),
+                    32, 55, 42, weapon_alpha(215.0 * event->fade));
+  static const Uint8 ff[3] = {195, 245, 115};
+  for (int i = 0; i < 8; i++) {
+    double fx = cx + sin(i * 2.1 + event->t * 0.9) * s * 0.026;
+    double fy = g - s * 0.014 - fabs(cos(i * 1.7 + event->t * 1.1)) * s * 0.020;
+    double blink = fmax(0.0, sin(event->t * 3.5 + i * 1.9));
+    weapon_glow(surface, fx, fy, 0.55, ff, 175.0 * blink * event->fade);
+  }
+}
+
+
+// Tethered kite: a single glowing box-kite bobbing high above a small stake.
+static void hill_tethered_kite(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 331, 479));
+  double g = hill_ground(event, cx);
+  double kx = cx + event->direction * s * 0.035 + sin(event->t * 1.8) * s * 0.012;
+  double ky = g - s * 0.095 + cos(event->t * 2.3) * s * 0.008;
+  lineRGBA(surface, (int)cx, (int)g, (int)kx, (int)ky, 185, 195, 210,
+           weapon_alpha(135.0 * event->fade));
+  boxRGBA(surface, (int)(kx - s * 0.010), (int)(ky - s * 0.010), (int)(kx + s * 0.010),
+          (int)(ky + s * 0.010), 235, 165, 95, weapon_alpha(205.0 * event->fade));
+}
+
+
+// Stone well: a mossy circular well with a small pitched shingle roof.
+static void hill_stone_well(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 337, 487));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  double w = s * 0.016, h = s * 0.040;
+  boxRGBA(surface, (int)(cx - w), (int)(g - s * 0.016), (int)(cx + w), (int)g, 110, 118, 130, a);
+  lineRGBA(surface, (int)(cx - w * 0.8), (int)(g - s * 0.016), (int)(cx - w * 0.8), (int)(g - h),
+           125, 100, 75, a);
+  lineRGBA(surface, (int)(cx + w * 0.8), (int)(g - s * 0.016), (int)(cx + w * 0.8), (int)(g - h),
+           125, 100, 75, a);
+  filledTrigonRGBA(surface, (int)(cx - w * 1.25), (int)(g - h), (int)(cx + w * 1.25),
+                   (int)(g - h), (int)cx, (int)(g - h - s * 0.016), 95, 78, 68, a);
+}
+
+
+// Aurora spire: a slim crystal obelisk pulsing with pale emerald light.
+static void hill_aurora_spire(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 347, 491));
+  double g = hill_ground(event, cx);
+  double h = s * 0.072;
+  filledTrigonRGBA(surface, (int)(cx - s * 0.010), (int)g, (int)(cx + s * 0.010), (int)g, (int)cx,
+                   (int)(g - h), 115, 215, 185, weapon_alpha(195.0 * event->fade));
+  static const Uint8 aur[3] = {125, 245, 200};
+  weapon_glow(surface, cx, g - h * 0.75, 1.1, aur,
+              (145.0 + 55.0 * sin(event->t * 2.5)) * event->fade);
+}
+
+
+// Lantern boat: a small glowing paper boat perched on a ridge puddle.
+static void hill_lantern_boat(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 349, 499));
+  double g = hill_ground(event, cx);
+  filledEllipseRGBA(surface, (int)cx, (int)g, (int)(s * 0.036), (int)(s * 0.006), 65, 115, 160,
+                    weapon_alpha(165.0 * event->fade));
+  double bx = cx + sin(event->t * 1.5) * s * 0.014;
+  filledTrigonRGBA(surface, (int)(bx - s * 0.010), (int)g, (int)(bx + s * 0.010), (int)g, (int)bx,
+                   (int)(g - s * 0.014), 245, 235, 215, weapon_alpha(220.0 * event->fade));
+  static const Uint8 lan[3] = {255, 195, 110};
+  weapon_glow(surface, bx, g - s * 0.006, 0.7, lan, 160.0 * event->fade);
+}
+
+
+// Camp lantern: a single brass hurricane lamp hanging from a crooked staff.
+static void hill_camp_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 353, 503));
+  double g = hill_ground(event, cx);
+  double h = s * 0.050;
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 120, 95, 75, a);
+  lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + s * 0.016), (int)(g - h), 120, 95, 75, a);
+  double lx = cx + s * 0.016 + sin(event->t * 2.8) * s * 0.004;
+  double ly = g - h + s * 0.012;
+  lineRGBA(surface, (int)(cx + s * 0.016), (int)(g - h), (int)lx, (int)ly, 155, 145, 130, a);
+  static const Uint8 lamp[3] = {255, 190, 95};
+  weapon_glow(surface, lx, ly, 1.1, lamp, 210.0 * event->fade);
+}
+
+
+// Wind sock: an illuminated striped cone streaming from a ridge pole.
+static void hill_wind_sock(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 359, 509));
+  double g = hill_ground(event, cx);
+  double h = s * 0.062;
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 175, 185, 200, a);
+  double wave = sin(event->t * 7.0) * s * 0.004;
+  filledTrigonRGBA(surface, (int)cx, (int)(g - h), (int)cx, (int)(g - h + s * 0.012),
+                   (int)(cx + event->direction * s * 0.038), (int)(g - h + s * 0.006 + wave), 235,
+                   125, 75, a);
+}
+
+
+// Moon gate: a circular stone portal framing a soft glow of mist.
+static void hill_moon_gate(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 367, 521));
+  double g = hill_ground(event, cx);
+  int r = (int)(s * 0.028);
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  filledCircleRGBA(surface, (int)cx, (int)(g - r), r, 115, 145, 180,
+                   weapon_alpha(75.0 * event->fade));
+  circleRGBA(surface, (int)cx, (int)(g - r), r, 145, 155, 170, a);
+  circleRGBA(surface, (int)cx, (int)(g - r), r + 2, 125, 135, 150, a);
+}
+
+
+// Starry trellis: a garden arch covered in tiny twinkling white blossoms.
+static void hill_starry_trellis(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 373, 523));
+  double g = hill_ground(event, cx);
+  double r = s * 0.030;
+  Uint8 a = weapon_alpha(210.0 * event->fade);
+  for (int i = 0; i < 8; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 8.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 8.0;
+    lineRGBA(surface, (int)(cx + cos(a0) * r), (int)(g + sin(a0) * r), (int)(cx + cos(a1) * r),
+             (int)(g + sin(a1) * r), 115, 145, 105, a);
+  }
+  static const Uint8 bl[3] = {235, 245, 255};
+  for (int i = 0; i <= 6; i++) {
+    double ang = SCENE_PI + i * SCENE_PI / 6.0;
+    weapon_glow(surface, cx + cos(ang) * r, g + sin(ang) * r, 0.55, bl,
+                (140.0 + 60.0 * sin(event->t * 2.8 + i)) * event->fade);
+  }
+}
+
+
+// Radio beacon: a tall radio tower with a rhythmic crimson warning strobe.
+static void hill_radio_beacon(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 379, 541));
+  double g = hill_ground(event, cx);
+  double h = s * 0.092;
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  lineRGBA(surface, (int)(cx - s * 0.010), (int)g, (int)cx, (int)(g - h), 145, 155, 175, a);
+  lineRGBA(surface, (int)(cx + s * 0.010), (int)g, (int)cx, (int)(g - h), 145, 155, 175, a);
+  double blink = fmax(0.0, sin(event->t * 4.5));
+  static const Uint8 red[3] = {255, 75, 75};
+  weapon_glow(surface, cx, g - h, 0.9 + 0.5 * blink, red, 220.0 * blink * event->fade);
+}
+
+
+// Owl perch: a perched barn owl rotating its head slowly on a crooked post.
+static void hill_owl_perch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 383, 547));
+  double g = hill_ground(event, cx);
+  double h = s * 0.044;
+  Uint8 a = weapon_alpha(225.0 * event->fade);
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 3, 105, 85, 68, a);
+  filledEllipseRGBA(surface, (int)cx, (int)(g - h - s * 0.009), (int)(s * 0.008), (int)(s * 0.011),
+                    205, 195, 180, a);
+  filledCircleRGBA(surface, (int)(cx + sin(event->t * 1.1) * 2.0), (int)(g - h - s * 0.020),
+                   (int)(s * 0.006) + 1, 225, 215, 200, a);
+}
+
+
+// Snowdrift tree: a frost-laden evergreen shimmering in the night breeze.
+static void hill_snowdrift_tree(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 389, 557));
+  double g = hill_ground(event, cx);
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  for (int i = 0; i < 3; i++) {
+    double y0 = g - s * (0.015 + i * 0.018);
+    double w = s * (0.022 - i * 0.005);
+    filledTrigonRGBA(surface, (int)(cx - w), (int)y0, (int)(cx + w), (int)y0, (int)cx,
+                     (int)(y0 - s * 0.026), 165, 200, 225, a);
+  }
+}
+
+
+// Glow mushrooms: a cluster of bioluminescent toadstools pulsing softly.
+static void hill_glow_mushrooms(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 397, 563));
+  static const Uint8 bio[3] = {125, 235, 215};
+  for (int i = -1; i <= 1; i++) {
+    double mx = cx + i * s * 0.015;
+    double mg = hill_ground(event, mx);
+    double h = s * (0.018 - abs(i) * 0.004);
+    lineRGBA(surface, (int)mx, (int)mg, (int)mx, (int)(mg - h), 175, 215, 210,
+             weapon_alpha(200.0 * event->fade));
+    filledPieRGBA(surface, (int)mx, (int)(mg - h), (int)(s * 0.009) + 2, 180, 360, 115, 230, 210,
+                  weapon_alpha(215.0 * event->fade));
+    weapon_glow(surface, mx, mg - h, 0.75, bio,
+                (130.0 + 45.0 * sin(event->t * 2.5 + i)) * event->fade);
+  }
+}
+
+
+// Lantern bridge: a low arched footbridge with two warm corner lamps.
+static void hill_lantern_bridge_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 401, 569));
+  double g = hill_ground(event, cx);
+  double w = s * 0.045;
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  thickLineRGBA(surface, (int)(cx - w), (int)g, (int)cx, (int)(g - s * 0.016), 3, 135, 105, 80, a);
+  thickLineRGBA(surface, (int)cx, (int)(g - s * 0.016), (int)(cx + w), (int)g, 3, 135, 105, 80, a);
+  static const Uint8 lan[3] = {255, 190, 95};
+  weapon_glow(surface, cx - w, g - s * 0.018, 0.85, lan, 185.0 * event->fade);
+  weapon_glow(surface, cx + w, g - s * 0.018, 0.85, lan, 185.0 * event->fade);
+}
+
+
+// Starry obelisk: a tall dark monolith etched with rising golden light.
+static void hill_starry_obelisk(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 409, 571));
+  double g = hill_ground(event, cx);
+  double h = s * 0.080;
+  boxRGBA(surface, (int)(cx - s * 0.008), (int)(g - h), (int)(cx + s * 0.008), (int)g, 55, 65, 82,
+          weapon_alpha(225.0 * event->fade));
+  filledTrigonRGBA(surface, (int)(cx - s * 0.008), (int)(g - h), (int)(cx + s * 0.008),
+                   (int)(g - h), (int)cx, (int)(g - h - s * 0.014), 75, 88, 110,
+                   weapon_alpha(225.0 * event->fade));
+  static const Uint8 gold[3] = {255, 215, 125};
+  weapon_glow(surface, cx, g - h - s * 0.014, 0.9, gold, 180.0 * event->fade);
+}
+
+
+// Crane roost: two slender cranes standing motionless on one leg.
+static void hill_crane_roost(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 419, 577));
+  Uint8 a = weapon_alpha(215.0 * event->fade);
+  for (int i = 0; i < 2; i++) {
+    double bx = cx + (i - 0.5) * s * 0.028;
+    double bg = hill_ground(event, bx);
+    lineRGBA(surface, (int)bx, (int)bg, (int)bx, (int)(bg - s * 0.022), 185, 195, 210, a);
+    filledEllipseRGBA(surface, (int)bx, (int)(bg - s * 0.024), (int)(s * 0.010), (int)(s * 0.005),
+                      220, 228, 240, a);
+    lineRGBA(surface, (int)(bx + s * 0.008), (int)(bg - s * 0.024), (int)(bx + s * 0.012),
+             (int)(bg - s * 0.036), 220, 228, 240, a);
+  }
+}
+
+
+// Wind harp: a tall stringed frame humming with shimmering silver waves.
+static void hill_wind_harp_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 421, 587));
+  double g = hill_ground(event, cx);
+  double h = s * 0.065;
+  Uint8 a = weapon_alpha(220.0 * event->fade);
+  thickLineRGBA(surface, (int)(cx - s * 0.016), (int)g, (int)(cx - s * 0.008), (int)(g - h), 2,
+                165, 145, 105, a);
+  thickLineRGBA(surface, (int)(cx + s * 0.016), (int)g, (int)(cx + s * 0.008), (int)(g - h), 2,
+                165, 145, 105, a);
+  lineRGBA(surface, (int)(cx - s * 0.008), (int)(g - h), (int)(cx + s * 0.008), (int)(g - h), 185,
+           165, 120, a);
+  for (int i = -1; i <= 1; i++) {
+    double sx = cx + i * s * 0.005;
+    lineRGBA(surface, (int)sx, (int)g, (int)(sx + sin(event->t * 10.0 + i) * 2.0), (int)(g - h),
+             205, 225, 245, weapon_alpha(165.0 * event->fade));
+  }
+}
+
+
+// Beacon dome: a geodesic glass dome glowing warmly from inside.
+static void hill_beacon_dome(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 431, 593));
+  double g = hill_ground(event, cx);
+  int r = (int)(s * 0.028);
+  filledPieRGBA(surface, (int)cx, (int)g, r, 180, 360, 235, 185, 110,
+                weapon_alpha(150.0 * event->fade));
+  circleRGBA(surface, (int)cx, (int)g, r, 185, 205, 225, weapon_alpha(200.0 * event->fade));
+}
+
+
+// Fire wheel: a spinning spark-wheel mounted on a wooden ridge post.
+static void hill_fire_wheel_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 433, 599));
+  double g = hill_ground(event, cx);
+  double h = s * 0.048;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 125, 105, 85,
+           weapon_alpha(200.0 * event->fade));
+  static const Uint8 spk[3] = {255, 185, 85};
+  for (int i = 0; i < 6; i++) {
+    double ang = event->t * 5.0 + i * SCENE_TAU / 6.0;
+    double sx = cx + cos(ang) * s * 0.020;
+    double sy = g - h + sin(ang) * s * 0.020;
+    weapon_glow(surface, sx, sy, 0.7, spk, 175.0 * event->fade);
+  }
+}
+
+
+// Dew flowers: tall pale blossoms swaying gently in the night breeze.
+static void hill_dew_flowers(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 439, 601));
+  for (int i = -2; i <= 2; i++) {
+    double fx = cx + i * s * 0.018;
+    double fg = hill_ground(event, fx);
+    double sway = sin(event->t * 1.9 + i * 0.8) * s * 0.006;
+    double h = s * (0.026 + (abs(i) % 2) * 0.008);
+    lineRGBA(surface, (int)fx, (int)fg, (int)(fx + sway), (int)(fg - h), 85, 135, 100,
+             weapon_alpha(200.0 * event->fade));
+    filledCircleRGBA(surface, (int)(fx + sway), (int)(fg - h), 3, 220, 235, 255,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -2441,6 +3547,68 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_starling_wave,
     hill_phoenix_crest,
     hill_gull_ridge,
+    hill_signal_tower,
+    hill_moon_garden,
+    hill_windmill_row,
+    hill_shrine_torii,
+    hill_starry_tent,
+    hill_ice_spire,
+    hill_lantern_procession,
+    hill_observatory_dome,
+    hill_weather_vane,
+    hill_geyser_vent,
+    hill_bonsai_pine,
+    hill_brazier_tripod,
+    hill_flagpole,
+    hill_glowworm_arch,
+    hill_haystacks,
+    hill_standing_stones,
+    hill_kite_festival,
+    hill_firepot_row,
+    hill_clockwork_bird,
+    hill_mirage_pool,
+    hill_signal_mirror,
+    hill_cairn_lantern,
+    hill_reed_boat,
+    hill_wind_chimes_row,
+    hill_sundial_plinth,
+    hill_star_map_table,
+    hill_lantern_gate,
+    hill_dew_web,
+    hill_ember_tree,
+    hill_ice_lantern,
+    hill_bell_buoy,
+    hill_frost_ferns,
+    hill_paper_lanterns,
+    hill_crystal_cluster,
+    hill_smoke_signals,
+    hill_shepherd_hut,
+    hill_moonstone_ring,
+    hill_weather_balloon,
+    hill_water_wheel,
+    hill_starry_campfire,
+    hill_beacon_arch,
+    hill_night_heron,
+    hill_firefly_bush,
+    hill_tethered_kite,
+    hill_stone_well,
+    hill_aurora_spire,
+    hill_lantern_boat,
+    hill_camp_lantern,
+    hill_wind_sock,
+    hill_moon_gate,
+    hill_starry_trellis,
+    hill_radio_beacon,
+    hill_owl_perch,
+    hill_snowdrift_tree,
+    hill_glow_mushrooms,
+    hill_lantern_bridge_two,
+    hill_starry_obelisk,
+    hill_crane_roost,
+    hill_wind_harp_two,
+    hill_beacon_dome,
+    hill_fire_wheel_two,
+    hill_dew_flowers,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
