@@ -72,7 +72,8 @@ Scenery events normally appear at random times. To see one right away, run only 
 
 ## Repository layout
 
-- `gluqlo.c` – the whole program
+- `src/` – the program
+- `assets/` – the program's assets
 - `NOTES.md` – notes on how the code works
 - `dev/` – developer tools; not needed to build
 
