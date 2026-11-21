@@ -2793,6 +2793,19 @@ static void sky_event_260(const SkyEvent *event) {
 }
 
 
+// Polar shimmer: vertical ice-cyan light curtains swaying gently.
+static void sky_event_261(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -3; i <= 3; i++) {
+    int bx = x + i * (size / 4 + 2);
+    int sway = (int)(sin(phase / 200.0 + i * 0.6) * 4.0);
+    int h = size + (3 - abs(i)) * 3;
+    lineRGBA(surface, bx, y - h / 2, bx + sway, y + h / 2, 130, 245, 225,
+             weapon_alpha((150.0 - abs(i) * 20.0) * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2876,7 +2889,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
-    sky_event_257, sky_event_258, sky_event_259, sky_event_260,
+    sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

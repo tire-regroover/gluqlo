@@ -4123,6 +4123,21 @@ static void hill_beacon_tripod(const HillEvent *event) {
 }
 
 
+// Tidepool glow: a shallow hillside basin with bioluminescent cyan ripples.
+static void hill_tidepool_glow(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 293, 433));
+  double g = hill_ground(event, cx);
+  double w = s * 0.032;
+  filledEllipseRGBA(surface, (int)cx, (int)g, (int)w, 4, 48, 92, 118,
+                    weapon_alpha(195.0 * event->fade));
+  double r = (0.4 + 0.6 * fmod(event->t * 0.6, 1.0)) * w * 0.85;
+  ellipseRGBA(surface, (int)cx, (int)g, (int)r, 2, 130, 240, 255,
+              weapon_alpha(190.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4387,6 +4402,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_wind_chime_arch,
     hill_lunar_sundial,
     hill_beacon_tripod,
+    hill_tidepool_glow,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
