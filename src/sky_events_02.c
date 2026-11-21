@@ -2442,6 +2442,18 @@ static void sky_event_232(const SkyEvent *event) {
 }
 
 
+// Starlight glider: a delta-wing glider with faint teal wingtip trails.
+static void sky_event_233(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  filledTrigonRGBA(surface, x + direction * size, y, x - direction * size, y - size * 2 / 3,
+                   x - direction * size, y + size * 2 / 3, 185, 215, 240, weapon_alpha(190.0 * fade));
+  lineRGBA(surface, x - direction * size, y - size * 2 / 3, x - direction * size * 3,
+           y - size * 2 / 3, 120, 230, 220, weapon_alpha(135.0 * fade));
+  lineRGBA(surface, x - direction * size, y + size * 2 / 3, x - direction * size * 3,
+           y + size * 2 / 3, 120, 230, 220, weapon_alpha(135.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2521,6 +2533,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_215, sky_event_216, sky_event_217, sky_event_218, sky_event_219, sky_event_220,
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
+    sky_event_233,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

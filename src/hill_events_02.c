@@ -3592,6 +3592,23 @@ static void hill_fire_totem(const HillEvent *event) {
 }
 
 
+// Star flowerbed: five glowing silver-blue blossoms opening along the ridge.
+static void hill_star_flowerbed(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 509, 673));
+  static const Uint8 blm[3] = {185, 225, 255};
+  for (int i = -2; i <= 2; i++) {
+    double fx = cx + i * s * 0.016;
+    double fg = hill_ground(event, fx);
+    double h = s * (0.016 + (abs(i) % 2) * 0.007);
+    lineRGBA(surface, (int)fx, (int)fg, (int)fx, (int)(fg - h), 85, 125, 95,
+             weapon_alpha(195.0 * event->fade));
+    weapon_glow(surface, fx, fg - h, 0.65, blm, 175.0 * event->fade);
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3828,6 +3845,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ice_crystals,
     hill_lantern_arch_two,
     hill_fire_totem,
+    hill_star_flowerbed,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
