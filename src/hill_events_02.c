@@ -3544,6 +3544,22 @@ static void hill_windmill_beacon(const HillEvent *event) {
 }
 
 
+// Ice crystals: three translucent blue-white spires catching starlight on the ridge.
+static void hill_ice_crystals(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 491, 653));
+  for (int i = -1; i <= 1; i++) {
+    double px = cx + i * s * 0.014;
+    double pg = hill_ground(event, px);
+    double h = s * (0.044 - abs(i) * 0.011);
+    double w = s * 0.007;
+    filledTrigonRGBA(surface, (int)(px - w), (int)pg, (int)(px + w), (int)pg, (int)px,
+                     (int)(pg - h), 165, 220, 255, weapon_alpha(190.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3777,6 +3793,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_reed_lanterns,
     hill_star_sundial,
     hill_windmill_beacon,
+    hill_ice_crystals,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
