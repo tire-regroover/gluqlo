@@ -3384,6 +3384,30 @@ static void hill_dew_flowers(const HillEvent *event) {
 }
 
 
+// Star lantern: a hanging brass-framed lantern swaying from a crooked ridge post.
+static void hill_star_lantern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 443, 607));
+  double g = hill_ground(event, cx);
+  double h = s * 0.056;
+  thickLineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 2, 110, 95, 80,
+                weapon_alpha(210.0 * event->fade));
+  double arm_x = cx + event->direction * s * 0.022;
+  lineRGBA(surface, (int)cx, (int)(g - h), (int)arm_x, (int)(g - h + s * 0.005), 110, 95, 80,
+           weapon_alpha(200.0 * event->fade));
+  double swing = sin(event->t * 2.1) * s * 0.004;
+  double lx = arm_x + swing;
+  double ly = g - h + s * 0.018;
+  lineRGBA(surface, (int)arm_x, (int)(g - h + s * 0.005), (int)lx, (int)ly, 150, 140, 120,
+           weapon_alpha(190.0 * event->fade));
+  static const Uint8 lan[3] = {255, 210, 110};
+  weapon_glow(surface, lx, ly, 1.2, lan, 180.0 * event->fade);
+  filledCircleRGBA(surface, (int)lx, (int)ly, 3, 255, 230, 155,
+                   weapon_alpha(230.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3609,6 +3633,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_beacon_dome,
     hill_fire_wheel_two,
     hill_dew_flowers,
+    hill_star_lantern,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

@@ -2300,6 +2300,18 @@ static void sky_event_221(const SkyEvent *event) {
 }
 
 
+// Comet glider: a sleek winged silhouette towing a pale-gold stardust wake.
+static void sky_event_222(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int tail_x = x - direction * size * 3;
+  thickLineRGBA(surface, x, y, tail_x, y + size / 3, 2, 235, 205, 130, weapon_alpha(145.0 * fade));
+  filledTrigonRGBA(surface, x + direction * size, y, x - direction * size, y - size * 2 / 3,
+                   x - direction * size / 2, y, 210, 225, 245, weapon_alpha(200.0 * fade));
+  filledTrigonRGBA(surface, x + direction * size, y, x - direction * size, y + size * 2 / 3,
+                   x - direction * size / 2, y, 180, 200, 230, weapon_alpha(185.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2377,7 +2389,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_203, sky_event_204, sky_event_205, sky_event_206, sky_event_207, sky_event_208,
     sky_event_209, sky_event_210, sky_event_211, sky_event_212, sky_event_213, sky_event_214,
     sky_event_215, sky_event_216, sky_event_217, sky_event_218, sky_event_219, sky_event_220,
-    sky_event_221,
+    sky_event_221, sky_event_222,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
