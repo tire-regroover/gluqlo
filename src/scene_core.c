@@ -41,13 +41,16 @@ double smooth_step(double edge0, double edge1, double value) {
 // Height of the three ground ridges as a fraction of the screen height at
 // horizontal position nx (0..1). Effects use it to sit things on the ground.
 double ridge_height(int layer, double nx) {
+  double far_shift = (scene_offset % 9973) * 0.13;
+  double mid_shift = ((scene_offset / 7) % 9967) * 0.17;
+  double near_shift = ((scene_offset / 13) % 9949) * 0.19;
   switch (layer) {
     case RIDGE_FAR:
-      return 0.68 + (smooth_noise(nx * 3.6, 1.0, 907) - 0.5) * 0.13;
+      return 0.68 + (smooth_noise(nx * 3.6 + far_shift, 1.0, 907) - 0.5) * 0.13;
     case RIDGE_MIDDLE:
-      return 0.79 + (smooth_noise(nx * 5.2 + 8.0, 2.0, 1013) - 0.5) * 0.10;
+      return 0.79 + (smooth_noise(nx * 5.2 + 8.0 + mid_shift, 2.0, 1013) - 0.5) * 0.10;
     default:
-      return 0.88 + (smooth_noise(nx * 8.0 - 3.0, 3.0, 1123) - 0.5) * 0.09;
+      return 0.88 + (smooth_noise(nx * 8.0 - 3.0 + near_shift, 3.0, 1123) - 0.5) * 0.09;
   }
 }
 
