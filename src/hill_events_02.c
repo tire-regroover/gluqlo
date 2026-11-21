@@ -3523,6 +3523,27 @@ static void hill_star_sundial(const HillEvent *event) {
 }
 
 
+// Windmill beacon: a small ridge windmill with a warm lantern at the hub.
+static void hill_windmill_beacon(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 487, 647));
+  double g = hill_ground(event, cx);
+  double h = s * 0.048;
+  filledTrigonRGBA(surface, (int)(cx - s * 0.014), (int)g, (int)(cx + s * 0.014), (int)g,
+                   (int)cx, (int)(g - h), 85, 80, 90, weapon_alpha(215.0 * event->fade));
+  double rot = event->t * 1.8 * event->direction;
+  for (int i = 0; i < 4; i++) {
+    double a = rot + i * SCENE_PI * 0.5;
+    lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + cos(a) * s * 0.026),
+             (int)(g - h + sin(a) * s * 0.026), 175, 170, 160,
+             weapon_alpha(205.0 * event->fade));
+  }
+  static const Uint8 hub[3] = {255, 210, 125};
+  weapon_glow(surface, cx, g - h, 0.8, hub, 175.0 * event->fade);
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3755,6 +3776,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_post_row,
     hill_reed_lanterns,
     hill_star_sundial,
+    hill_windmill_beacon,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
