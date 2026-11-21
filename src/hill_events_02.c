@@ -4212,6 +4212,24 @@ static void hill_beacon_windmill_two(const HillEvent *event) {
 }
 
 
+// Dew lantern row: four low curved stems holding glowing pale-aqua dew drops.
+static void hill_dew_lantern_row(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.18 + 0.64 * hill_random(event, 347, 491));
+  for (int i = 0; i < 4; i++) {
+    double px = cx + (i - 1.5) * s * 0.015;
+    double g = hill_ground(event, px);
+    double h = s * 0.020;
+    double tip_x = px + 3.0 + sin(event->t * 2.0 + i) * 1.5;
+    lineRGBA(surface, (int)px, (int)g, (int)tip_x, (int)(g - h), 88, 122, 102,
+             weapon_alpha(200.0 * event->fade));
+    filledCircleRGBA(surface, (int)tip_x, (int)(g - h + 2), 2, 155, 245, 230,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4481,6 +4499,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_crystal_lantern,
     hill_lantern_boat_two,
     hill_beacon_windmill_two,
+    hill_dew_lantern_row,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

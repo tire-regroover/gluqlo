@@ -2856,6 +2856,18 @@ static void sky_event_265(const SkyEvent *event) {
 }
 
 
+// Starlit cascade: three staggered falling star motes with faint vertical tails.
+static void sky_event_266(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -1; i <= 1; i++) {
+    int sx = x + i * (size / 2 + 2);
+    int sy = y + (int)((phase / 12 + i * 7) % (size + 6)) - size / 2;
+    lineRGBA(surface, sx, sy - 5, sx, sy, 200, 225, 255, weapon_alpha(150.0 * fade));
+    filledCircleRGBA(surface, sx, sy, 2, 240, 248, 255, weapon_alpha(215.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2940,7 +2952,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
-    sky_event_263, sky_event_264, sky_event_265,
+    sky_event_263, sky_event_264, sky_event_265, sky_event_266,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
