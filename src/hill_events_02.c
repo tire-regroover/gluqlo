@@ -3450,6 +3450,25 @@ static void hill_ember_braziers(const HillEvent *event) {
 }
 
 
+// Stone arch: a weathered megalithic arch framing a small flickering hearth.
+static void hill_stone_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 461, 619));
+  double g = hill_ground(event, cx);
+  double w = s * 0.022;
+  double h = s * 0.044;
+  boxRGBA(surface, (int)(cx - w - 3), (int)(g - h), (int)(cx - w + 3), (int)g, 90, 95, 108,
+          weapon_alpha(220.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 3), (int)(g - h), (int)(cx + w + 3), (int)g, 90, 95, 108,
+          weapon_alpha(220.0 * event->fade));
+  boxRGBA(surface, (int)(cx - w - 5), (int)(g - h - 5), (int)(cx + w + 5), (int)(g - h + 2), 100,
+          105, 118, weapon_alpha(225.0 * event->fade));
+  static const Uint8 hth[3] = {255, 175, 90};
+  weapon_glow(surface, cx, g - s * 0.008, 0.9, hth, 165.0 * event->fade);
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3678,6 +3697,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_star_lantern,
     hill_frost_chimes,
     hill_ember_braziers,
+    hill_stone_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
