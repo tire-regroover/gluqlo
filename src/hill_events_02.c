@@ -3577,6 +3577,21 @@ static void hill_lantern_arch_two(const HillEvent *event) {
 }
 
 
+// Fire totem: a carved wooden pillar crowned with a flickering amber flame.
+static void hill_fire_totem(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 503, 661));
+  double g = hill_ground(event, cx);
+  double h = s * 0.048;
+  boxRGBA(surface, (int)(cx - 3), (int)(g - h), (int)(cx + 3), (int)g, 95, 78, 65,
+          weapon_alpha(220.0 * event->fade));
+  static const Uint8 flm[3] = {255, 160, 70};
+  double pulse = 0.8 + 0.2 * sin(event->t * 4.5);
+  weapon_glow(surface, cx, g - h - s * 0.006, 1.1 * pulse, flm, 190.0 * event->fade);
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3812,6 +3827,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_windmill_beacon,
     hill_ice_crystals,
     hill_lantern_arch_two,
+    hill_fire_totem,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

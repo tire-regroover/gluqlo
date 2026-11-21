@@ -2429,6 +2429,19 @@ static void sky_event_231(const SkyEvent *event) {
 }
 
 
+// Starlit kite: a diamond kite with a fluttering ribbon tail drifting across the sky.
+static void sky_event_232(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  filledTrigonRGBA(surface, x, y - size, x - size * 2 / 3, y, x + size * 2 / 3, y, 235, 170, 125,
+                   weapon_alpha(200.0 * fade));
+  filledTrigonRGBA(surface, x, y + size, x - size * 2 / 3, y, x + size * 2 / 3, y, 210, 145, 105,
+                   weapon_alpha(185.0 * fade));
+  int wave = (int)(sin(phase / 160.0) * size * 0.4);
+  lineRGBA(surface, x, y + size, x - direction * size, y + size * 2 + wave, 240, 225, 195,
+           weapon_alpha(170.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2507,7 +2520,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_209, sky_event_210, sky_event_211, sky_event_212, sky_event_213, sky_event_214,
     sky_event_215, sky_event_216, sky_event_217, sky_event_218, sky_event_219, sky_event_220,
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
-    sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231,
+    sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
