@@ -366,7 +366,7 @@ static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char 
     total_w += adv + kerning;
     if (i + 1 < n_cp) total_w += extra_space;
   }
-  total_w += 1;  // room for subtle 1px weight-reinforcement pass
+  total_w += 2;  // room for up to 2px weight-reinforcement pass
   if (total_w < 1) total_w = 1;
   if (max_h < 1) max_h = 1;
 
@@ -391,22 +391,30 @@ static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char 
       SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
       SDL_BlitSurface(glyph, &src, dst, &drect);
       if (is_light_weight) {
-        // Thicken Book/Regular glyphs: full 1px horizontal pass, moderate 1px
-        // vertical pass, and a diagonal fill pass for balanced stroke weight.
+        // Thicken Book/Regular glyphs by ~1.33x relative to previous pass:
+        // full 1px + 0.33px horizontal, full 1px vertical, and diagonal fill.
         SDL_SetSurfaceAlphaMod(glyph, 255);
         SDL_Rect drect_x = {pen_x + 1, 0, glyph->w, blit_h};
         SDL_BlitSurface(glyph, &src, dst, &drect_x);
 
+        SDL_SetSurfaceAlphaMod(glyph, 85);
+        SDL_Rect drect_x2 = {pen_x + 2, 0, glyph->w, blit_h};
+        SDL_BlitSurface(glyph, &src, dst, &drect_x2);
+
         int blit_h_y = glyph->h > max_h - 1 ? max_h - 1 : glyph->h;
         if (blit_h_y > 0) {
           SDL_Rect src_y = {0, 0, glyph->w, blit_h_y};
-          SDL_SetSurfaceAlphaMod(glyph, 160);
+          SDL_SetSurfaceAlphaMod(glyph, 255);
           SDL_Rect drect_y = {pen_x, 1, glyph->w, blit_h_y};
           SDL_BlitSurface(glyph, &src_y, dst, &drect_y);
 
-          SDL_SetSurfaceAlphaMod(glyph, 130);
+          SDL_SetSurfaceAlphaMod(glyph, 210);
           SDL_Rect drect_xy = {pen_x + 1, 1, glyph->w, blit_h_y};
           SDL_BlitSurface(glyph, &src_y, dst, &drect_xy);
+
+          SDL_SetSurfaceAlphaMod(glyph, 60);
+          SDL_Rect drect_x2y = {pen_x + 2, 1, glyph->w, blit_h_y};
+          SDL_BlitSurface(glyph, &src_y, dst, &drect_x2y);
         }
       }
       SDL_DestroySurface(glyph);
