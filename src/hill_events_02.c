@@ -4103,6 +4103,26 @@ static void hill_lunar_sundial(const HillEvent *event) {
 }
 
 
+// Beacon tripod: three iron legs supporting a pulsing warm-amber lantern.
+static void hill_beacon_tripod(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.18 + 0.64 * hill_random(event, 283, 421));
+  double g = hill_ground(event, cx);
+  double w = s * 0.016;
+  double h = s * 0.032;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)cx, (int)(g - h), 88, 94, 106,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)cx, (int)(g - h), 88, 94, 106,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 88, 94, 106,
+           weapon_alpha(210.0 * event->fade));
+  double pulse = 0.7 + 0.3 * sin(event->t * 3.0);
+  filledCircleRGBA(surface, (int)cx, (int)(g - h - 2), 3, 255, 200, 120,
+                   weapon_alpha(230.0 * pulse * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4366,6 +4386,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ember_shrine,
     hill_wind_chime_arch,
     hill_lunar_sundial,
+    hill_beacon_tripod,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

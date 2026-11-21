@@ -2779,6 +2779,20 @@ static void sky_event_259(const SkyEvent *event) {
 }
 
 
+// Celestial harp: parallel shimmering vertical light strings drifting in the sky.
+static void sky_event_260(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -2; i <= 2; i++) {
+    int sx = x + i * (size / 3 + 2);
+    int h = size - abs(i) * 3;
+    if (h < 4) h = 4;
+    int wave = (int)(sin(phase / 170.0 + i * 0.9) * 2.5);
+    lineRGBA(surface, sx, y - h / 2, sx + wave, y + h / 2, 185, 225, 255,
+             weapon_alpha(175.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2862,7 +2876,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249, sky_event_250,
     sky_event_251, sky_event_252, sky_event_253, sky_event_254, sky_event_255, sky_event_256,
-    sky_event_257, sky_event_258, sky_event_259,
+    sky_event_257, sky_event_258, sky_event_259, sky_event_260,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
