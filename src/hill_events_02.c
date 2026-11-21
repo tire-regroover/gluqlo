@@ -4765,6 +4765,21 @@ static void hill_ember_chime(const HillEvent *event) {
 }
 
 
+// Frost beacon: a crystalline hillside spire pulsing with icy blue light.
+static void hill_frost_beacon(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 683, 877));
+  double g = hill_ground(event, cx);
+  double h = s * 0.042;
+  filledTrigonRGBA(surface, (int)(cx - 4), (int)g, (int)(cx + 4), (int)g, (int)cx, (int)(g - h),
+                   130, 195, 235, weapon_alpha(205.0 * event->fade));
+  double pulse = 0.7 + 0.3 * sin(event->t * 3.0);
+  filledCircleRGBA(surface, (int)cx, (int)(g - h - 2), 3, 200, 245, 255,
+                   weapon_alpha(230.0 * pulse * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5063,6 +5078,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_dew_arbor,
     hill_lantern_bridge_three,
     hill_ember_chime,
+    hill_frost_beacon,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

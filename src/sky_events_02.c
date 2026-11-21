@@ -3246,6 +3246,20 @@ static void sky_event_294(const SkyEvent *event) {
 }
 
 
+// Celestial ribbon: a twin-layered undulating band of pale blue and gold light.
+static void sky_event_295(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -2; i < 2; i++) {
+    int x0 = x + i * (size / 2);
+    int y0 = y + (int)(sin(phase / 200.0 + i) * 4.0);
+    int x1 = x + (i + 1) * (size / 2);
+    int y1 = y + (int)(sin(phase / 200.0 + i + 1) * 4.0);
+    lineRGBA(surface, x0, y0, x1, y1, 175, 225, 255, weapon_alpha(175.0 * fade));
+    lineRGBA(surface, x0, y0 + 3, x1, y1 + 3, 255, 225, 165, weapon_alpha(150.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3335,7 +3349,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
     sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291, sky_event_292,
-    sky_event_293, sky_event_294,
+    sky_event_293, sky_event_294, sky_event_295,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
