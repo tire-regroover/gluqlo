@@ -4381,6 +4381,25 @@ static void hill_moonstone_arch(const HillEvent *event) {
 }
 
 
+// Tidebell post: a coastal timber post with a swaying brass bell.
+static void hill_tidebell_post(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 457, 631));
+  double g = hill_ground(event, cx);
+  double h = s * 0.040;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 102, 84, 66,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)cx, (int)(g - h), (int)(cx + s * 0.012), (int)(g - h), 102, 84, 66,
+           weapon_alpha(210.0 * event->fade));
+  double sway = sin(event->t * 2.7) * 2.5;
+  filledTrigonRGBA(surface, (int)(cx + s * 0.012 + sway - 3), (int)(g - h + 7),
+                   (int)(cx + s * 0.012 + sway + 3), (int)(g - h + 7),
+                   (int)(cx + s * 0.012 + sway * 0.4), (int)(g - h + 1), 225, 195, 115,
+                   weapon_alpha(220.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4659,6 +4678,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_cairn_row,
     hill_skywatch_mast,
     hill_moonstone_arch,
+    hill_tidebell_post,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
