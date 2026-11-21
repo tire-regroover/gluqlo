@@ -3754,6 +3754,25 @@ static void hill_lantern_fence(const HillEvent *event) {
 }
 
 
+// Star telescope: a brass tripod telescope scanning the night sky.
+static void hill_star_telescope(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 577, 739));
+  double g = hill_ground(event, cx);
+  double piv_y = g - s * 0.024;
+  lineRGBA(surface, (int)(cx - s * 0.010), (int)g, (int)cx, (int)piv_y, 120, 110, 95,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx + s * 0.010), (int)g, (int)cx, (int)piv_y, 120, 110, 95,
+           weapon_alpha(210.0 * event->fade));
+  double ang = -0.6 + sin(event->t * 0.7) * 0.35;
+  double tx = cx + event->direction * cos(ang) * s * 0.028;
+  double ty = piv_y + sin(ang) * s * 0.028;
+  thickLineRGBA(surface, (int)cx, (int)piv_y, (int)tx, (int)ty, 3, 200, 175, 110,
+                weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3999,6 +4018,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_fire_pit,
     hill_moon_pond,
     hill_lantern_fence,
+    hill_star_telescope,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
