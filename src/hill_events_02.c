@@ -4780,6 +4780,27 @@ static void hill_frost_beacon(const HillEvent *event) {
 }
 
 
+// Reed lantern arch: a slender reed arch with a single warm hanging paper lamp.
+static void hill_reed_lantern_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 701, 887));
+  double g = hill_ground(event, cx);
+  double w = s * 0.022;
+  double h = s * 0.030;
+  for (int i = 0; i < 6; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 6.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 6.0;
+    lineRGBA(surface, (int)(cx + cos(a0) * w), (int)(g + sin(a0) * h),
+             (int)(cx + cos(a1) * w), (int)(g + sin(a1) * h), 96, 128, 92,
+             weapon_alpha(205.0 * event->fade));
+  }
+  double sway = sin(event->t * 2.2) * 2.0;
+  filledCircleRGBA(surface, (int)(cx + sway), (int)(g - h * 0.72), 3, 255, 205, 120,
+                   weapon_alpha(225.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5079,6 +5100,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_bridge_three,
     hill_ember_chime,
     hill_frost_beacon,
+    hill_reed_lantern_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
