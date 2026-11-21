@@ -508,11 +508,11 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 189
+#define RARE_SKY_KINDS 204
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  145  // things that happen on the hills (see render_hill_event)
+  160  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -1168,6 +1168,83 @@ static void draw_bird(RenderTarget *surface, int x, int y, int size,
                 shade, 30, 43, alpha);
   thickLineRGBA(surface, x - size / 2, y + wing_lift / 3, near_tip_x,
                 near_tip_y, 2, shade, 30, 43, alpha);
+}
+
+// Sleek, aerodynamic bird silhouette with swept cambered wings, tapered body,
+// forked/fanned tail, and optional rim highlight. `dir` is +1 (right) or -1
+// (left); `flap` ranges roughly -1.0 (downstroke) to +1.0 (upstroke); `pitch`
+// tilts the flight vector in radians.
+static void draw_sleek_bird(RenderTarget *surface, double cx, double cy,
+                            double span, int dir, double flap, double pitch,
+                            Uint8 r, Uint8 g, Uint8 b, Uint8 alpha,
+                            bool rim_light) {
+  if (span < 3.0 || alpha == 0) return;
+  double ca = cos(pitch), sa = sin(pitch);
+  double fx = dir * ca, fy = dir * sa;  // forward unit vector
+  double ux = -sa, uy = ca;             // up-ish normal (screen y is down)
+  if (dir < 0) {
+    ux = sa;
+    uy = -ca;
+  }
+  double body_len = span * 0.62;
+  double head_x = cx + fx * body_len * 0.52;
+  double head_y = cy + fy * body_len * 0.52;
+  double tail_x = cx - fx * body_len * 0.55;
+  double tail_y = cy - fy * body_len * 0.55;
+  double beak_x = head_x + fx * span * 0.16;
+  double beak_y = head_y + fy * span * 0.16;
+
+  // Tapered fuselage + sleek head/beak
+  int body_w = span > 18.0 ? 3 : 2;
+  thickLineRGBA(surface, (int)(tail_x), (int)(tail_y), (int)head_x, (int)head_y,
+                body_w, r, g, b, alpha);
+  lineRGBA(surface, (int)head_x, (int)head_y, (int)beak_x, (int)beak_y, r, g, b,
+           alpha);
+
+  // Forked / swept tail feathers
+  double t_spread = span * 0.14;
+  double t_back = span * 0.24;
+  lineRGBA(surface, (int)tail_x, (int)tail_y,
+           (int)(tail_x - fx * t_back - ux * t_spread),
+           (int)(tail_y - fy * t_back - uy * t_spread), r, g, b,
+           (Uint8)(alpha * 0.85));
+  lineRGBA(surface, (int)tail_x, (int)tail_y,
+           (int)(tail_x - fx * t_back + ux * t_spread),
+           (int)(tail_y - fy * t_back + uy * t_spread), r, g, b,
+           (Uint8)(alpha * 0.85));
+
+  // Swept articulated wings (near wing + far wing for 3/4 depth)
+  double sh_x = cx + fx * body_len * 0.10;
+  double sh_y = cy + fy * body_len * 0.10;
+  int wing_w = span > 20.0 ? 2 : 1;
+
+  // Far wing (higher/further in perspective)
+  double f_mid_x = sh_x - fx * span * 0.24 - ux * span * (0.28 + 0.22 * flap);
+  double f_mid_y = sh_y - fy * span * 0.24 - uy * span * (0.28 + 0.22 * flap);
+  double f_tip_x = sh_x - fx * span * 0.72 - ux * span * (0.14 + 0.34 * flap);
+  double f_tip_y = sh_y - fy * span * 0.72 - uy * span * (0.14 + 0.34 * flap);
+  thickLineRGBA(surface, (int)sh_x, (int)sh_y, (int)f_mid_x, (int)f_mid_y,
+                wing_w, r, g, b, alpha);
+  lineRGBA(surface, (int)f_mid_x, (int)f_mid_y, (int)f_tip_x, (int)f_tip_y, r,
+           g, b, alpha);
+
+  // Near wing (swept lower/closer)
+  double n_mid_x = sh_x - fx * span * 0.18 + ux * span * (0.18 - 0.24 * flap);
+  double n_mid_y = sh_y - fy * span * 0.18 + uy * span * (0.18 - 0.24 * flap);
+  double n_tip_x = sh_x - fx * span * 0.62 + ux * span * (0.10 - 0.36 * flap);
+  double n_tip_y = sh_y - fy * span * 0.62 + uy * span * (0.10 - 0.36 * flap);
+  thickLineRGBA(surface, (int)sh_x, (int)sh_y, (int)n_mid_x, (int)n_mid_y,
+                wing_w, r, g, b, alpha);
+  lineRGBA(surface, (int)n_mid_x, (int)n_mid_y, (int)n_tip_x, (int)n_tip_y, r,
+           g, b, alpha);
+
+  if (rim_light) {
+    Uint8 rim_a = (Uint8)(alpha * 0.45);
+    lineRGBA(surface, (int)sh_x, (int)sh_y - 1, (int)f_mid_x, (int)f_mid_y - 1,
+             175, 205, 240, rim_a);
+    lineRGBA(surface, (int)f_mid_x, (int)f_mid_y - 1, (int)f_tip_x,
+             (int)f_tip_y - 1, 175, 205, 240, rim_a);
+  }
 }
 
 /*
@@ -10072,6 +10149,323 @@ static void hill_pendulum(const HillEvent *event) {
   weapon_glow(surface, bx, by, 1.5, bob_c, 205.0 * event->fade);
 }
 
+// Peregrine falcon stoop: dives steeply from high sky onto the ridge and
+// pulls up sharply with faint wind-shear streaks.
+static void hill_falcon_stoop(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double p = event->progress;
+  double tx = surface->w * (0.28 + 0.44 * hill_random(event, 79, 181));
+  double ground = hill_ground(event, tx);
+  double start_x = tx - dir * s * 0.42;
+  double end_x = tx + dir * s * 0.45;
+  double bx = start_x + (end_x - start_x) * p;
+  double dive = sin(p * M_PI);
+  double by = ground - s * 0.04 - (1.0 - dive * dive) * s * 0.32;
+  double pitch =
+      dir * ((p < 0.5) ? 0.65 * (1.0 - p * 2.0) : -0.45 * (p - 0.5) * 2.0);
+  double flap = (p > 0.35 && p < 0.65) ? -0.45 : sin(event->t * 14.0) * 0.65;
+  Uint8 alpha = weapon_alpha(230.0 * event->fade);
+  draw_sleek_bird(surface, bx, by, s * 0.030, dir, flap, pitch, 24, 30, 44,
+                  alpha, true);
+  if (p > 0.25 && p < 0.65) {
+    lineRGBA(surface, (int)(bx - dir * s * 0.02), (int)(by - s * 0.02),
+             (int)(bx - dir * s * 0.06), (int)(by - s * 0.06), 160, 195, 235,
+             weapon_alpha(70.0 * event->fade));
+  }
+}
+
+// Silent barn owl gliding low over the ridge contour, dipping into hollows.
+static void hill_owl_glide(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double p = event->progress;
+  double bx = (dir > 0) ? surface->w * (0.08 + 0.84 * p)
+                        : surface->w * (0.92 - 0.84 * p);
+  double by =
+      hill_ground(event, bx) - s * 0.055 - sin(p * M_PI * 3.0) * s * 0.018;
+  double flap = sin(event->t * 3.8) * 0.72;
+  draw_sleek_bird(surface, bx, by, s * 0.036, dir, flap,
+                  cos(p * M_PI * 3.0) * -0.14, 185, 195, 215,
+                  weapon_alpha(205.0 * event->fade), true);
+}
+
+// Roost flight: a flock of ravens lifts off from a ridge sentinel tree and
+// arcs away into the night sky.
+static void hill_roost_flight(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double tx = surface->w * (0.25 + 0.50 * hill_random(event, 81, 191));
+  double ground = hill_ground(event, tx);
+  Uint8 hull_a = weapon_alpha(225.0 * event->fade);
+  thickLineRGBA(surface, (int)tx, (int)(ground + 2), (int)tx,
+                (int)(ground - s * 0.055), 3, 16, 20, 28, hull_a);
+  lineRGBA(surface, (int)tx, (int)(ground - s * 0.035), (int)(tx - s * 0.018),
+           (int)(ground - s * 0.052), 16, 20, 28, hull_a);
+  lineRGBA(surface, (int)tx, (int)(ground - s * 0.040), (int)(tx + s * 0.020),
+           (int)(ground - s * 0.058), 16, 20, 28, hull_a);
+  for (int i = 0; i < 7; i++) {
+    double delay = i * 0.07;
+    double bp = (event->progress - delay) / (1.0 - delay);
+    if (bp <= 0.0) continue;
+    int dir = (i % 2 == 0) ? event->direction : -event->direction;
+    double bx = tx + dir * bp * s * (0.22 + 0.04 * i);
+    double by =
+        ground - s * 0.052 - pow(bp, 1.15) * s * (0.14 + 0.02 * (i % 3));
+    double flap = sin(event->t * 9.5 + i * 1.4) * 0.85;
+    draw_sleek_bird(surface, bx, by, s * 0.018, dir, flap, -0.25, 22, 26, 36,
+                    weapon_alpha(210.0 * event->fade * (1.0 - bp * 0.4)),
+                    false);
+  }
+}
+
+// Night heron: tall slender silhouette on the ridge that launches into slow,
+// majestic wingbeats.
+static void hill_heron_stalk(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double tx = surface->w * (0.25 + 0.50 * hill_random(event, 83, 193));
+  double ground = hill_ground(event, tx);
+  double p = event->progress;
+  Uint8 alpha = weapon_alpha(220.0 * event->fade);
+  if (p < 0.30) {
+    double h = s * 0.032;
+    lineRGBA(surface, (int)tx, (int)ground, (int)tx, (int)(ground - h * 0.55),
+             24, 30, 42, alpha);
+    thickLineRGBA(surface, (int)(tx - dir * s * 0.008),
+                  (int)(ground - h * 0.55), (int)(tx + dir * s * 0.008),
+                  (int)(ground - h * 0.65), 2, 24, 30, 42, alpha);
+    lineRGBA(surface, (int)(tx + dir * s * 0.008), (int)(ground - h * 0.65),
+             (int)(tx + dir * s * 0.010), (int)(ground - h * 0.95), 24, 30, 42,
+             alpha);
+    lineRGBA(surface, (int)(tx + dir * s * 0.010), (int)(ground - h * 0.95),
+             (int)(tx + dir * s * 0.022), (int)(ground - h * 0.92), 24, 30, 42,
+             alpha);
+  } else {
+    double fp = (p - 0.30) / 0.70;
+    double bx = tx + dir * fp * s * 0.36;
+    double by = ground - s * 0.03 - sin(fp * M_PI * 0.5) * s * 0.14;
+    double flap = sin(event->t * 4.2) * 0.9;
+    draw_sleek_bird(surface, bx, by, s * 0.038, dir, flap, -0.20, 26, 34, 48,
+                    alpha, true);
+  }
+}
+
+// Swallow skim: agile swallows darting in sweeping arcs just above the ridge.
+static void hill_swallow_skim(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  for (int i = 0; i < 4; i++) {
+    int dir = (i % 2 == 0) ? 1 : -1;
+    double phase = fmod(event->progress * 1.4 + i * 0.23, 1.0);
+    double bx = (dir > 0) ? surface->w * (0.12 + 0.76 * phase)
+                          : surface->w * (0.88 - 0.76 * phase);
+    double by = hill_ground(event, bx) - s * 0.022 -
+                fabs(sin(phase * M_PI * 4.0 + i)) * s * 0.028;
+    double pitch = cos(phase * M_PI * 4.0 + i) * -0.35;
+    double flap = sin(event->t * 14.0 + i * 2.1) * 0.9;
+    draw_sleek_bird(surface, bx, by, s * 0.017, dir, flap, pitch, 28, 36, 52,
+                    weapon_alpha(205.0 * event->fade), true);
+  }
+}
+
+// Eagle soar: broad-winged eagle circling lazily on thermal updrafts above
+// the hill crest.
+static void hill_eagle_soar(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 85, 197));
+  double cy = hill_ground(event, cx) - s * 0.16;
+  double a = event->t * 0.85;
+  double bx = cx + cos(a) * s * 0.11;
+  double by = cy + sin(a) * s * 0.032;
+  int dir = (-sin(a) >= 0.0) ? 1 : -1;
+  double flap = 0.18 + sin(event->t * 2.1) * 0.14;
+  draw_sleek_bird(surface, bx, by, s * 0.044, dir, flap, cos(a) * 0.12, 26, 32,
+                  46, weapon_alpha(220.0 * event->fade), true);
+}
+
+// Crane dance: two tall cranes silhouetted on the ridge crest, bowing and
+// leaping with moonlit wings.
+static void hill_crane_dance(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 87, 199));
+  Uint8 alpha = weapon_alpha(225.0 * event->fade);
+  for (int i = 0; i < 2; i++) {
+    int dir = (i == 0) ? 1 : -1;
+    double x = cx + (i == 0 ? -s * 0.024 : s * 0.024);
+    double ground = hill_ground(event, x);
+    double leap = fabs(sin(event->t * 2.6 + i * 1.5)) * s * 0.026;
+    double flap = sin(event->t * 5.2 + i * 1.5) * 0.85;
+    draw_sleek_bird(surface, x, ground - s * 0.028 - leap, s * 0.030, dir, flap,
+                    -0.18, 200, 212, 232, alpha, true);
+    lineRGBA(surface, (int)x, (int)(ground - leap), (int)x,
+             (int)(ground - s * 0.026 - leap), 185, 198, 220, alpha);
+  }
+}
+
+// Nightjar hawk: buoyant erratic banked turns over the ridge dusk.
+static void hill_nightjar_hawk(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double p = event->progress;
+  double bx = (dir > 0) ? surface->w * (0.14 + 0.72 * p)
+                        : surface->w * (0.86 - 0.72 * p);
+  double by =
+      hill_ground(event, bx) - s * 0.075 + sin(event->t * 3.1) * s * 0.025;
+  double flap = sin(event->t * 8.5) * 0.88;
+  draw_sleek_bird(surface, bx, by, s * 0.024, dir, flap,
+                  cos(event->t * 3.1) * 0.25, 36, 44, 62,
+                  weapon_alpha(215.0 * event->fade), true);
+}
+
+// Raven spire: three ravens wheeling around a craggy stone pinnacle.
+static void hill_raven_spire(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.24 + 0.52 * hill_random(event, 89, 211));
+  double ground = hill_ground(event, x);
+  double h = s * 0.072;
+  filledTrigonRGBA(surface, (int)(x - s * 0.015), (int)(ground + 2),
+                   (int)(x + s * 0.015), (int)(ground + 2), (int)x,
+                   (int)(ground - h), 18, 22, 32,
+                   weapon_alpha(235.0 * event->fade));
+  for (int i = 0; i < 3; i++) {
+    double a = event->t * 1.5 + i * (2.0 * M_PI / 3.0);
+    double bx = x + cos(a) * s * 0.055;
+    double by = ground - h * 0.88 + sin(a) * s * 0.016;
+    int dir = (-sin(a) >= 0.0) ? 1 : -1;
+    double flap = sin(event->t * 7.2 + i * 1.9) * 0.75;
+    draw_sleek_bird(surface, bx, by, s * 0.020, dir, flap, 0.08, 22, 26, 36,
+                    weapon_alpha(215.0 * event->fade), false);
+  }
+}
+
+// Kingfisher dart: sleek bird with faint cyan-blue sheen hovering briefly
+// above a hollow before darting across.
+static void hill_kingfisher_dive(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double p = event->progress;
+  double cx = surface->w * (0.28 + 0.44 * hill_random(event, 91, 223));
+  double ground = hill_ground(event, cx);
+  double bx = (p < 0.45) ? cx : cx + dir * ((p - 0.45) / 0.55) * s * 0.42;
+  double by = ground - s * 0.065 +
+              ((p < 0.45) ? sin(event->t * 6.0) * s * 0.004
+                          : sin((p - 0.45) * M_PI) * s * 0.032);
+  double flap = (p < 0.45) ? sin(event->t * 22.0) * 0.95 : -0.25;
+  draw_sleek_bird(surface, bx, by, s * 0.019, dir, flap,
+                  (p < 0.45) ? -0.15 : 0.25, 45, 130, 175,
+                  weapon_alpha(225.0 * event->fade), true);
+}
+
+// Vulture kettle: five broad-winged raptors spiraling steadily upward from
+// the far ridge.
+static void hill_vulture_kettle(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 93, 227));
+  double base_y = hill_ground(event, cx) - s * 0.05;
+  for (int i = 0; i < 5; i++) {
+    double a = event->t * 0.95 + i * 1.25;
+    double r = s * (0.045 + 0.01 * (i % 3));
+    double bx = cx + cos(a) * r;
+    double by = base_y - event->progress * s * 0.16 - i * s * 0.018 +
+                sin(a) * s * 0.014;
+    int dir = (-sin(a) >= 0.0) ? 1 : -1;
+    draw_sleek_bird(surface, bx, by, s * 0.028, dir, 0.22, 0.05, 24, 28, 38,
+                    weapon_alpha(200.0 * event->fade), true);
+  }
+}
+
+// Loon skitter: a pair of night birds skimming fast and low across the ridge
+// saddle, leaving subtle pale wake ripples behind.
+static void hill_loon_skitter(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  for (int i = 0; i < 2; i++) {
+    double p = event->progress;
+    double bx = (dir > 0) ? surface->w * (0.10 + 0.80 * p) - i * s * 0.04
+                          : surface->w * (0.90 - 0.80 * p) + i * s * 0.04;
+    double by = hill_ground(event, bx) - s * 0.014;
+    double flap = sin(event->t * 11.0 + i * 1.1) * 0.85;
+    draw_sleek_bird(surface, bx, by, s * 0.022, dir, flap, 0.04, 30, 38, 54,
+                    weapon_alpha(215.0 * event->fade), true);
+    lineRGBA(surface, (int)(bx - dir * s * 0.015), (int)(by + s * 0.008),
+             (int)(bx - dir * s * 0.045), (int)(by + s * 0.010), 140, 175, 215,
+             weapon_alpha(95.0 * event->fade));
+  }
+}
+
+// Starling wave: an undulating murmuration ribbon of 24 small birds sweeping
+// over the hill line like living smoke.
+static void hill_starling_wave(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double head_x = (dir > 0) ? surface->w * (0.05 + 0.90 * event->progress)
+                            : surface->w * (0.95 - 0.90 * event->progress);
+  for (int i = 0; i < 24; i++) {
+    double u = i / 24.0;
+    double bx =
+        head_x - dir * u * s * 0.24 + sin(event->t * 2.5 + i) * s * 0.01;
+    double by = hill_ground(event, bx) - s * 0.065 -
+                sin(u * M_PI * 2.0 + event->t * 2.4) * s * 0.026 +
+                ((i % 5) - 2) * s * 0.007;
+    double flap = sin(event->t * 15.0 + i * 0.9) * 0.9;
+    draw_sleek_bird(surface, bx, by, s * 0.010, dir, flap, 0.0, 22, 28, 40,
+                    weapon_alpha(190.0 * event->fade), false);
+  }
+}
+
+// Phoenix crest: an ember-tipped raptor sweeping low over the ridge, shedding
+// a brief trail of cooling golden sparks.
+static void hill_phoenix_crest(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double p = event->progress;
+  double bx = (dir > 0) ? surface->w * (0.10 + 0.80 * p)
+                        : surface->w * (0.90 - 0.80 * p);
+  double by = hill_ground(event, bx) - s * 0.065 - sin(p * M_PI) * s * 0.045;
+  double flap = sin(event->t * 6.5) * 0.82;
+  static const Uint8 ember_c[3] = {255, 175, 85};
+  for (int i = 1; i <= 6; i++) {
+    double sx = bx - dir * i * s * 0.016;
+    double sy = by + i * s * 0.003 + sin(event->t * 4.0 + i) * s * 0.004;
+    weapon_glow(surface, sx, sy, 1.1 - i * 0.12, ember_c,
+                (170.0 - i * 22.0) * event->fade);
+  }
+  draw_sleek_bird(surface, bx, by, s * 0.034, dir, flap, -0.14, 245, 155, 75,
+                  weapon_alpha(230.0 * event->fade), true);
+}
+
+// Gull ridge: coastal gulls riding the ridge updraft in a steady hover,
+// banking slightly against the wind.
+static void hill_gull_ridge(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  int dir = event->direction;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 95, 229));
+  for (int i = 0; i < 4; i++) {
+    double bx =
+        cx + (i - 1.5) * s * 0.042 + sin(event->t * 1.1 + i * 1.4) * s * 0.012;
+    double by = hill_ground(event, bx) - s * (0.065 + 0.014 * (i % 2)) +
+                cos(event->t * 1.4 + i) * s * 0.008;
+    double flap = 0.25 + sin(event->t * 3.2 + i * 1.7) * 0.35;
+    draw_sleek_bird(surface, bx, by, s * 0.023, dir, flap,
+                    sin(event->t * 1.5 + i) * 0.12, 195, 208, 225,
+                    weapon_alpha(205.0 * event->fade), true);
+  }
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -10220,6 +10614,21 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_paper_boats,
     hill_glow_cave,
     hill_pendulum,
+    hill_falcon_stoop,
+    hill_owl_glide,
+    hill_roost_flight,
+    hill_heron_stalk,
+    hill_swallow_skim,
+    hill_eagle_soar,
+    hill_crane_dance,
+    hill_nightjar_hawk,
+    hill_raven_spire,
+    hill_kingfisher_dive,
+    hill_vulture_kettle,
+    hill_loon_skitter,
+    hill_starling_wave,
+    hill_phoenix_crest,
+    hill_gull_ridge,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
@@ -14710,6 +15119,208 @@ static void sky_event_188(const SkyEvent *event) {
   }
 }
 
+// V-formation geese: a crisp chevron of 9 migratory birds with synchronized,
+// slightly staggered wingbeats.
+static void sky_event_189(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 9; i++) {
+    int rank = (i + 1) / 2;
+    int side = (i == 0) ? 0 : ((i % 2 == 1) ? -1 : 1);
+    double bx = x - direction * rank * size * 0.85;
+    double by = y + side * rank * size * 0.55;
+    double flap = sin(phase / 190.0 - rank * 0.45) * 0.85;
+    draw_sleek_bird(surface, bx, by, size * 0.85, direction, flap, 0.0, 32, 42,
+                    60, weapon_alpha(205.0 * fade), true);
+  }
+}
+
+// Moonlit albatross: a wide-winged oceanic glider banking gently on long
+// slender swept wings.
+static void sky_event_190(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double pitch = sin(phase / 900.0) * 0.14;
+  double flap = 0.22 + sin(phase / 650.0) * 0.16;
+  draw_sleek_bird(surface, x, y, size * 1.9, direction, flap, pitch, 195, 210,
+                  230, weapon_alpha(210.0 * fade), true);
+}
+
+// Swift squadron: 7 crescent-winged swifts banking together in tight echelon.
+static void sky_event_191(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 7; i++) {
+    double bx = x - direction * i * size * 0.65;
+    double by =
+        y + (i - 3) * size * 0.35 + sin(phase / 320.0 + i * 0.3) * size * 0.18;
+    double flap = sin(phase / 110.0 + i * 0.7) * 0.9;
+    draw_sleek_bird(surface, bx, by, size * 0.62, direction, flap,
+                    cos(phase / 320.0 + i * 0.3) * 0.18, 28, 36, 52,
+                    weapon_alpha(200.0 * fade), true);
+  }
+}
+
+// Crane migration: a long undulating diagonal line of 8 graceful cranes.
+static void sky_event_192(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 8; i++) {
+    double bx = x - direction * i * size * 0.95;
+    double by =
+        y + (i - 3.5) * size * 0.42 + sin(phase / 500.0 + i * 0.6) * size * 0.2;
+    double flap = sin(phase / 260.0 + i * 0.5) * 0.82;
+    draw_sleek_bird(surface, bx, by, size * 1.05, direction, flap, -0.06, 175,
+                    190, 215, weapon_alpha(195.0 * fade), true);
+  }
+}
+
+// Starlight murmuration: a fluid twisting cloud of 28 small birds morphing
+// smoothly across the upper sky.
+static void sky_event_193(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 28; i++) {
+    double a = i * 0.48 + phase / 450.0;
+    double r = size * (0.4 + 0.85 * sin(i * 0.37 + phase / 620.0));
+    double bx = x + cos(a) * r * 1.4;
+    double by = y + sin(a * 1.3) * r * 0.65;
+    double flap = sin(phase / 120.0 + i * 1.1) * 0.9;
+    draw_sleek_bird(surface, bx, by, size * 0.36, direction, flap,
+                    sin(a) * 0.15, 26, 34, 48, weapon_alpha(185.0 * fade),
+                    false);
+  }
+}
+
+// Twin hawks: two agile hawks spiraling around each other in aerial chase.
+static void sky_event_194(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 2; i++) {
+    double a = phase / 280.0 + i * M_PI;
+    double bx = x + cos(a) * size * 0.55;
+    double by = y + sin(a) * size * 0.65;
+    double flap = sin(phase / 150.0 + i * 1.7) * 0.85;
+    draw_sleek_bird(surface, bx, by, size * 0.95, direction, flap,
+                    cos(a) * 0.25, 34, 42, 58, weapon_alpha(215.0 * fade),
+                    true);
+  }
+}
+
+// Night owl patrol: a large pale-bellied owl flying silent and steady with
+// deep, slow wingstrokes.
+static void sky_event_195(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double by = y + sin(phase / 420.0) * size * 0.25;
+  double flap = sin(phase / 270.0) * 0.88;
+  draw_sleek_bird(surface, x, by, size * 1.35, direction, flap, 0.0, 195, 205,
+                  225, weapon_alpha(205.0 * fade), true);
+}
+
+// Condor thermal: a massive condor with broad wings riding a high-altitude arc.
+static void sky_event_196(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double by = y - sin(progress * M_PI) * size * 1.1;
+  double pitch = -cos(progress * M_PI) * 0.18;
+  double flap = 0.24 + sin(phase / 800.0) * 0.12;
+  draw_sleek_bird(surface, x, by, size * 2.0, direction, flap, pitch, 24, 30,
+                  42, weapon_alpha(220.0 * fade), true);
+}
+
+// Storm petrels: five small dark seabirds weaving in sinusoidal wave-skimming
+// flight across the sky.
+static void sky_event_197(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 5; i++) {
+    double bx = x - direction * i * size * 0.75;
+    double by = y + sin(phase / 220.0 + i * 0.9) * size * 0.65;
+    double flap = sin(phase / 130.0 + i * 1.3) * 0.9;
+    draw_sleek_bird(surface, bx, by, size * 0.56, direction, flap,
+                    cos(phase / 220.0 + i * 0.9) * 0.28, 28, 36, 52,
+                    weapon_alpha(195.0 * fade), true);
+  }
+}
+
+// Raven trio: three sleek ravens flying in a loose staggered trail.
+static void sky_event_198(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 3; i++) {
+    double bx = x - direction * i * size * 1.1;
+    double by = y + (i - 1) * size * 0.55 + sin(phase / 380.0 + i) * size * 0.2;
+    double flap = sin(phase / 200.0 + i * 1.4) * 0.85;
+    draw_sleek_bird(surface, bx, by, size * 0.92, direction, flap, 0.05, 22, 26,
+                    38, weapon_alpha(215.0 * fade), true);
+  }
+}
+
+// Aurora bird: a ghostly bioluminescent cyan-emerald spectral bird gliding
+// with a faint stardust wake.
+static void sky_event_199(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 aura_c[3] = {125, 235, 210};
+  for (int i = 1; i <= 5; i++) {
+    weapon_glow(surface, x - direction * i * size * 0.55,
+                y + sin(phase / 300.0 + i) * size * 0.12, 1.2 - i * 0.15,
+                aura_c, (150.0 - i * 24.0) * fade);
+  }
+  double flap = sin(phase / 240.0) * 0.75;
+  draw_sleek_bird(surface, x, y, size * 1.35, direction, flap, 0.0, 145, 245,
+                  220, weapon_alpha(215.0 * fade), true);
+}
+
+// Peregrine pursuit: a fast raptor in a shallow power-dive chasing a nimble
+// smaller bird that jinks ahead.
+static void sky_event_200(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double prey_x = x + direction * size * 1.25;
+  double prey_y = y + sin(phase / 150.0) * size * 0.45;
+  draw_sleek_bird(surface, prey_x, prey_y, size * 0.50, direction,
+                  sin(phase / 95.0) * 0.95, cos(phase / 150.0) * 0.28, 175, 195,
+                  220, weapon_alpha(200.0 * fade), true);
+  draw_sleek_bird(surface, x - direction * size * 0.35,
+                  y - size * 0.15 + sin(phase / 200.0) * size * 0.25,
+                  size * 1.05, direction, -0.35, 0.18, 28, 34, 48,
+                  weapon_alpha(225.0 * fade), true);
+}
+
+// Pelican line: five pelicans gliding in synchronized single-file line.
+static void sky_event_201(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double shared_flap =
+      (sin(phase / 700.0) > 0.2) ? sin(phase / 210.0) * 0.8 : 0.15;
+  for (int i = 0; i < 5; i++) {
+    double bx = x - direction * i * size * 1.05;
+    double by = y + sin(phase / 550.0 + i * 0.4) * size * 0.15;
+    draw_sleek_bird(surface, bx, by, size * 1.0, direction, shared_flap, 0.0,
+                    165, 180, 205, weapon_alpha(195.0 * fade), true);
+  }
+}
+
+// Silver-winged tern: three slender arctic terns with long forked tails and
+// silver-lit upper wings slicing cleanly through the night air.
+static void sky_event_202(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 3; i++) {
+    double bx = x - direction * i * size * 0.9;
+    double by = y + (i - 1) * size * 0.52;
+    double flap = sin(phase / 160.0 + i * 0.9) * 0.88;
+    draw_sleek_bird(surface, bx, by, size * 0.82, direction, flap, -0.04, 185,
+                    205, 230, weapon_alpha(205.0 * fade), true);
+  }
+}
+
+// Constellation flock: seven luminous pale-gold star-birds flying in a loose
+// diamond formation, each trailing a tiny pinpoint glimmer.
+static void sky_event_203(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 star_c[3] = {245, 220, 150};
+  static const int dx[7] = {2, 1, 1, 0, 0, -1, -2};
+  static const int dy[7] = {0, -1, 1, -2, 2, 0, 0};
+  for (int i = 0; i < 7; i++) {
+    double bx = x + direction * dx[i] * size * 0.7;
+    double by = y + dy[i] * size * 0.55;
+    double flap = sin(phase / 210.0 + i * 0.8) * 0.78;
+    weapon_glow(surface, bx - direction * size * 0.35, by, 0.75, star_c,
+                145.0 * fade);
+    draw_sleek_bird(surface, bx, by, size * 0.72, direction, flap, 0.0, 235,
+                    215, 165, weapon_alpha(205.0 * fade), true);
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -14789,7 +15400,10 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_173, sky_event_174, sky_event_175, sky_event_176, sky_event_177,
     sky_event_178, sky_event_179, sky_event_180, sky_event_181, sky_event_182,
     sky_event_183, sky_event_184, sky_event_185, sky_event_186, sky_event_187,
-    sky_event_188,
+    sky_event_188, sky_event_189, sky_event_190, sky_event_191, sky_event_192,
+    sky_event_193, sky_event_194, sky_event_195, sky_event_196, sky_event_197,
+    sky_event_198, sky_event_199, sky_event_200, sky_event_201, sky_event_202,
+    sky_event_203,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
