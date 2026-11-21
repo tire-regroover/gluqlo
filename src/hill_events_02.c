@@ -3823,6 +3823,24 @@ static void hill_torch_circle(const HillEvent *event) {
 }
 
 
+// Reed wind: a cluster of tall silver-tipped reeds bending together in gusts.
+static void hill_reed_wind(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 601, 761));
+  double gust = sin(event->t * 2.1) * s * 0.012;
+  for (int i = -3; i <= 3; i++) {
+    double rx = cx + i * s * 0.010;
+    double rg = hill_ground(event, rx);
+    double h = s * (0.026 + (abs(i) % 2) * 0.008);
+    lineRGBA(surface, (int)rx, (int)rg, (int)(rx + gust), (int)(rg - h), 110, 145, 115,
+             weapon_alpha(200.0 * event->fade));
+    pixelRGBA(surface, (int)(rx + gust), (int)(rg - h), 210, 225, 215,
+              weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4072,6 +4090,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_glowing_moss,
     hill_frost_arch,
     hill_torch_circle,
+    hill_reed_wind,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
