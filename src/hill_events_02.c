@@ -3841,6 +3841,23 @@ static void hill_reed_wind(const HillEvent *event) {
 }
 
 
+// Beacon cairn: a stacked stone cairn topped with a pulsing blue-white crystal.
+static void hill_beacon_cairn(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.25 + 0.50 * hill_random(event, 607, 769));
+  double g = hill_ground(event, cx);
+  for (int i = 0; i < 4; i++) {
+    int rw = (int)(s * (0.012 - i * 0.002));
+    filledEllipseRGBA(surface, (int)cx, (int)(g - i * 4), rw, 3, 100 + i * 8, 105 + i * 8,
+                      115 + i * 8, weapon_alpha(220.0 * event->fade));
+  }
+  static const Uint8 cry[3] = {175, 225, 255};
+  double pulse = 0.7 + 0.3 * sin(event->t * 2.7);
+  weapon_glow(surface, cx, g - 16, 0.9, cry, 175.0 * pulse * event->fade);
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4091,6 +4108,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_frost_arch,
     hill_torch_circle,
     hill_reed_wind,
+    hill_beacon_cairn,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

@@ -2605,6 +2605,17 @@ static void sky_event_246(const SkyEvent *event) {
 }
 
 
+// Vapor rings: three expanding smoke-like rings drifting gently across the sky.
+static void sky_event_247(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 0; i < 3; i++) {
+    int rx = x - direction * i * size * 1.1;
+    int r = (size / 2 + i * 3) + (int)(progress * size * 0.5);
+    circleRGBA(surface, rx, y, r, 185, 200, 220, weapon_alpha((150.0 - i * 30.0) * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2686,7 +2697,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
-    sky_event_245, sky_event_246,
+    sky_event_245, sky_event_246, sky_event_247,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
