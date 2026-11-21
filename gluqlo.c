@@ -508,11 +508,11 @@ static double ridge_height(int layer, double nx) {
  */
 enum { GROUP_NONE = 0, GROUP_TAKEOVER, GROUP_SKY };
 
-#define RARE_SKY_KINDS 185
+#define RARE_SKY_KINDS 189
 #define RARE_SKY_CLASSIC_KINDS \
   23  // kinds below this use the four classic sky objects
 #define HILL_EVENT_KINDS \
-  141  // things that happen on the hills (see render_hill_event)
+  145  // things that happen on the hills (see render_hill_event)
 
 typedef struct {
   const char *name;
@@ -9979,6 +9979,97 @@ static void hill_aurora_reeds(const HillEvent *event) {
   }
 }
 
+// Star-gate obelisk: twin angled stone monoliths on the ridge with a
+// shimmering pale-gold energy arc sparking between their tips.
+static void hill_twin_monoliths(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.24 + 0.52 * hill_random(event, 71, 163));
+  double ground = hill_ground(event, x);
+  double sep = s * 0.036;
+  double h = s * 0.072;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  filledTrigonRGBA(surface, (int)(x - sep - s * 0.014), (int)(ground + 2),
+                   (int)(x - sep + s * 0.010), (int)(ground + 2),
+                   (int)(x - sep * 0.65), (int)(ground - h), 20, 24, 34, hull_a);
+  filledTrigonRGBA(surface, (int)(x + sep + s * 0.014), (int)(ground + 2),
+                   (int)(x + sep - s * 0.010), (int)(ground + 2),
+                   (int)(x + sep * 0.65), (int)(ground - h), 20, 24, 34, hull_a);
+  static const Uint8 arc_c[3] = {255, 215, 135};
+  double mid_y = ground - h - sin(event->t * 3.5) * s * 0.010;
+  lineRGBA(surface, (int)(x - sep * 0.65), (int)(ground - h), (int)x,
+           (int)mid_y, arc_c[0], arc_c[1], arc_c[2],
+           weapon_alpha(175.0 * event->fade));
+  lineRGBA(surface, (int)x, (int)mid_y, (int)(x + sep * 0.65),
+           (int)(ground - h), arc_c[0], arc_c[1], arc_c[2],
+           weapon_alpha(175.0 * event->fade));
+  weapon_glow(surface, x, mid_y, 1.3, arc_c, 195.0 * event->fade);
+}
+
+// Paper boat stream: three tiny lit paper boats gliding slowly along the
+// ridge hollow with warm candle-amber reflections.
+static void hill_paper_boats(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 73, 167));
+  static const Uint8 candle_c[3] = {255, 195, 110};
+  for (int i = -1; i <= 1; i++) {
+    double bx = cx + i * s * 0.045 + fmod(event->t * s * 0.008, s * 0.04);
+    double by = hill_ground(event, bx) - s * 0.006;
+    filledTrigonRGBA(surface, (int)(bx - s * 0.012), (int)by,
+                     (int)(bx + s * 0.012), (int)by, (int)bx,
+                     (int)(by - s * 0.014), 225, 225, 235,
+                     weapon_alpha(185.0 * event->fade));
+    weapon_glow(surface, bx, by - s * 0.006, 1.1, candle_c,
+                185.0 * event->fade);
+  }
+}
+
+// Glow-worm cave: a dark stone archway tucked into the ridge with clusters
+// of pale-blue bioluminescent dots twinkling inside.
+static void hill_glow_cave(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.24 + 0.52 * hill_random(event, 75, 173));
+  double ground = hill_ground(event, x);
+  double r = s * 0.036;
+  filledCircleRGBA(surface, (int)x, (int)ground, (int)r, 12, 16, 24,
+                   weapon_alpha(235.0 * event->fade));
+  static const Uint8 worm_c[3] = {125, 225, 255};
+  for (int i = 0; i < 8; i++) {
+    double wx = x + (-0.65 + 0.18 * i) * r;
+    double wy = ground - (0.25 + 0.45 * ((i * 3) % 4) / 3.0) * r;
+    double tw = 0.45 + 0.55 * sin(event->t * 2.4 + i * 1.3);
+    weapon_glow(surface, wx, wy, 0.9, worm_c, 185.0 * tw * event->fade);
+  }
+}
+
+// Starlight pendulum: a tall gallows-frame on the ridge with a glowing
+// silver-blue bob swinging in a slow hypnotic arc.
+static void hill_pendulum(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double x = surface->w * (0.22 + 0.56 * hill_random(event, 77, 179));
+  double ground = hill_ground(event, x);
+  double h = s * 0.075;
+  double w = s * 0.028;
+  Uint8 hull_a = weapon_alpha(230.0 * event->fade);
+  thickLineRGBA(surface, (int)(x - w), (int)(ground + 2), (int)(x - w * 0.5),
+                (int)(ground - h), 2, 22, 26, 36, hull_a);
+  thickLineRGBA(surface, (int)(x + w), (int)(ground + 2), (int)(x + w * 0.5),
+                (int)(ground - h), 2, 22, 26, 36, hull_a);
+  thickLineRGBA(surface, (int)(x - w * 0.6), (int)(ground - h),
+                (int)(x + w * 0.6), (int)(ground - h), 2, 26, 30, 42, hull_a);
+  double ang = sin(event->t * 1.4) * 0.52;
+  double len = h * 0.72;
+  double bx = x + sin(ang) * len;
+  double by = ground - h + cos(ang) * len;
+  lineRGBA(surface, (int)x, (int)(ground - h), (int)bx, (int)by, 95, 115, 145,
+           hull_a);
+  static const Uint8 bob_c[3] = {165, 225, 255};
+  weapon_glow(surface, bx, by, 1.5, bob_c, 205.0 * event->fade);
+}
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 static void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -10020,6 +10111,7 @@ static void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_moon_dome, hill_lantern_arch, hill_bio_grove, hill_beacon_mast,
     hill_tide_clock, hill_fire_wheel, hill_rune_pillar, hill_star_antenna,
     hill_lantern_pergola, hill_star_well, hill_bell_arch, hill_aurora_reeds,
+    hill_twin_monoliths, hill_paper_boats, hill_glow_cave, hill_pendulum,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) ==
@@ -14453,6 +14545,68 @@ static void sky_event_184(const SkyEvent *event) {
   }
 }
 
+// Sky-whale pod: two luminous indigo-aqua sky-whales gliding in tandem
+// across the upper sky.
+static void sky_event_185(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 bio_c[3] = {135, 235, 235};
+  for (int w = 0; w < 2; w++) {
+    double wx = x + (w == 0 ? 0.0 : -direction * size * 2.1);
+    double wy = y + (w == 0 ? -size * 0.25 : size * 0.55) +
+                sin(phase / 550.0 + w) * size * 0.2;
+    double sc = (w == 0) ? 1.0 : 0.72;
+    filledEllipseRGBA(surface, (int)wx, (int)wy, (int)(size * 1.4 * sc),
+                      (int)(size * 0.44 * sc), 34, 58, 96,
+                      weapon_alpha(215.0 * fade));
+    weapon_glow(surface, wx + direction * size * 0.4 * sc, wy, 1.1 * sc,
+                bio_c, 175.0 * fade);
+  }
+}
+
+// Star-crystal snowflake: a six-pointed pale-cyan ice crystal rotating
+// serenely in the upper sky.
+static void sky_event_186(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 ice_c[3] = {195, 240, 255};
+  double r = size * 1.15;
+  double rot = phase / 1400.0;
+  for (int i = 0; i < 3; i++) {
+    double a = rot + i * (M_PI / 3.0);
+    lineRGBA(surface, (int)(x - cos(a) * r), (int)(y - sin(a) * r),
+             (int)(x + cos(a) * r), (int)(y + sin(a) * r), ice_c[0], ice_c[1],
+             ice_c[2], weapon_alpha(185.0 * fade));
+  }
+  weapon_glow(surface, x, y, 1.3, ice_c, 200.0 * fade);
+}
+
+// Ion ringlet swarm: three tiny glowing violet-blue plasma rings drifting
+// in a loose triangle formation.
+static void sky_event_187(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 ring_c[3] = {175, 165, 255};
+  for (int i = 0; i < 3; i++) {
+    double rx = x + (i - 1) * size * 1.05;
+    double ry = y + (i == 1 ? -size * 0.55 : size * 0.45);
+    double rad = size * (0.38 + 0.08 * sin(phase / 320.0 + i));
+    circleRGBA(surface, (int)rx, (int)ry, (int)rad, ring_c[0], ring_c[1],
+               ring_c[2], weapon_alpha(185.0 * fade));
+  }
+}
+
+// Starlight pendulum arc: a sweeping golden-white meteor arc leaving a
+// curved trail of five fading sparks.
+static void sky_event_188(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  static const Uint8 spark_c[3] = {255, 225, 155};
+  for (int i = 0; i < 5; i++) {
+    double u = i * 0.35;
+    double sx = x - direction * u * size * 1.5;
+    double sy = y - u * u * size * 0.25;
+    weapon_glow(surface, sx, sy, 1.6 - i * 0.25, spark_c,
+                (210.0 - i * 35.0) * fade);
+  }
+}
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -14531,7 +14685,8 @@ static void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_168, sky_event_169, sky_event_170, sky_event_171, sky_event_172,
     sky_event_173, sky_event_174, sky_event_175, sky_event_176, sky_event_177,
     sky_event_178, sky_event_179, sky_event_180, sky_event_181, sky_event_182,
-    sky_event_183, sky_event_184,
+    sky_event_183, sky_event_184, sky_event_185, sky_event_186, sky_event_187,
+    sky_event_188,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS +
