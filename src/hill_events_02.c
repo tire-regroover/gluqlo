@@ -3878,6 +3878,28 @@ static void hill_star_pavilion(const HillEvent *event) {
 }
 
 
+// Star arch: two slender stone pillars topped with a glowing silver-gold arc.
+static void hill_star_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 617, 787));
+  double g = hill_ground(event, cx);
+  double w = s * 0.024;
+  double h = s * 0.036;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 105, 110, 125,
+           weapon_alpha(210.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 105, 110, 125,
+           weapon_alpha(210.0 * event->fade));
+  for (int i = 0; i < 8; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 8.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 8.0;
+    thickLineRGBA(surface, (int)(cx + cos(a0) * w), (int)(g - h + sin(a0) * w * 0.7),
+                  (int)(cx + cos(a1) * w), (int)(g - h + sin(a1) * w * 0.7), 2, 235, 220, 165,
+                  weapon_alpha(215.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4130,6 +4152,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_reed_wind,
     hill_beacon_cairn,
     hill_star_pavilion,
+    hill_star_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

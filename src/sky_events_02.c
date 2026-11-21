@@ -2628,6 +2628,22 @@ static void sky_event_248(const SkyEvent *event) {
 }
 
 
+// Starlit ribbon: a drifting banner of pale lavender and silver stars.
+static void sky_event_249(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -2; i <= 2; i++) {
+    int sx = x + i * size;
+    int sy = y + (int)(sin(phase / 190.0 + i * 0.9) * size * 0.5);
+    filledCircleRGBA(surface, sx, sy, 2, 215, 200, 250, weapon_alpha(205.0 * fade));
+    if (i < 2) {
+      int nx = x + (i + 1) * size;
+      int ny = y + (int)(sin(phase / 190.0 + (i + 1) * 0.9) * size * 0.5);
+      lineRGBA(surface, sx, sy, nx, ny, 190, 180, 235, weapon_alpha(145.0 * fade));
+    }
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2709,7 +2725,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
     sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
-    sky_event_245, sky_event_246, sky_event_247, sky_event_248,
+    sky_event_245, sky_event_246, sky_event_247, sky_event_248, sky_event_249,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
