@@ -11,9 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define RARE_SKY_KINDS 283
+#define RARE_SKY_KINDS 284
 #define RARE_SKY_CLASSIC_KINDS 23  // kinds below this use the four classic sky objects
-#define HILL_EVENT_KINDS 283       // things that happen on the hills (see render_hill_event)
+#define HILL_EVENT_KINDS 284       // things that happen on the hills (see render_hill_event)
 #define SCENE_PI 3.14159265359
 #define SCENE_TAU 6.28318530718
 

@@ -4533,6 +4533,24 @@ static void hill_windwheel_tower(const HillEvent *event) {
 }
 
 
+// Starlight pond: a quiet hillside pool reflecting three twinkling star points.
+static void hill_starlight_pond(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 557, 733));
+  double g = hill_ground(event, cx);
+  double w = s * 0.036;
+  filledEllipseRGBA(surface, (int)cx, (int)g, (int)w, 4, 42, 62, 92,
+                    weapon_alpha(195.0 * event->fade));
+  for (int i = -1; i <= 1; i++) {
+    double px = cx + i * w * 0.45;
+    double tw = 0.6 + 0.4 * sin(event->t * 3.2 + i * 1.4);
+    filledCircleRGBA(surface, (int)px, (int)g, 1, 225, 240, 255,
+                     weapon_alpha(230.0 * tw * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4819,6 +4837,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_bell_lantern,
     hill_ember_lantern_row,
     hill_windwheel_tower,
+    hill_starlight_pond,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

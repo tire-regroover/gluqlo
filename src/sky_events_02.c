@@ -3082,6 +3082,20 @@ static void sky_event_282(const SkyEvent *event) {
 }
 
 
+// Stardust veil: five vertical shimmering threads of lavender-white dust.
+static void sky_event_283(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = -2; i <= 2; i++) {
+    int sx = x + i * (size / 3 + 2);
+    int len = size - abs(i) * 3;
+    if (len < 4) len = 4;
+    int off = (int)(sin(phase / 200.0 + i) * 3.0);
+    lineRGBA(surface, sx, y - len / 2 + off, sx, y + len / 2 + off, 215, 200, 250,
+             weapon_alpha(155.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3169,7 +3183,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
     sky_event_275, sky_event_276, sky_event_277, sky_event_278, sky_event_279, sky_event_280,
-    sky_event_281, sky_event_282,
+    sky_event_281, sky_event_282, sky_event_283,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
