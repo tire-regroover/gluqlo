@@ -1,0 +1,1 @@
+- Keep `/memories/` notes and any outside-of-workspace working files mirrored/stored inside `dev/memories/` in the workspace, and commit/push them with changes.
