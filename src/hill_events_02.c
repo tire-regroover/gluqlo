@@ -3408,6 +3408,30 @@ static void hill_star_lantern(const HillEvent *event) {
 }
 
 
+// Frost chimes: icy crystal rods suspended from a horizontal ridge bar.
+static void hill_frost_chimes(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 449, 613));
+  double g = hill_ground(event, cx);
+  double h = s * 0.048;
+  double w = s * 0.028;
+  lineRGBA(surface, (int)(cx - w), (int)g, (int)(cx - w), (int)(g - h), 120, 130, 145,
+           weapon_alpha(190.0 * event->fade));
+  lineRGBA(surface, (int)(cx + w), (int)g, (int)(cx + w), (int)(g - h), 120, 130, 145,
+           weapon_alpha(190.0 * event->fade));
+  lineRGBA(surface, (int)(cx - w), (int)(g - h), (int)(cx + w), (int)(g - h), 135, 145, 160,
+           weapon_alpha(200.0 * event->fade));
+  for (int i = -2; i <= 2; i++) {
+    double rx = cx + i * s * 0.009;
+    double sway = sin(event->t * 2.4 + i * 0.9) * s * 0.003;
+    double len = s * (0.016 + (abs(i) % 2) * 0.007);
+    thickLineRGBA(surface, (int)rx, (int)(g - h), (int)(rx + sway), (int)(g - h + len), 2, 185,
+                  230, 255, weapon_alpha(210.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3634,6 +3658,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_fire_wheel_two,
     hill_dew_flowers,
     hill_star_lantern,
+    hill_frost_chimes,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
