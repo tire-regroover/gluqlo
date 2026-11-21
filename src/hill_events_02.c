@@ -3966,6 +3966,26 @@ static void hill_lantern_belfry(const HillEvent *event) {
 }
 
 
+// Aurora cairn: stacked hillside stones topped with a pulsing emerald-cyan orb.
+static void hill_aurora_cairn(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.16 + 0.68 * hill_random(event, 173, 281));
+  double g = hill_ground(event, cx);
+  double base_r = s * 0.011;
+  if (base_r < 3.0) base_r = 3.0;
+  for (int i = 0; i < 3; i++) {
+    double r = base_r * (1.0 - 0.22 * i);
+    double cy = g - r - i * base_r * 1.1;
+    filledCircleRGBA(surface, (int)cx, (int)cy, (int)r, 95, 102, 114,
+                     weapon_alpha(210.0 * event->fade));
+  }
+  double pulse = 0.75 + 0.25 * sin(event->t * 2.6);
+  filledCircleRGBA(surface, (int)cx, (int)(g - base_r * 3.8), 3, 125, 245, 210,
+                   weapon_alpha(220.0 * pulse * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4222,6 +4242,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_star_pergola,
     hill_moonlit_gazebo,
     hill_lantern_belfry,
+    hill_aurora_cairn,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
