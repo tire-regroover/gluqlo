@@ -2989,6 +2989,19 @@ static void sky_event_275(const SkyEvent *event) {
 }
 
 
+// Comet braid: two intertwined sinusoidal trails behind a bright silver-gold head.
+static void sky_event_276(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  for (int i = 1; i <= 5; i++) {
+    int tx = x - direction * i * (size / 2);
+    int off = (int)(sin(phase / 130.0 + i * 0.9) * 3.0);
+    filledCircleRGBA(surface, tx, y + off, 1, 255, 225, 165, weapon_alpha((200.0 - i * 30.0) * fade));
+    filledCircleRGBA(surface, tx, y - off, 1, 175, 220, 255, weapon_alpha((200.0 - i * 30.0) * fade));
+  }
+  filledCircleRGBA(surface, x, y, 2, 255, 245, 225, weapon_alpha(230.0 * fade));
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3075,7 +3088,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
-    sky_event_275,
+    sky_event_275, sky_event_276,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

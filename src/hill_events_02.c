@@ -4400,6 +4400,28 @@ static void hill_tidebell_post(const HillEvent *event) {
 }
 
 
+// Starry windmill three: a slender mill with glowing gold-tipped blades.
+static void hill_starry_windmill_three(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.20 + 0.60 * hill_random(event, 467, 643));
+  double g = hill_ground(event, cx);
+  double h = s * 0.044;
+  double r = s * 0.019;
+  lineRGBA(surface, (int)cx, (int)g, (int)cx, (int)(g - h), 102, 108, 124,
+           weapon_alpha(210.0 * event->fade));
+  for (int i = 0; i < 3; i++) {
+    double a = event->t * 1.9 + i * SCENE_TAU / 3.0;
+    double bx = cx + cos(a) * r;
+    double by = g - h + sin(a) * r;
+    lineRGBA(surface, (int)cx, (int)(g - h), (int)bx, (int)by, 185, 195, 215,
+             weapon_alpha(200.0 * event->fade));
+    filledCircleRGBA(surface, (int)bx, (int)by, 2, 255, 225, 145,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4679,6 +4701,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_skywatch_mast,
     hill_moonstone_arch,
     hill_tidebell_post,
+    hill_starry_windmill_three,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
