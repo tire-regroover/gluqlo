@@ -4005,6 +4005,29 @@ static void hill_signal_lantern_post(const HillEvent *event) {
 }
 
 
+// Starry obelisk pair: two matching dark monoliths linked by a faint starlight arc.
+static void hill_starry_obelisk_pair(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 211, 331));
+  double span = s * 0.028;
+  double h = s * 0.044;
+  for (int side = -1; side <= 1; side += 2) {
+    double ox = cx + side * span;
+    double g = hill_ground(event, ox);
+    filledTrigonRGBA(surface, (int)(ox - 4), (int)g, (int)(ox + 4), (int)g, (int)ox, (int)(g - h),
+                     70, 76, 92, weapon_alpha(215.0 * event->fade));
+    filledCircleRGBA(surface, (int)ox, (int)(g - h - 2), 2, 225, 235, 255,
+                     weapon_alpha(210.0 * event->fade));
+  }
+  double g_mid = hill_ground(event, cx);
+  lineRGBA(surface, (int)(cx - span), (int)(hill_ground(event, cx - span) - h - 2), (int)(cx + span),
+           (int)(hill_ground(event, cx + span) - h - 2), 185, 215, 255,
+           weapon_alpha((100.0 + 50.0 * sin(event->t * 2.2)) * event->fade));
+  (void)g_mid;
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4263,6 +4286,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_belfry,
     hill_aurora_cairn,
     hill_signal_lantern_post,
+    hill_starry_obelisk_pair,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
