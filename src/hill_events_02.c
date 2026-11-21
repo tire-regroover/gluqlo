@@ -3788,6 +3788,23 @@ static void hill_glowing_moss(const HillEvent *event) {
 }
 
 
+// Frost arch: a crystalline ice arch sparkling softly on the ridge.
+static void hill_frost_arch(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 593, 751));
+  double g = hill_ground(event, cx);
+  double r = s * 0.028;
+  for (int i = 0; i < 10; i++) {
+    double a0 = SCENE_PI + i * SCENE_PI / 10.0;
+    double a1 = SCENE_PI + (i + 1) * SCENE_PI / 10.0;
+    thickLineRGBA(surface, (int)(cx + cos(a0) * r), (int)(g + sin(a0) * r),
+                  (int)(cx + cos(a1) * r), (int)(g + sin(a1) * r), 3, 175, 225, 255,
+                  weapon_alpha(200.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4035,6 +4052,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_lantern_fence,
     hill_star_telescope,
     hill_glowing_moss,
+    hill_frost_arch,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

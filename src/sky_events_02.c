@@ -2571,6 +2571,15 @@ static void sky_event_243(const SkyEvent *event) {
 }
 
 
+// Silver swift: a fast, slender swift banking smoothly across the upper sky.
+static void sky_event_244(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  double flap = sin(phase / 110.0) * 0.95;
+  draw_sleek_bird(surface, x, y, size * 0.85, direction, flap, 0.1, 185, 210, 235,
+                  weapon_alpha(200.0 * fade), true);
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -2651,7 +2660,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_221, sky_event_222, sky_event_223, sky_event_224, sky_event_225, sky_event_226,
     sky_event_227, sky_event_228, sky_event_229, sky_event_230, sky_event_231, sky_event_232,
     sky_event_233, sky_event_234, sky_event_235, sky_event_236, sky_event_237, sky_event_238,
-    sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243,
+    sky_event_239, sky_event_240, sky_event_241, sky_event_242, sky_event_243, sky_event_244,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
