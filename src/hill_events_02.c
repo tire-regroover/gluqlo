@@ -3487,6 +3487,24 @@ static void hill_lantern_post_row(const HillEvent *event) {
 }
 
 
+// Reed lanterns: swaying tall reeds tipped with soft amber-green bulbs.
+static void hill_reed_lanterns(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 467, 641));
+  static const Uint8 bulb[3] = {195, 240, 140};
+  for (int i = -2; i <= 2; i++) {
+    double rx = cx + i * s * 0.015;
+    double rg = hill_ground(event, rx);
+    double sway = sin(event->t * 2.2 + i * 0.7) * s * 0.008;
+    double h = s * (0.030 + (abs(i) % 2) * 0.010);
+    lineRGBA(surface, (int)rx, (int)rg, (int)(rx + sway), (int)(rg - h), 80, 120, 85,
+             weapon_alpha(200.0 * event->fade));
+    weapon_glow(surface, rx + sway, rg - h, 0.65, bulb, 165.0 * event->fade);
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3717,6 +3735,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_ember_braziers,
     hill_stone_arch,
     hill_lantern_post_row,
+    hill_reed_lanterns,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
