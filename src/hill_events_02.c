@@ -3664,6 +3664,23 @@ static void hill_crystal_obelisk(const HillEvent *event) {
 }
 
 
+// Sky mirror: a tilted silver dish on the ridge reflecting a faint beam upward.
+static void hill_sky_mirror(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 547, 701));
+  double g = hill_ground(event, cx);
+  lineRGBA(surface, (int)(cx - s * 0.012), (int)g, (int)cx, (int)(g - s * 0.020), 100, 110, 125,
+           weapon_alpha(200.0 * event->fade));
+  lineRGBA(surface, (int)(cx + s * 0.012), (int)g, (int)cx, (int)(g - s * 0.020), 100, 110, 125,
+           weapon_alpha(200.0 * event->fade));
+  thickLineRGBA(surface, (int)(cx - s * 0.016), (int)(g - s * 0.026), (int)(cx + s * 0.016),
+                (int)(g - s * 0.016), 2, 200, 220, 240, weapon_alpha(220.0 * event->fade));
+  lineRGBA(surface, (int)cx, (int)(g - s * 0.021), (int)(cx + event->direction * s * 0.025),
+           (int)(g - s * 0.085), 185, 220, 255, weapon_alpha(110.0 * event->fade));
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3904,6 +3921,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_clockwork_owl,
     hill_ether_windmill,
     hill_crystal_obelisk,
+    hill_sky_mirror,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
