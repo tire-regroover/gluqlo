@@ -3002,6 +3002,19 @@ static void sky_event_276(const SkyEvent *event) {
 }
 
 
+// Starlight diamond: four pulsing stars at the corners of a rotating diamond.
+static void sky_event_277(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 2;
+  for (int i = 0; i < 4; i++) {
+    double a = phase / 260.0 + i * SCENE_PI * 0.5;
+    int sx = x + (int)(cos(a) * r);
+    int sy = y + (int)(sin(a) * r);
+    filledCircleRGBA(surface, sx, sy, 2, 225, 240, 255, weapon_alpha(210.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3088,7 +3101,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_257, sky_event_258, sky_event_259, sky_event_260, sky_event_261, sky_event_262,
     sky_event_263, sky_event_264, sky_event_265, sky_event_266, sky_event_267, sky_event_268,
     sky_event_269, sky_event_270, sky_event_271, sky_event_272, sky_event_273, sky_event_274,
-    sky_event_275, sky_event_276,
+    sky_event_275, sky_event_276, sky_event_277,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==

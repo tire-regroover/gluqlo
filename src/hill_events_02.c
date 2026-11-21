@@ -4422,6 +4422,23 @@ static void hill_starry_windmill_three(const HillEvent *event) {
 }
 
 
+// Glowing fern: unfurling emerald fronds tipped with tiny cyan spores.
+static void hill_glowing_fern(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.18 + 0.64 * hill_random(event, 479, 659));
+  double g = hill_ground(event, cx);
+  for (int i = -1; i <= 1; i++) {
+    double h = s * (0.028 - abs(i) * 0.005);
+    double tip_x = cx + i * s * 0.014 + sin(event->t * 2.1 + i) * 2.0;
+    lineRGBA(surface, (int)cx, (int)g, (int)tip_x, (int)(g - h), 78, 138, 102,
+             weapon_alpha(210.0 * event->fade));
+    filledCircleRGBA(surface, (int)tip_x, (int)(g - h), 2, 155, 250, 220,
+                     weapon_alpha(220.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -4702,6 +4719,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_moonstone_arch,
     hill_tidebell_post,
     hill_starry_windmill_three,
+    hill_glowing_fern,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
