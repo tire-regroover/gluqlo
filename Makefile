@@ -16,7 +16,7 @@ all: gluqlo
 gluqlo: $(OBJS)
 	$(CXX) -o gluqlo $(OBJS) $(LDFLAGS)
 
-%.o: %.c
+%.o: %.c src/gluqlo.h
 	$(CXX) -x c++ $(CXXFLAGS) -c $< -o $@
 
 -include $(DEPS)
