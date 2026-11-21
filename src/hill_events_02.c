@@ -4838,6 +4838,28 @@ static void hill_starlight_well_two(const HillEvent *event) {
 }
 
 
+// Celestial archway: twin stone pillars supporting a glowing gold-and-cyan star arc.
+static void hill_celestial_archway(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.22 + 0.56 * hill_random(event, 751, 937));
+  double g = hill_ground(event, cx);
+  double w = s * 0.024;
+  double h = s * 0.036;
+  boxRGBA(surface, (int)(cx - w - 2), (int)(g - h), (int)(cx - w + 2), (int)g, 92, 98, 114,
+          weapon_alpha(210.0 * event->fade));
+  boxRGBA(surface, (int)(cx + w - 2), (int)(g - h), (int)(cx + w + 2), (int)g, 92, 98, 114,
+          weapon_alpha(210.0 * event->fade));
+  for (int i = 0; i < 5; i++) {
+    double a = SCENE_PI + (i + 0.5) * SCENE_PI / 5.0;
+    double sx = cx + cos(a) * w;
+    double sy = g - h + sin(a) * w * 0.7;
+    filledCircleRGBA(surface, (int)sx, (int)sy, 2, i == 2 ? 255 : 165, i == 2 ? 230 : 235,
+                     i == 2 ? 155 : 255, weapon_alpha(225.0 * event->fade));
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -5140,6 +5162,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_reed_lantern_arch,
     hill_moonlit_gazebo_two,
     hill_starlight_well_two,
+    hill_celestial_archway,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,

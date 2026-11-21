@@ -3297,6 +3297,20 @@ static void sky_event_298(const SkyEvent *event) {
 }
 
 
+// Aurora crown: a shimmering arc of five emerald, cyan, and violet star points.
+static void sky_event_299(const SkyEvent *event) {
+  SKY_EVENT_UNPACK(event);
+  int r = size / 2 + 4;
+  static const Uint8 cols[5][3] = {
+      {130, 245, 200}, {145, 235, 255}, {255, 240, 185}, {145, 235, 255}, {205, 180, 255}};
+  for (int i = 0; i < 5; i++) {
+    double a = -SCENE_PI * 0.8 + i * (SCENE_PI * 0.6 / 4.0);
+    filledCircleRGBA(surface, x + (int)(cos(a) * r), y + (int)(sin(a) * r), 2, cols[i][0],
+                     cols[i][1], cols[i][2], weapon_alpha(215.0 * fade));
+  }
+}
+
+
 // NEW_SKY_EVENTS_ABOVE (new sky_event_NN() functions go above this line)
 
 #define SKY_CLASSIC_VARIANTS 3
@@ -3387,6 +3401,7 @@ void (*const sky_event_kinds[])(const SkyEvent *) = {
     sky_event_281, sky_event_282, sky_event_283, sky_event_284, sky_event_285, sky_event_286,
     sky_event_287, sky_event_288, sky_event_289, sky_event_290, sky_event_291, sky_event_292,
     sky_event_293, sky_event_294, sky_event_295, sky_event_296, sky_event_297, sky_event_298,
+    sky_event_299,
     // NEW_SKY_KINDS_ABOVE
 };
 static_assert(RARE_SKY_CLASSIC_KINDS + sizeof(sky_event_kinds) / sizeof(sky_event_kinds[0]) ==
