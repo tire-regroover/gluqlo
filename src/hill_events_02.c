@@ -3560,6 +3560,23 @@ static void hill_ice_crystals(const HillEvent *event) {
 }
 
 
+// Lantern arch two: a wooden moon-arch hung with five warm glowing paper globes.
+static void hill_lantern_arch_two(const HillEvent *event) {
+  RenderTarget *surface = event->surface;
+  double s = event->scale;
+  double cx = surface->w * (0.24 + 0.52 * hill_random(event, 499, 659));
+  double g = hill_ground(event, cx);
+  double r = s * 0.032;
+  static const Uint8 lan[3] = {255, 190, 95};
+  for (int i = 0; i <= 4; i++) {
+    double a = SCENE_PI + i * SCENE_PI / 4.0;
+    double lx = cx + cos(a) * r;
+    double ly = g + sin(a) * r;
+    weapon_glow(surface, lx, ly, 0.7, lan, 165.0 * event->fade);
+  }
+}
+
+
 // NEW_HILL_EVENTS_ABOVE (new hill_xxx() functions go above this line)
 
 void (*const hill_event_kinds[])(const HillEvent *) = {
@@ -3794,6 +3811,7 @@ void (*const hill_event_kinds[])(const HillEvent *) = {
     hill_star_sundial,
     hill_windmill_beacon,
     hill_ice_crystals,
+    hill_lantern_arch_two,
     // NEW_HILL_KINDS_ABOVE
 };
 static_assert(sizeof(hill_event_kinds) / sizeof(hill_event_kinds[0]) == HILL_EVENT_KINDS,
