@@ -391,18 +391,22 @@ static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char 
       SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
       SDL_BlitSurface(glyph, &src, dst, &drect);
       if (is_light_weight) {
-        // Thicken Book/Regular glyphs toward Semibold: strong 1px horizontal pass
-        // plus a subtle 1px vertical pass so horizontal strokes match.
-        SDL_SetSurfaceAlphaMod(glyph, 230);
+        // Thicken Book/Regular glyphs: full 1px horizontal pass, moderate 1px
+        // vertical pass, and a diagonal fill pass for balanced stroke weight.
+        SDL_SetSurfaceAlphaMod(glyph, 255);
         SDL_Rect drect_x = {pen_x + 1, 0, glyph->w, blit_h};
         SDL_BlitSurface(glyph, &src, dst, &drect_x);
 
         int blit_h_y = glyph->h > max_h - 1 ? max_h - 1 : glyph->h;
         if (blit_h_y > 0) {
-          SDL_SetSurfaceAlphaMod(glyph, 90);
           SDL_Rect src_y = {0, 0, glyph->w, blit_h_y};
+          SDL_SetSurfaceAlphaMod(glyph, 160);
           SDL_Rect drect_y = {pen_x, 1, glyph->w, blit_h_y};
           SDL_BlitSurface(glyph, &src_y, dst, &drect_y);
+
+          SDL_SetSurfaceAlphaMod(glyph, 130);
+          SDL_Rect drect_xy = {pen_x + 1, 1, glyph->w, blit_h_y};
+          SDL_BlitSurface(glyph, &src_y, dst, &drect_xy);
         }
       }
       SDL_DestroySurface(glyph);
