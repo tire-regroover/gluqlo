@@ -963,7 +963,8 @@ static bool is_readable_file(const char *path) {
 }
 
 
-static bool find_font_via_fontconfig(const char *pattern_str, char *out, size_t out_size) {
+static bool find_font_via_fontconfig(const char *pattern_str, const char *required_family,
+                                     char *out, size_t out_size) {
   if (!FcInit()) return false;
   FcPattern *pat = FcNameParse((const FcChar8 *)pattern_str);
   if (!pat) return false;
@@ -973,9 +974,22 @@ static bool find_font_via_fontconfig(const char *pattern_str, char *out, size_t 
   FcPattern *match = FcFontMatch(NULL, pat, &result);
   FcPatternDestroy(pat);
   if (!match) return false;
+
+  bool family_ok = (required_family == NULL);
+  if (!family_ok) {
+    FcChar8 *matched_family = NULL;
+    for (int i = 0; FcPatternGetString(match, FC_FAMILY, i, &matched_family) == FcResultMatch;
+         i++) {
+      if (matched_family && strcasecmp((const char *)matched_family, required_family) == 0) {
+        family_ok = true;
+        break;
+      }
+    }
+  }
+
   FcChar8 *file = NULL;
   bool found = false;
-  if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
+  if (family_ok && FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
     const char *path = (const char *)file;
     if (is_readable_file(path)) {
       snprintf(out, out_size, "%s", path);
@@ -1032,14 +1046,61 @@ static const char *resolve_date_font_path(void) {
     return resolved_date_font;
   }
 
-  static const char *fc_patterns[] = {
+  // Prefer condensed and neo-grotesque sans-serif fonts that pair well with
+  // the condensed flip-clock numerals, verifying the matched family so
+  // fontconfig does not silently fall back to DejaVu Sans before trying them.
+  static const struct {
+    const char *family;
+    const char *pattern;
+  } preferred_fonts[] = {
+      {"Barlow Condensed", "Barlow Condensed:weight=medium:lang=en"},
+      {"Barlow Condensed", "Barlow Condensed:lang=en"},
+      {"Roboto Condensed", "Roboto Condensed:weight=medium:lang=en"},
+      {"Roboto Condensed", "Roboto Condensed:lang=en"},
+      {"Oswald", "Oswald:weight=medium:lang=en"},
+      {"Oswald", "Oswald:lang=en"},
+      {"Nimbus Sans Narrow", "Nimbus Sans Narrow:weight=medium:lang=en"},
+      {"Nimbus Sans Narrow", "Nimbus Sans Narrow:lang=en"},
+      {"Liberation Sans Narrow", "Liberation Sans Narrow:lang=en"},
+      {"Noto Sans Condensed", "Noto Sans Condensed:weight=medium:lang=en"},
+      {"Noto Sans Condensed", "Noto Sans Condensed:lang=en"},
+      {"PT Sans Narrow", "PT Sans Narrow:lang=en"},
+      {"DIN Alternate", "DIN Alternate:lang=en"},
+      {"Helvetica Neue", "Helvetica Neue:weight=medium:lang=en"},
+      {"Helvetica Neue", "Helvetica Neue:lang=en"},
+      {"Inter", "Inter:weight=medium:lang=en"},
+      {"Inter", "Inter:lang=en"},
+      {"Nimbus Sans", "Nimbus Sans:weight=medium:lang=en"},
+      {"Nimbus Sans", "Nimbus Sans:lang=en"},
+      {"Liberation Sans", "Liberation Sans:lang=en"},
+      {"Roboto", "Roboto:weight=medium:lang=en"},
+      {"Roboto", "Roboto:lang=en"},
+      {"IBM Plex Sans", "IBM Plex Sans:weight=medium:lang=en"},
+      {"IBM Plex Sans", "IBM Plex Sans:lang=en"},
+      {"Cantarell", "Cantarell:weight=medium:lang=en"},
+      {"Cantarell", "Cantarell:lang=en"},
+      {"Ubuntu", "Ubuntu:weight=medium:lang=en"},
+      {"Ubuntu", "Ubuntu:lang=en"},
+      {"Noto Sans", "Noto Sans:weight=medium:lang=en"},
+      {"Noto Sans", "Noto Sans:lang=en"},
+  };
+  for (size_t i = 0; i < sizeof(preferred_fonts) / sizeof(preferred_fonts[0]); i++) {
+    char candidate[1024];
+    if (find_font_via_fontconfig(preferred_fonts[i].pattern, preferred_fonts[i].family, candidate,
+                                 sizeof(candidate)) &&
+        font_supports_date_text(candidate)) {
+      snprintf(resolved_date_font, sizeof(resolved_date_font), "%s", candidate);
+      return resolved_date_font;
+    }
+  }
+
+  static const char *fc_fallbacks[] = {
       "sans:weight=medium:lang=en", "sans:weight=semibold:lang=en",
       "sans:lang=en",               "sans-serif:weight=medium",
-      "sans-serif",                 "DejaVu Sans",
-      "Liberation Sans",            "Noto Sans"};
-  for (size_t i = 0; i < sizeof(fc_patterns) / sizeof(fc_patterns[0]); i++) {
+      "sans-serif",                 "DejaVu Sans"};
+  for (size_t i = 0; i < sizeof(fc_fallbacks) / sizeof(fc_fallbacks[0]); i++) {
     char candidate[1024];
-    if (find_font_via_fontconfig(fc_patterns[i], candidate, sizeof(candidate)) &&
+    if (find_font_via_fontconfig(fc_fallbacks[i], NULL, candidate, sizeof(candidate)) &&
         font_supports_date_text(candidate)) {
       snprintf(resolved_date_font, sizeof(resolved_date_font), "%s", candidate);
       return resolved_date_font;
@@ -1083,7 +1144,7 @@ static const char *resolve_clock_font_path(void) {
   }
 
   char fc_gluqlo[1024];
-  if (find_font_via_fontconfig("Gluqlo", fc_gluqlo, sizeof(fc_gluqlo)) &&
+  if (find_font_via_fontconfig("Gluqlo", "Gluqlo", fc_gluqlo, sizeof(fc_gluqlo)) &&
       font_supports_clock_text(fc_gluqlo)) {
     snprintf(resolved_clock_font, sizeof(resolved_clock_font), "%s", fc_gluqlo);
     return resolved_clock_font;
