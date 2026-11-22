@@ -81,7 +81,7 @@ Scenery events normally appear at random times. To see one right away, run only 
 ## Credits and licence
 
 - Gluqlo © 2014 Alexander Kovalenko; noflipqlo © 2010–2012 Jacek Kuźniarski.
-- L-Space © 2026 tire-regroover, written with the help of AI coding assistants: GitHub Copilot using agents from Anthropic Claude, Google Gemini, OpenAI GPT, Hangzhou DeepSeek and Alibaba Qwen. Their output was directed and reviewed by tire-regroover.
+- L-Space © 2026 tire-regroover, written with the help of AI coding assistants: GitHub Copilot using models from Anthropic Claude, Google Gemini, OpenAI GPT, Hangzhou DeepSeek and Alibaba Qwen. Their output was directed and reviewed by tire-regroover.
 
 Released under the ISC licence, the same as upstream. See `LICENSE`.
 
