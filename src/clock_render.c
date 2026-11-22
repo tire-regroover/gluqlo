@@ -491,12 +491,143 @@ void render_digits(RenderTarget *surface, SDL_Rect *background, int card_idx, ch
 }
 
 
+typedef struct {
+  Uint32 cp;
+  SDL_Surface *surf;
+  int w, h;
+  int adv;
+  int bmin_x, bmax_x;
+  int *left_edge;
+  int *right_edge;
+} DateGlyph;
+
+static DateGlyph render_date_glyph(TTF_Font *font, Uint32 cp, SDL_Color color,
+                                   bool is_light_weight) {
+  DateGlyph g = {cp, NULL, 0, 0, 0, 0, -1, NULL, NULL};
+  TTF_GetGlyphMetrics(font, cp, NULL, NULL, NULL, NULL, &g.adv);
+  SDL_Surface *raw = TTF_RenderGlyph_Blended(font, cp, color);
+  if (!raw) return g;
+
+  if (is_light_weight) {
+    // Thicken Book/Regular glyphs by ~1.33x relative to previous pass:
+    // full 1px + 0.33px horizontal, full 1px vertical, and diagonal fill.
+    int tw = raw->w + 2;
+    int th = raw->h + 1;
+    SDL_Surface *thick = SDL_CreateSurface(tw, th, SDL_PIXELFORMAT_ARGB8888);
+    if (thick) {
+      SDL_FillSurfaceRect(thick, NULL, 0);
+      SDL_SetSurfaceBlendMode(raw, SDL_BLENDMODE_BLEND);
+      SDL_Rect r0 = {0, 0, raw->w, raw->h};
+      SDL_BlitSurface(raw, NULL, thick, &r0);
+
+      SDL_SetSurfaceAlphaMod(raw, 255);
+      SDL_Rect rx = {1, 0, raw->w, raw->h};
+      SDL_BlitSurface(raw, NULL, thick, &rx);
+
+      SDL_SetSurfaceAlphaMod(raw, 85);
+      SDL_Rect rx2 = {2, 0, raw->w, raw->h};
+      SDL_BlitSurface(raw, NULL, thick, &rx2);
+
+      SDL_SetSurfaceAlphaMod(raw, 255);
+      SDL_Rect ry = {0, 1, raw->w, raw->h};
+      SDL_BlitSurface(raw, NULL, thick, &ry);
+
+      SDL_SetSurfaceAlphaMod(raw, 210);
+      SDL_Rect rxy = {1, 1, raw->w, raw->h};
+      SDL_BlitSurface(raw, NULL, thick, &rxy);
+
+      SDL_SetSurfaceAlphaMod(raw, 60);
+      SDL_Rect rx2y = {2, 1, raw->w, raw->h};
+      SDL_BlitSurface(raw, NULL, thick, &rx2y);
+
+      SDL_DestroySurface(raw);
+      g.surf = thick;
+    } else {
+      g.surf = raw;
+    }
+  } else {
+    g.surf = raw;
+  }
+
+  g.w = g.surf->w;
+  g.h = g.surf->h;
+  g.bmin_x = g.w;
+  g.bmax_x = -1;
+  g.left_edge = (int *)malloc((size_t)g.h * sizeof(int));
+  g.right_edge = (int *)malloc((size_t)g.h * sizeof(int));
+  if (!g.left_edge || !g.right_edge) {
+    free(g.left_edge);
+    free(g.right_edge);
+    g.left_edge = NULL;
+    g.right_edge = NULL;
+    return g;
+  }
+  for (int y = 0; y < g.h; y++) {
+    g.left_edge[y] = g.w;
+    g.right_edge[y] = -1;
+  }
+
+  const SDL_PixelFormatDetails *fmt = SDL_GetPixelFormatDetails(g.surf->format);
+  if (fmt && SDL_LockSurface(g.surf)) {
+    for (int y = 0; y < g.h; y++) {
+      const Uint8 *row = (const Uint8 *)g.surf->pixels + y * g.surf->pitch;
+      for (int x = 0; x < g.w; x++) {
+        Uint32 px;
+        memcpy(&px, row + x * fmt->bytes_per_pixel, fmt->bytes_per_pixel);
+        Uint8 r, gr, b, a;
+        SDL_GetRGBA(px, fmt, NULL, &r, &gr, &b, &a);
+        if (a >= 96) {
+          if (g.left_edge[y] == g.w) g.left_edge[y] = x;
+          g.right_edge[y] = x;
+          if (x < g.bmin_x) g.bmin_x = x;
+          if (x > g.bmax_x) g.bmax_x = x;
+        }
+      }
+    }
+    SDL_UnlockSurface(g.surf);
+  }
+  return g;
+}
+
+static void free_date_glyph(DateGlyph *g) {
+  if (g->surf) SDL_DestroySurface(g->surf);
+  free(g->left_edge);
+  free(g->right_edge);
+  g->surf = NULL;
+  g->left_edge = NULL;
+  g->right_edge = NULL;
+}
+
+static double date_pair_optical_sep(const DateGlyph *a, const DateGlyph *b, double dx, int vpad) {
+  if (!a->right_edge || !b->left_edge) return -1.0;
+  int h = a->h < b->h ? a->h : b->h;
+  double sum = 0.0;
+  int cnt = 0;
+  for (int y = 0; y < h; y++) {
+    double best = 1e9;
+    int lo = y - vpad < 0 ? 0 : y - vpad;
+    int hi = y + vpad >= h ? h - 1 : y + vpad;
+    for (int yy = lo; yy <= hi; yy++) {
+      if (a->right_edge[yy] >= 0 && b->left_edge[yy] < b->w) {
+        double d = (dx + b->left_edge[yy]) - a->right_edge[yy];
+        if (d < best) best = d;
+      }
+    }
+    if (best < 1e8) {
+      if (best < 1.0) best = 1.0;
+      sum += 1.0 / (best * best);
+      cnt++;
+    }
+  }
+  return cnt > 0 ? sqrt(cnt / sum) : -1.0;
+}
+
 static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char *text,
                                                    SDL_Color color) {
   if (!font || !text || !*text) return NULL;
   int font_h = TTF_GetFontHeight(font);
-  int extra_space = (int)(font_h * 0.10f);
-  if (extra_space < 2) extra_space = 2;
+  if (font_h < 1) font_h = 1;
+  bool is_light_weight = TTF_GetFontWeight(font) < TTF_FONT_WEIGHT_MEDIUM;
 
   Uint32 codepoints[128];
   int n_cp = 0;
@@ -509,71 +640,123 @@ static SDL_Surface *render_date_surface_with_spacing(TTF_Font *font, const char 
   }
   if (n_cp == 0) return NULL;
 
-  int total_w = 0;
-  int max_h = font_h;
+  double tracking = font_h * 0.085;
+  if (tracking < 2.0) tracking = 2.0;
+  int vpad = font_h / 16;
+  if (vpad < 2) vpad = 2;
+  double min_clear = tracking * 0.72;
+  if (min_clear < 1.5) min_clear = 1.5;
+
+  // Use "nn" at target tracking as the optical spacing reference.
+  DateGlyph ref_n = render_date_glyph(font, 'n', color, is_light_weight);
+  double ref_w = (ref_n.bmax_x >= ref_n.bmin_x) ? (double)(ref_n.bmax_x - ref_n.bmin_x + 1)
+                                                : (double)ref_n.adv;
+  double target_sep = date_pair_optical_sep(&ref_n, &ref_n, ref_w + tracking, vpad);
+  if (target_sep < 1.0) target_sep = tracking;
+  free_date_glyph(&ref_n);
+
+  DateGlyph glyphs[128];
+  double pos_x[128];
   for (int i = 0; i < n_cp; i++) {
-    int adv = 0;
-    TTF_GetGlyphMetrics(font, codepoints[i], NULL, NULL, NULL, NULL, &adv);
-    int kerning = 0;
-    if (i > 0) TTF_GetGlyphKerning(font, codepoints[i - 1], codepoints[i], &kerning);
-    total_w += adv + kerning;
-    if (i + 1 < n_cp) total_w += extra_space;
+    glyphs[i] = render_date_glyph(font, codepoints[i], color, is_light_weight);
+    pos_x[i] = 0.0;
   }
-  total_w += 2;  // room for up to 2px weight-reinforcement pass
+
+  for (int i = 0; i < n_cp; i++) {
+    if (i == 0) {
+      pos_x[i] = (glyphs[i].bmax_x >= glyphs[i].bmin_x) ? -(double)glyphs[i].bmin_x : 0.0;
+      continue;
+    }
+    const DateGlyph *prev = &glyphs[i - 1];
+    const DateGlyph *curr = &glyphs[i];
+
+    if (curr->cp == ' ') {
+      double prev_right = (prev->bmax_x >= 0) ? (pos_x[i - 1] + prev->bmax_x + 1)
+                                              : (pos_x[i - 1] + prev->adv);
+      double word_gap = curr->adv * 0.95;
+      if (word_gap < font_h * 0.28) word_gap = font_h * 0.28;
+      pos_x[i] = prev_right + word_gap;
+      continue;
+    }
+    if (prev->cp == ' ') {
+      pos_x[i] = pos_x[i - 1] - ((curr->bmax_x >= curr->bmin_x) ? (double)curr->bmin_x : 0.0);
+      continue;
+    }
+
+    if (curr->cp == ',' && prev->right_edge && curr->bmax_x >= curr->bmin_x) {
+      // Tuck comma tightly to the lower-right contour of the preceding glyph.
+      int y_start = (prev->h * 55) / 100;
+      int low_max = -1;
+      for (int y = y_start; y < prev->h; y++) {
+        if (prev->right_edge[y] > low_max) low_max = prev->right_edge[y];
+      }
+      double prev_right_low = low_max >= 0 ? (double)low_max : (double)prev->bmax_x;
+      double comma_gap = tracking * 0.45;
+      if (comma_gap < 1.5) comma_gap = 1.5;
+      pos_x[i] = pos_x[i - 1] + prev_right_low + 1.0 + comma_gap - curr->bmin_x;
+      continue;
+    }
+
+    // Solve horizontal step optically against target_sep with collision guard.
+    int h = prev->h < curr->h ? prev->h : curr->h;
+    double min_dx = -1e9;
+    if (prev->right_edge && curr->left_edge) {
+      for (int y = 0; y < h; y++) {
+        int lo = y - vpad < 0 ? 0 : y - vpad;
+        int hi = y + vpad >= h ? h - 1 : y + vpad;
+        for (int yy = lo; yy <= hi; yy++) {
+          if (prev->right_edge[yy] >= 0 && curr->left_edge[yy] < curr->w) {
+            double need = (double)prev->right_edge[yy] - curr->left_edge[yy] + min_clear;
+            if (need > min_dx) min_dx = need;
+          }
+        }
+      }
+    }
+    if (min_dx < -1e8) min_dx = prev->adv;
+
+    double max_dx = (prev->bmax_x >= 0 && curr->bmax_x >= curr->bmin_x)
+                        ? (double)(prev->bmax_x - curr->bmin_x + 1) + tracking * 1.35
+                        : (double)prev->adv + tracking;
+    if (max_dx < min_dx) max_dx = min_dx;
+
+    double lo = min_dx, hi = max_dx;
+    for (int it = 0; it < 16; it++) {
+      double mid = 0.5 * (lo + hi);
+      double sep = date_pair_optical_sep(prev, curr, mid, vpad);
+      if (sep < 0.0 || sep < target_sep)
+        lo = mid;
+      else
+        hi = mid;
+    }
+    pos_x[i] = pos_x[i - 1] + 0.5 * (lo + hi);
+  }
+
+  double max_right = 1.0;
+  for (int i = 0; i < n_cp; i++) {
+    if (glyphs[i].bmax_x >= 0) {
+      double r = pos_x[i] + glyphs[i].w;
+      if (r > max_right) max_right = r;
+    }
+  }
+  int total_w = (int)ceil(max_right) + 2;
+  int max_h = font_h + (is_light_weight ? 1 : 0);
   if (total_w < 1) total_w = 1;
   if (max_h < 1) max_h = 1;
 
   SDL_Surface *dst = SDL_CreateSurface(total_w, max_h, SDL_PIXELFORMAT_ARGB8888);
-  if (!dst) return NULL;
-  SDL_FillSurfaceRect(dst, NULL, 0);
-
-  bool is_light_weight = TTF_GetFontWeight(font) < TTF_FONT_WEIGHT_MEDIUM;
-  int pen_x = 0;
-  for (int i = 0; i < n_cp; i++) {
-    int kerning = 0;
-    if (i > 0) TTF_GetGlyphKerning(font, codepoints[i - 1], codepoints[i], &kerning);
-    pen_x += kerning;
-
-    int adv = 0;
-    TTF_GetGlyphMetrics(font, codepoints[i], NULL, NULL, NULL, NULL, &adv);
-    SDL_Surface *glyph = TTF_RenderGlyph_Blended(font, codepoints[i], color);
-    if (glyph) {
-      int blit_h = glyph->h > max_h ? max_h : glyph->h;
-      SDL_Rect src = {0, 0, glyph->w, blit_h};
-      SDL_Rect drect = {pen_x, 0, glyph->w, blit_h};
-      SDL_SetSurfaceBlendMode(glyph, SDL_BLENDMODE_BLEND);
-      SDL_BlitSurface(glyph, &src, dst, &drect);
-      if (is_light_weight) {
-        // Thicken Book/Regular glyphs by ~1.33x relative to previous pass:
-        // full 1px + 0.33px horizontal, full 1px vertical, and diagonal fill.
-        SDL_SetSurfaceAlphaMod(glyph, 255);
-        SDL_Rect drect_x = {pen_x + 1, 0, glyph->w, blit_h};
-        SDL_BlitSurface(glyph, &src, dst, &drect_x);
-
-        SDL_SetSurfaceAlphaMod(glyph, 85);
-        SDL_Rect drect_x2 = {pen_x + 2, 0, glyph->w, blit_h};
-        SDL_BlitSurface(glyph, &src, dst, &drect_x2);
-
-        int blit_h_y = glyph->h > max_h - 1 ? max_h - 1 : glyph->h;
-        if (blit_h_y > 0) {
-          SDL_Rect src_y = {0, 0, glyph->w, blit_h_y};
-          SDL_SetSurfaceAlphaMod(glyph, 255);
-          SDL_Rect drect_y = {pen_x, 1, glyph->w, blit_h_y};
-          SDL_BlitSurface(glyph, &src_y, dst, &drect_y);
-
-          SDL_SetSurfaceAlphaMod(glyph, 210);
-          SDL_Rect drect_xy = {pen_x + 1, 1, glyph->w, blit_h_y};
-          SDL_BlitSurface(glyph, &src_y, dst, &drect_xy);
-
-          SDL_SetSurfaceAlphaMod(glyph, 60);
-          SDL_Rect drect_x2y = {pen_x + 2, 1, glyph->w, blit_h_y};
-          SDL_BlitSurface(glyph, &src_y, dst, &drect_x2y);
-        }
+  if (dst) {
+    SDL_FillSurfaceRect(dst, NULL, 0);
+    for (int i = 0; i < n_cp; i++) {
+      if (glyphs[i].surf && glyphs[i].cp != ' ') {
+        int blit_h = glyphs[i].h > max_h ? max_h : glyphs[i].h;
+        SDL_Rect src = {0, 0, glyphs[i].w, blit_h};
+        SDL_Rect drect = {(int)lround(pos_x[i]), 0, glyphs[i].w, blit_h};
+        SDL_SetSurfaceBlendMode(glyphs[i].surf, SDL_BLENDMODE_BLEND);
+        SDL_BlitSurface(glyphs[i].surf, &src, dst, &drect);
       }
-      SDL_DestroySurface(glyph);
     }
-    pen_x += adv + extra_space;
   }
+  for (int i = 0; i < n_cp; i++) free_date_glyph(&glyphs[i]);
   return dst;
 }
 
