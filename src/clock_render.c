@@ -1046,43 +1046,16 @@ static const char *resolve_date_font_path(void) {
     return resolved_date_font;
   }
 
-  // Prefer condensed and neo-grotesque sans-serif fonts that pair well with
-  // the condensed flip-clock numerals, verifying the matched family so
-  // fontconfig does not silently fall back to DejaVu Sans before trying them.
+  // Prefer DejaVu Sans Bold (available on virtually all Linux/Arch/Pi systems),
+  // then fall back to bold sans-serif and regular sans-serif.
   static const struct {
     const char *family;
     const char *pattern;
   } preferred_fonts[] = {
-      {"Barlow Condensed", "Barlow Condensed:weight=medium:lang=en"},
-      {"Barlow Condensed", "Barlow Condensed:lang=en"},
-      {"Roboto Condensed", "Roboto Condensed:weight=medium:lang=en"},
-      {"Roboto Condensed", "Roboto Condensed:lang=en"},
-      {"Oswald", "Oswald:weight=medium:lang=en"},
-      {"Oswald", "Oswald:lang=en"},
-      {"Nimbus Sans Narrow", "Nimbus Sans Narrow:weight=medium:lang=en"},
-      {"Nimbus Sans Narrow", "Nimbus Sans Narrow:lang=en"},
-      {"Liberation Sans Narrow", "Liberation Sans Narrow:lang=en"},
-      {"Noto Sans Condensed", "Noto Sans Condensed:weight=medium:lang=en"},
-      {"Noto Sans Condensed", "Noto Sans Condensed:lang=en"},
-      {"PT Sans Narrow", "PT Sans Narrow:lang=en"},
-      {"DIN Alternate", "DIN Alternate:lang=en"},
-      {"Helvetica Neue", "Helvetica Neue:weight=medium:lang=en"},
-      {"Helvetica Neue", "Helvetica Neue:lang=en"},
-      {"Inter", "Inter:weight=medium:lang=en"},
-      {"Inter", "Inter:lang=en"},
-      {"Nimbus Sans", "Nimbus Sans:weight=medium:lang=en"},
-      {"Nimbus Sans", "Nimbus Sans:lang=en"},
-      {"Liberation Sans", "Liberation Sans:lang=en"},
-      {"Roboto", "Roboto:weight=medium:lang=en"},
-      {"Roboto", "Roboto:lang=en"},
-      {"IBM Plex Sans", "IBM Plex Sans:weight=medium:lang=en"},
-      {"IBM Plex Sans", "IBM Plex Sans:lang=en"},
-      {"Cantarell", "Cantarell:weight=medium:lang=en"},
-      {"Cantarell", "Cantarell:lang=en"},
-      {"Ubuntu", "Ubuntu:weight=medium:lang=en"},
-      {"Ubuntu", "Ubuntu:lang=en"},
-      {"Noto Sans", "Noto Sans:weight=medium:lang=en"},
-      {"Noto Sans", "Noto Sans:lang=en"},
+      {"DejaVu Sans", "DejaVu Sans:weight=bold:lang=en"},
+      {"DejaVu Sans", "DejaVu Sans:style=Bold"},
+      {"Liberation Sans", "Liberation Sans:weight=bold:lang=en"},
+      {"Noto Sans", "Noto Sans:weight=bold:lang=en"},
   };
   for (size_t i = 0; i < sizeof(preferred_fonts) / sizeof(preferred_fonts[0]); i++) {
     char candidate[1024];
@@ -1095,9 +1068,9 @@ static const char *resolve_date_font_path(void) {
   }
 
   static const char *fc_fallbacks[] = {
-      "sans:weight=medium:lang=en", "sans:weight=semibold:lang=en",
-      "sans:lang=en",               "sans-serif:weight=medium",
-      "sans-serif",                 "DejaVu Sans"};
+      "sans:weight=bold:lang=en", "sans-serif:weight=bold",
+      "sans:lang=en",             "sans-serif",
+      "DejaVu Sans"};
   for (size_t i = 0; i < sizeof(fc_fallbacks) / sizeof(fc_fallbacks[0]); i++) {
     char candidate[1024];
     if (find_font_via_fontconfig(fc_fallbacks[i], NULL, candidate, sizeof(candidate)) &&
