@@ -102,3 +102,22 @@ Testing options:
     gluqlo -effect NAME            # show only that effect, repeating, other scheduled effects off
     gluqlo -effect NAME:KIND       # additionally force its sub-kind (where it has one)
     gluqlo -seed N                 # start the scenery at a reproducible point
+
+## Typography & kerning (`src/clock_render.c`)
+
+- Clock digits (`get_digit_glyph_texture()`, `get_digit_pair_gap()`, `blit_digits()`):
+  - Each cached digit glyph (`0`–`9`) measures its alpha-weighted horizontal center of mass, average
+    left/right sidebearing voids, and a 64-bin vertical edge profile so optical positioning works at
+    any resolution or fallback font.
+  - Single digits are optically centered (fixing `1`, `3`, `4`, `6`, `7`, `9` sitting off-center on
+    their card).
+  - Two-digit pairs solve their horizontal gap optically against `"00"` as the reference separation
+    (allowing natural overhang tucks like `41` while enforcing a minimum clearance guard) and balance
+    outer sidebearings across the card with an edge margin clamp.
+- Date display (`render_date_surface_with_spacing()`, `resolve_date_font_path()`):
+  - Uses optical pair kerning against `"nn"` with comma tucking under the preceding glyph's
+    lower-right contour and normalized word spacing.
+  - Prefers `DejaVu Sans Bold` (verified by family via fontconfig, with `Liberation Sans Bold`,
+    `Noto Sans Bold`, and bold/regular `sans` fallbacks; `GLUQLO_DATE_FONT` still overrides).
+- `preview.png` updated at 1:41 AM to showcase both single-digit (`1`) centering and pair (`41`)
+  kerning alongside the `DejaVu Sans Bold` date display.
