@@ -4,6 +4,7 @@
 #include "backdrop.h"
 #include "sky_events.h"
 #include <fontconfig/fontconfig.h>
+#include <limits.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -32,6 +33,15 @@ static SDL_Texture *digit_glyph_tex[10] = {NULL};
 static int digit_glyph_w[10] = {0};
 static int digit_glyph_h[10] = {0};
 static int digit_glyph_y_off[10] = {0};
+static float digit_glyph_opt_x[10] = {0};
+static float digit_glyph_left_void[10] = {0};
+static float digit_glyph_right_void[10] = {0};
+#define DIGIT_PROFILE_BINS 64
+static float digit_left_profile[10][DIGIT_PROFILE_BINS];
+static float digit_right_profile[10][DIGIT_PROFILE_BINS];
+static bool digit_profile_valid[10] = {false};
+static int digit_pair_gap_cache[10][10];
+static int digit_pair_gap_nom = -1;
 
 static SDL_Texture *card_cache_tex[2] = {NULL, NULL};
 static char card_cache_digits[2][3] = {"", ""};
@@ -155,6 +165,55 @@ static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h, int *y_off)
     if (max_x >= min_x && max_y >= min_y) {
       int crop_w = max_x - min_x + 1;
       int crop_h = max_y - min_y + 1;
+
+      // Measure optical center of mass and left/right edge profiles for
+      // typographic centering and pair kerning (works for any font).
+      double sum_a = 0.0, sum_ax = 0.0;
+      double left_void_sum = 0.0, right_void_sum = 0.0;
+      for (int b = 0; b < DIGIT_PROFILE_BINS; b++) {
+        digit_left_profile[idx][b] = (float)crop_w;
+        digit_right_profile[idx][b] = (float)crop_w;
+      }
+      if (fmt && SDL_LockSurface(surf)) {
+        for (int y = 0; y < crop_h; y++) {
+          const Uint8 *row = (const Uint8 *)surf->pixels + (y + min_y) * surf->pitch;
+          int lx = crop_w, rx = -1;
+          for (int x = 0; x < crop_w; x++) {
+            Uint32 px;
+            memcpy(&px, row + (x + min_x) * fmt->bytes_per_pixel, fmt->bytes_per_pixel);
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(px, fmt, NULL, &r, &g, &b, &a);
+            if (a >= 128) {
+              if (lx == crop_w) lx = x;
+              rx = x;
+            }
+            if (a > 0) {
+              sum_a += a;
+              sum_ax += a * (x + 0.5);
+            }
+          }
+          if (lx < crop_w && rx >= 0) {
+            float l_dist = (float)lx;
+            float r_dist = (float)(crop_w - 1 - rx);
+            left_void_sum += l_dist;
+            right_void_sum += r_dist;
+            int bin = (y * DIGIT_PROFILE_BINS) / crop_h;
+            if (bin >= DIGIT_PROFILE_BINS) bin = DIGIT_PROFILE_BINS - 1;
+            if (l_dist < digit_left_profile[idx][bin]) digit_left_profile[idx][bin] = l_dist;
+            if (r_dist < digit_right_profile[idx][bin]) digit_right_profile[idx][bin] = r_dist;
+          }
+        }
+        SDL_UnlockSurface(surf);
+      }
+      float left_void = (float)(left_void_sum / crop_h);
+      float right_void = (float)(right_void_sum / crop_h);
+      float com_shift = sum_a > 0.0 ? (float)(crop_w * 0.5 - sum_ax / sum_a) : 0.0f;
+      float sb_shift = (right_void - left_void) * 0.5f;
+      digit_glyph_left_void[idx] = left_void;
+      digit_glyph_right_void[idx] = right_void;
+      digit_glyph_opt_x[idx] = 0.5f * com_shift + 0.5f * sb_shift;
+      digit_profile_valid[idx] = true;
+
       SDL_Surface *cropped = SDL_CreateSurface(crop_w, crop_h, surf->format);
       if (cropped) {
         SDL_Rect src_rect = {min_x, min_y, crop_w, crop_h};
@@ -175,6 +234,10 @@ static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h, int *y_off)
       digit_glyph_w[idx] = surf->w;
       digit_glyph_h[idx] = surf->h;
       digit_glyph_y_off[idx] = 0;
+      digit_glyph_opt_x[idx] = 0.0f;
+      digit_glyph_left_void[idx] = 0.0f;
+      digit_glyph_right_void[idx] = 0.0f;
+      digit_profile_valid[idx] = false;
       digit_glyph_tex[idx] = SDL_CreateTextureFromSurface(renderer, surf);
     }
     SDL_DestroySurface(surf);
@@ -188,16 +251,104 @@ static SDL_Texture *get_digit_glyph_texture(char ch, int *w, int *h, int *y_off)
 }
 
 
+static double pair_optical_separation(int a, int b, double gap) {
+  const int vpad = 4;  // +/- 4 of 64 bins (~6% of glyph height) for diagonal proximity
+  double sum = 0.0;
+  int cnt = 0;
+  for (int i = 0; i < DIGIT_PROFILE_BINS; i++) {
+    double best = 1e9;
+    int lo = i - vpad < 0 ? 0 : i - vpad;
+    int hi = i + vpad >= DIGIT_PROFILE_BINS ? DIGIT_PROFILE_BINS - 1 : i + vpad;
+    for (int j = lo; j <= hi; j++) {
+      float ra = digit_right_profile[a][j];
+      float lb = digit_left_profile[b][j];
+      if (ra < (float)digit_glyph_w[a] && lb < (float)digit_glyph_w[b]) {
+        double d = ra + gap + lb;
+        if (d < best) best = d;
+      }
+    }
+    if (best < 1e8) {
+      if (best < 1.0) best = 1.0;
+      sum += 1.0 / (best * best);
+      cnt++;
+    }
+  }
+  return cnt > 0 ? sqrt(cnt / sum) : gap;
+}
+
+
+static int get_digit_pair_gap(int a, int b, int nominal_gap) {
+  if (a < 0 || a > 9 || b < 0 || b > 9) return nominal_gap;
+  if (!digit_profile_valid[a] || !digit_profile_valid[b]) return nominal_gap;
+
+  // Ensure digit '0' is loaded as the optical spacing reference ("00").
+  if (!digit_profile_valid[0]) {
+    int dummy_w, dummy_h;
+    get_digit_glyph_texture('0', &dummy_w, &dummy_h, NULL);
+  }
+  if (!digit_profile_valid[0]) return nominal_gap;
+
+  if (digit_pair_gap_nom != nominal_gap) {
+    for (int i = 0; i < 10; i++)
+      for (int j = 0; j < 10; j++) digit_pair_gap_cache[i][j] = INT_MIN;
+    digit_pair_gap_nom = nominal_gap;
+  }
+  if (digit_pair_gap_cache[a][b] != INT_MIN) return digit_pair_gap_cache[a][b];
+
+  double target = pair_optical_separation(0, 0, (double)nominal_gap);
+  const int vpad = 4;
+  double min_touch = -1e9;
+  for (int i = 0; i < DIGIT_PROFILE_BINS; i++) {
+    int lo = i - vpad < 0 ? 0 : i - vpad;
+    int hi = i + vpad >= DIGIT_PROFILE_BINS ? DIGIT_PROFILE_BINS - 1 : i + vpad;
+    for (int j = lo; j <= hi; j++) {
+      float ra = digit_right_profile[a][j];
+      float lb = digit_left_profile[b][j];
+      if (ra < (float)digit_glyph_w[a] && lb < (float)digit_glyph_w[b]) {
+        double touch = -(double)(ra + lb);
+        if (touch > min_touch) min_touch = touch;
+      }
+    }
+  }
+  double min_gap = min_touch + nominal_gap * 0.90;
+  double max_tuck = -nominal_gap * 1.4;
+  if (min_gap < max_tuck) min_gap = max_tuck;
+
+  double lo = min_gap, hi = nominal_gap * 2.0;
+  for (int it = 0; it < 18; it++) {
+    double mid = 0.5 * (lo + hi);
+    if (pair_optical_separation(a, b, mid) < target)
+      lo = mid;
+    else
+      hi = mid;
+  }
+  int best = (int)lround(0.5 * (lo + hi));
+  if (best < (int)ceil(min_gap)) best = (int)ceil(min_gap);
+  digit_pair_gap_cache[a][b] = best;
+  return best;
+}
+
+
 void blit_digits(RenderTarget *surface, SDL_Rect *rect, int spc, char digits[], Uint8 mod_r,
                  Uint8 mod_g, Uint8 mod_b) {
   if (digits[1]) {
-    int gap = spc + spc / 2;
+    int nom_gap = spc + spc / 2;
     int w0 = 0, h0 = 0, y0 = 0, w1 = 0, h1 = 0, y1 = 0;
     SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0, &y0);
     SDL_Texture *t1 = get_digit_glyph_texture(digits[1], &w1, &h1, &y1);
     if (!t0 || !t1) return;
+    int d0 = digits[0] - '0';
+    int d1 = digits[1] - '0';
+    int gap = get_digit_pair_gap(d0, d1, nom_gap);
     int total_width = w0 + gap + w1;
-    float x = (float)(rect->x + (rect->w - total_width) / 2);
+    // Balance outer optical sidebearings across the card while clamping to
+    // keep comfortable margins around protruding strokes (e.g. '1' beak + AM).
+    float opt_shift = (digit_glyph_right_void[d1] - digit_glyph_left_void[d0]) * 0.35f;
+    float x = (float)rect->x + (rect->w - total_width) * 0.5f + opt_shift;
+    float min_margin = rect->w * 0.055f;
+    if (x < rect->x + min_margin) x = rect->x + min_margin;
+    if (x + total_width > rect->x + rect->w - min_margin)
+      x = rect->x + rect->w - min_margin - total_width;
     SDL_FRect dst0 = {x, (float)(rect->y + (rect->h - h0 + y0) / 2), (float)w0, (float)h0};
     SDL_SetTextureColorMod(t0, mod_r, mod_g, mod_b);
     SDL_RenderTexture(surface->renderer, t0, NULL, &dst0);
@@ -209,7 +360,9 @@ void blit_digits(RenderTarget *surface, SDL_Rect *rect, int spc, char digits[], 
     int w0 = 0, h0 = 0, y0 = 0;
     SDL_Texture *t0 = get_digit_glyph_texture(digits[0], &w0, &h0, &y0);
     if (!t0) return;
-    SDL_FRect dst0 = {(float)(rect->x + (rect->w - w0) / 2),
+    int d0 = digits[0] - '0';
+    float opt_shift = digit_glyph_opt_x[d0];
+    SDL_FRect dst0 = {(float)rect->x + (rect->w - w0) * 0.5f + opt_shift,
                       (float)(rect->y + (rect->h - h0 + y0) / 2), (float)w0, (float)h0};
     SDL_SetTextureColorMod(t0, mod_r, mod_g, mod_b);
     SDL_RenderTexture(surface->renderer, t0, NULL, &dst0);
@@ -594,7 +747,12 @@ void destroy_clock_caches(void) {
       SDL_DestroyTexture(digit_glyph_tex[i]);
       digit_glyph_tex[i] = NULL;
     }
+    digit_glyph_opt_x[i] = 0.0f;
+    digit_glyph_left_void[i] = 0.0f;
+    digit_glyph_right_void[i] = 0.0f;
+    digit_profile_valid[i] = false;
   }
+  digit_pair_gap_nom = -1;
   for (int i = 0; i < 2; i++) {
     if (card_cache_tex[i]) {
       SDL_DestroyTexture(card_cache_tex[i]);
