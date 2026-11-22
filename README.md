@@ -20,6 +20,7 @@ turn up now and then, in the sky and on the hills. See `NOTES.md` if you want th
 - SDL3
 - SDL3_ttf
 - Fontconfig
+- ttf-dejavu (optional, default for date font is DejaVu Sans Bold)
 - XScreensaver (optional, X11)
 
 ## Building from source
