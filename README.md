@@ -20,12 +20,13 @@ turn up now and then, in the sky and on the hills. See `NOTES.md` if you want th
 - SDL3
 - SDL3_ttf
 - Fontconfig
-- ttf-dejavu (optional, default for date font is DejaVu Sans Bold)
-- XScreensaver (optional, X11)
+- ttf-dejavu (optional; the default date font is DejaVu Sans Bold)
+- XScreenSaver (optional, X11)
 
 ## Building from source
 
-Install the build-time dependencies (with SDL3, SDL3_ttf, and Fontconfig development packages or built from source):
+Install the build-time dependencies (you need the development packages for SDL3, SDL3_ttf, and Fontconfig,
+either from your distro or built from source):
 
     $ sudo apt-get install build-essential pkg-config libsdl3-dev libsdl3-ttf-dev libfontconfig-dev
 
@@ -40,19 +41,21 @@ Then compile and install as usual:
 
 ### openSUSE (Leap and Tumbleweed)
 
-    $ sudo zypper install gcc-c++ make pkg-config SDL3-devel SDL3_ttf-devel fontconfig-devel
+    $ sudo zypper in +pattern:devel_C_C++ SDL3-devel SDL3_ttf-devel fontconfig-devel
     $ make && sudo make install
 
 `make install` puts the program in `/usr/libexec/xscreensaver`. If your XScreenSaver looks for its programs
-somewhere else (for example `/usr/lib64/xscreensaver`), copy `gluqlo` there, or put the full path in
-`~/.xscreensaver`, for example `/usr/libexec/xscreensaver/gluqlo -root \n\`.
+somewhere else (for example `/usr/lib64/xscreensaver` on openSUSE), copy `gluqlo` there, or put the full
+path in the `programs:` section of `~/.xscreensaver`, for example:
+
+    /usr/libexec/xscreensaver/gluqlo -root \n\
 
 The Ubuntu PPA from the upstream project installs upstream Gluqlo, not L-Space.
 
 ## Usage
 
-To use L-Space as a screensaver you may need to remove gnome-screensaver and install XScreensaver (on Ubuntu see
-[this page](http://www.howtogeek.com/114027/how-to-add-screensavers-to-ubuntu-12.04/)). Add it to your
+To use L-Space as a screensaver you may need to remove gnome-screensaver and install XScreenSaver (on Ubuntu
+see [this page](http://www.howtogeek.com/114027/how-to-add-screensavers-to-ubuntu-12.04/)). Add it to your
 `~/.xscreensaver` config file (in the `programs:` section):
 
     gluqlo -root \n\
@@ -60,11 +63,11 @@ To use L-Space as a screensaver you may need to remove gnome-screensaver and ins
 Otherwise, you can just run it as is.
 
 Options: `-root` (fullscreen), `-noflip`, `-ampm`, `-leadingzero`, `-w`, `-h`, `-r WxH`, `-s SCALE`,
-`-anykeyclose`, `-effect NAME[:KIND]` and `-seed N`. Run `gluqlo -help` for the list.
+`-anykeyclose`, `-effect NAME[:KIND]` and `-seed N`. Run `gluqlo -help` for the full list.
 
 ### Testing effects
 
-Scenery events normally appear at random times. To see one right away, run only that event on repeat:
+Scenery events normally appear at random times. To see one right away, run only that effect on repeat:
 
     $ gluqlo -effect list          # list effect names and their kinds
     $ gluqlo -effect rare_sky      # repeat one effect
@@ -81,7 +84,9 @@ Scenery events normally appear at random times. To see one right away, run only 
 ## Credits and licence
 
 - Gluqlo © 2014 Alexander Kovalenko; noflipqlo © 2010–2012 Jacek Kuźniarski.
-- L-Space © 2026 tire-regroover, written with the help of AI coding assistants: GitHub Copilot using models from Anthropic Claude, Google Gemini, OpenAI GPT, Hangzhou DeepSeek and Alibaba Qwen. Their output was directed and reviewed by tire-regroover.
+- L-Space © 2026 tire-regroover, written with the help of AI coding assistants: GitHub Copilot using models
+  from Anthropic Claude, Google Gemini, OpenAI GPT, Hangzhou DeepSeek and Alibaba Qwen. Their output was
+  directed and reviewed by tire-regroover.
 
 Released under the ISC licence, the same as upstream. See `LICENSE`.
 
@@ -91,4 +96,4 @@ Released under the ISC licence, the same as upstream. See `LICENSE`.
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
-5. Create new Pull Request!
+5. Create a new Pull Request   
