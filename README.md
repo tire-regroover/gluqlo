@@ -85,7 +85,7 @@ Scenery events normally appear at random times. To see one right away, run only 
 
 - Gluqlo © 2014 Alexander Kovalenko; noflipqlo © 2010–2012 Jacek Kuźniarski.
 - L-Space © 2026 tire-regroover, developed with AI assistance (GitHub Copilot: Claude, Gemini, GPT, DeepSeek,
-  Qwen; Brave). Directed and reviewed by tire-regroover.
+  Qwen, Brave). Directed and reviewed by tire-regroover.
 
 
 Released under the ISC licence, the same as upstream. See `LICENSE`.
