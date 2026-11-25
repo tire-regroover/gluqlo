@@ -1,38 +1,3 @@
-/*
- * Gluqlo L-Space: a flip clock that lives inside a night landscape
- * https://github.com/tire-regroover/gluqlo (branch l-space)
- *
- * L-Space is a fork of Gluqlo (Fliqlo for Linux) by Alexander Kovalenko,
- * https://github.com/alexanderk23/gluqlo, which is itself based on noflipqlo by
- * Jacek Kuźniarski. The flip cards, the flip animation and the licence come
- * from those projects. What is new in L-Space is everything behind and around
- * the cards: a procedural backdrop with seasons and weather, and hundreds of
- * scheduled scenery events (things that cross the sky, happen on the hills, or
- * take over the whole screen) including ship battles with nine weapon types.
- * See README.md and NOTES.md for the details and for how to add an event.
- *
- * Copyright (c) 2010-2012 Kuźniarski Jacek
- * Copyright (c) 2014 Alexander Kovalenko
- * Copyright (c) 2026 tire-regroover (L-Space scenery, weather and events)
- *
- * L-Space was written with the help of AI coding assistants: GitHub Copilot
- * using models from Anthropic Claude, Google Gemini, OpenAI GPT, Hangzhou
- * DeepSeek and Alibaba Qwen. Their output was directed and reviewed by
- * tire-regroover.
- *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
-
 #include "gluqlo.h"
 #include "gfx_primitives.h"
 #include "scene_core.h"
