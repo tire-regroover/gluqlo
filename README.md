@@ -13,7 +13,7 @@ It is not affiliated with, or endorsed by, the upstream project.
 ## What L-Space adds
 
 A landscape behind the cards that changes with seasons and weather, plus a lot of small scenes that
-turn up now and then, in the sky and on the hills. See `NOTES.md` if you want the details.
+turn up now and then, in the sky and on the hills. See `NOTES.md` if you want more details.
 
 ## Requirements
 
