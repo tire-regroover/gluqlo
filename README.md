@@ -78,8 +78,8 @@ Scenery events normally appear at random times. To see one right away, run only 
 
 - `src/` – the program
 - `assets/` – program assets, most vitally gluqlo.ttf
-- `NOTES.md` – some notes on how the code works
 - `dev/` – developer tools; not needed to build
+- `NOTES.md` – some notes on how the code works
 
 ## Credits and licence
 
