@@ -60,7 +60,7 @@ see [this page](http://www.howtogeek.com/114027/how-to-add-screensavers-to-ubunt
 
     gluqlo -root \n\
 
-With Wayland, XScreenSaver is still being worked on to be compatible.  Otherwise, you can just run it as is (great for a living room Pi).
+With Wayland, XScreenSaver is still being worked on to be compatible.  Otherwise, you can just run it as is.
 
 Options: `-root` (fullscreen), `-noflip`, `-ampm`, `-leadingzero`, `-w`, `-h`, `-r WxH`, `-s SCALE`,
 `-anykeyclose`, `-effect NAME[:KIND]` and `-seed N`. Run `gluqlo -help` for the full list.
